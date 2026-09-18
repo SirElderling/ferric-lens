@@ -30,6 +30,24 @@ pub struct ChangeSet {
     pub modified: BTreeSet<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct HistoryCommit {
+    pub oid: String,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HistorySample {
+    pub commits: Vec<HistoryCommit>,
+    pub changed_path_records: usize,
+    pub broad_commits_excluded_from_cochange: usize,
+    pub truncated: bool,
+}
+
+const HISTORY_MAX_COMMITS: usize = 2_000;
+const HISTORY_MAX_PATH_RECORDS: usize = 100_000;
+const HISTORY_MAX_COCHANGE_PATHS_PER_COMMIT: usize = 200;
+
 pub struct TemporaryWorktree {
     repo_root: PathBuf,
     path: PathBuf,
@@ -187,6 +205,105 @@ pub fn changes_since(root: &Path, merge_base: &str) -> Result<ChangeSet, String>
     Ok(changes)
 }
 
+pub fn sample_history(root: &Path) -> Result<HistorySample, String> {
+    let output = git_bytes(
+        root,
+        [
+            OsStr::new("log"),
+            OsStr::new("--no-merges"),
+            OsStr::new("--no-renames"),
+            OsStr::new("--name-only"),
+            OsStr::new("-z"),
+            OsStr::new("--format=format:%x00%x00%H%x00"),
+            OsStr::new("--max-count=2001"),
+            OsStr::new("HEAD"),
+            OsStr::new("--"),
+        ],
+    )?;
+
+    parse_history(&output)
+}
+
+fn parse_history(output: &[u8]) -> Result<HistorySample, String> {
+    let mut commits = Vec::new();
+    let mut current: Option<HistoryCommit> = None;
+    let mut changed_path_records = 0usize;
+    let mut broad_commits = 0usize;
+    let mut truncated = false;
+    let mut empty_run = 0usize;
+
+    for raw in output.split(|byte| *byte == 0) {
+        if raw.is_empty() {
+            empty_run += 1;
+            continue;
+        }
+
+        if empty_run >= 2 {
+            if let Some(commit) = current.take() {
+                if commit.paths.len() > HISTORY_MAX_COCHANGE_PATHS_PER_COMMIT {
+                    broad_commits += 1;
+                }
+                commits.push(commit);
+                if commits.len() >= HISTORY_MAX_COMMITS {
+                    truncated = true;
+                    break;
+                }
+            }
+
+            let oid = String::from_utf8_lossy(raw).trim().to_owned();
+            if !is_object_id(&oid) {
+                return Err("git history stream contained an invalid commit identifier".into());
+            }
+            current = Some(HistoryCommit {
+                oid,
+                paths: Vec::new(),
+            });
+            empty_run = 0;
+            continue;
+        }
+
+        empty_run = 0;
+        let Some(commit) = current.as_mut() else {
+            continue;
+        };
+
+        if changed_path_records >= HISTORY_MAX_PATH_RECORDS {
+            truncated = true;
+            break;
+        }
+
+        let path = String::from_utf8_lossy(raw).into_owned();
+        if !path.is_empty() {
+            commit.paths.push(path);
+            changed_path_records += 1;
+        }
+    }
+
+    if !truncated {
+        if let Some(commit) = current {
+            if commits.len() < HISTORY_MAX_COMMITS {
+                if commit.paths.len() > HISTORY_MAX_COCHANGE_PATHS_PER_COMMIT {
+                    broad_commits += 1;
+                }
+                commits.push(commit);
+            } else {
+                truncated = true;
+            }
+        }
+    }
+
+    Ok(HistorySample {
+        commits,
+        changed_path_records,
+        broad_commits_excluded_from_cochange: broad_commits,
+        truncated,
+    })
+}
+
+fn is_object_id(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 pub fn materialize_worktree(root: &Path, commit: &str) -> Result<TemporaryWorktree, String> {
     let counter = WORKTREE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
@@ -292,7 +409,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::ChangeSet;
+    use super::{parse_history, ChangeSet};
 
     #[test]
     fn change_set_defaults_empty() {
@@ -301,5 +418,25 @@ mod tests {
         assert!(changes.added.is_empty());
         assert!(changes.deleted.is_empty());
         assert!(changes.modified.is_empty());
+    }
+
+    #[test]
+    fn parses_nul_delimited_history_records() {
+        let first = "1111111111111111111111111111111111111111";
+        let second = "2222222222222222222222222222222222222222";
+        let bytes = [
+            b"\0\0".as_slice(),
+            first.as_bytes(),
+            b"\0src/a.rs\0src/b.rs\0\0".as_slice(),
+            second.as_bytes(),
+            b"\0src/a.rs\0".as_slice(),
+        ]
+        .concat();
+
+        let sample = parse_history(&bytes).unwrap();
+        assert_eq!(sample.commits.len(), 2);
+        assert_eq!(sample.changed_path_records, 3);
+        assert_eq!(sample.commits[0].paths, ["src/a.rs", "src/b.rs"]);
+        assert_eq!(sample.commits[1].paths, ["src/a.rs"]);
     }
 }
