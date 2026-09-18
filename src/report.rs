@@ -120,7 +120,7 @@ code {{ overflow-wrap: anywhere; }}
 <div class="card"><h2>Baseline</h2>{baseline}</div>
 <div class="card"><h2>Coverage</h2><ul>{capabilities}</ul></div>
 </section>
-<section><h2>Gate regressions</h2>{gate_html}</section>
+<section><h2>Gate findings</h2>{gate_html}</section>
 <section><h2>Advisory findings</h2>{advisory_html}</section>
 <section><h2>Codebase map</h2>{modules}</section>
 </body></html>"#,
@@ -149,7 +149,18 @@ fn render_findings(findings: &[&Finding], empty: &str) -> String {
         html.push_str(&escape(&finding.rule));
         html.push_str("</strong> · ");
         html.push_str(&escape(&format!("{:?}", finding.delta).to_lowercase()));
-        html.push_str("</p><p>");
+        if finding.accepted {
+            html.push_str(" · accepted");
+        }
+        html.push_str("</p><p><strong>Fingerprint:</strong> <code>");
+        html.push_str(&escape(&finding.fingerprint));
+        html.push_str("</code></p>");
+        if let Some(reason) = &finding.acceptance_reason {
+            html.push_str("<p><strong>Acceptance:</strong> ");
+            html.push_str(&escape(reason));
+            html.push_str("</p>");
+        }
+        html.push_str("<p>");
         html.push_str(&escape(&finding.summary));
         html.push_str("</p><ul>");
         for evidence in &finding.evidence {
