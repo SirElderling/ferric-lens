@@ -15,7 +15,9 @@ Ferric Lens currently:
 - resolves a Git target and analyzes the unique merge base under the same rules as the current tree,
 - conservatively matches modules by stable identity, Git rename, then unique normalized structure,
 - gates the documented `structure.coupled_complexity_growth` regression only when both independent signals materially worsen,
-- reports incomplete macro/cfg evidence as `inconclusive` rather than pretending the gate passed,
+- evaluates standard Rust target cfg predicates for one concrete target profile per invocation,
+- supports explicit additional Cargo features without inventing a feature powerset,
+- reports unresolved custom/default-feature cfg evidence as `inconclusive` rather than pretending the gate passed,
 - emits deterministic JSON,
 - emits one self-contained HTML/CSS report with no JavaScript,
 - reuses content-addressed raw syntax facts through a disposable 256 MiB repository cache,
@@ -35,6 +37,18 @@ Analyze a repository and write JSON plus HTML:
 ```bash
 cargo run -- analyze /path/to/rust/repository --base origin/main
 ```
+
+Analyze a concrete non-host target or enable additional Cargo features:
+
+```bash
+cargo run -- analyze /path/to/rust/repository \
+  --base origin/main \
+  --target aarch64-apple-darwin \
+  --feature fast-path \
+  --feature telemetry
+```
+
+Each invocation analyzes one real profile. The default profile is the host target with Cargo default features. Repeated `--feature` options add explicit features to the default feature set. Ferric Lens records the resolved target, selected features, and canonical `rustc --print cfg` facts in the result.
 
 This writes:
 
@@ -85,7 +99,7 @@ The V1 envelope is intentionally generic rather than vendor-specific:
 }
 ```
 
-Imports are limited to 16 MiB, require repository-relative subjects, and are sorted deterministically. Source/configuration matches are explicit. Mismatched evidence is retained only as unattached context.
+Imports are limited to 16 MiB, require repository-relative subjects, and are sorted deterministically. Source/configuration matches are explicit: the evidence target and explicit feature list must match the active Ferric Lens profile. Mismatched evidence is retained only as unattached context.
 
 Imported evidence is advisory in V1. It never changes the `check` gate verdict and Ferric Lens never invokes the producing tool automatically.
 
@@ -111,7 +125,7 @@ An acceptance does not suppress a rule broadly. Material evidence changes produc
 
 ## Evidence limits
 
-Ferric Lens does not expand macros or pretend mutually exclusive platform `cfg` branches coexist. A changed gate subject or required baseline population affected by unsupported evidence makes the relevant gate inconclusive.
+Ferric Lens does not expand macros or pretend mutually exclusive platform `cfg` branches coexist. Standard target cfg predicates are evaluated from the selected target's stable `rustc --print cfg` output. Explicitly requested features can satisfy matching `cfg(feature = "...")`; unselected feature cfg remains unknown because default/transitive feature activation is not inferred from source alone. A changed gate subject or required baseline population affected by unsupported evidence makes the relevant gate inconclusive.
 
 Static findings are not runtime profiling claims.
 
