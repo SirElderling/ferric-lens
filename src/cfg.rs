@@ -18,12 +18,21 @@ pub struct HostCfg {
     values: BTreeMap<String, BTreeSet<String>>,
     digest: String,
     reliable: bool,
+    explicit_features: BTreeSet<String>,
 }
 
 impl HostCfg {
     pub fn detect() -> Result<Self, String> {
-        let output = Command::new("rustc")
-            .args(["--print", "cfg"])
+        Self::detect_for_target(None, &[])
+    }
+
+    pub fn detect_for_target(target: Option<&str>, features: &[String]) -> Result<Self, String> {
+        let mut command = Command::new("rustc");
+        command.args(["--print", "cfg"]);
+        if let Some(target) = target {
+            command.args(["--target", target]);
+        }
+        let output = command
             .output()
             .map_err(|error| format!("could not execute rustc --print cfg: {error}"))?;
         if !output.status.success() {
@@ -32,7 +41,14 @@ impl HostCfg {
 
         let text = std::str::from_utf8(&output.stdout)
             .map_err(|error| format!("rustc cfg output is not UTF-8: {error}"))?;
-        Self::from_lines(text.lines())
+        let mut cfg = Self::from_lines(text.lines())?;
+        cfg.explicit_features = features
+            .iter()
+            .map(|feature| feature.trim().to_owned())
+            .filter(|feature| !feature.is_empty())
+            .collect();
+        cfg.rehash();
+        Ok(cfg)
     }
 
     pub fn unavailable() -> Self {
@@ -41,11 +57,23 @@ impl HostCfg {
             values: BTreeMap::new(),
             digest: "cfg-unavailable".into(),
             reliable: false,
+            explicit_features: BTreeSet::new(),
         }
     }
 
     pub fn digest(&self) -> &str {
         &self.digest
+    }
+
+    pub fn canonical_lines(&self) -> Vec<String> {
+        let mut lines = self.flags.iter().cloned().collect::<Vec<_>>();
+        for (key, values) in &self.values {
+            for value in values {
+                lines.push(format!("{key}=\"{value}\""));
+            }
+        }
+        lines.sort();
+        lines
     }
 
     pub fn evaluate(&self, meta: &Meta) -> Truth {
@@ -78,7 +106,18 @@ impl HostCfg {
                 };
                 let key = ident.to_string();
                 if key == "feature" {
-                    return Truth::Unknown;
+                    let Expr::Lit(ExprLit {
+                        lit: Lit::Str(value),
+                        ..
+                    }) = &name_value.value
+                    else {
+                        return Truth::Unknown;
+                    };
+                    return if self.explicit_features.contains(&value.value()) {
+                        Truth::True
+                    } else {
+                        Truth::Unknown
+                    };
                 }
                 let Expr::Lit(ExprLit {
                     lit: Lit::Str(value),
@@ -139,12 +178,24 @@ impl HostCfg {
             }
         }
 
+        let mut cfg = Self {
+            flags,
+            values,
+            digest: String::new(),
+            reliable: true,
+            explicit_features: BTreeSet::new(),
+        };
+        cfg.rehash();
+        Ok(cfg)
+    }
+
+    fn rehash(&mut self) {
         let mut hasher = blake3::Hasher::new();
-        for flag in &flags {
+        for flag in &self.flags {
             hasher.update(flag.as_bytes());
             hasher.update(&[0]);
         }
-        for (key, set) in &values {
+        for (key, set) in &self.values {
             hasher.update(key.as_bytes());
             hasher.update(&[1]);
             for value in set {
@@ -152,18 +203,36 @@ impl HostCfg {
                 hasher.update(&[0]);
             }
         }
-
-        Ok(Self {
-            flags,
-            values,
-            digest: hasher.finalize().to_hex().to_string(),
-            reliable: true,
-        })
+        for feature in &self.explicit_features {
+            hasher.update(b"feature");
+            hasher.update(&[2]);
+            hasher.update(feature.as_bytes());
+            hasher.update(&[0]);
+        }
+        self.digest = hasher.finalize().to_hex().to_string();
     }
 
     #[cfg(test)]
     pub fn test(lines: &[&str]) -> Self {
         Self::from_lines(lines.iter().copied()).unwrap()
+    }
+
+    #[cfg(test)]
+    pub fn test_with_features(lines: &[&str], features: &[&str]) -> Self {
+        let mut cfg = Self::from_lines(lines.iter().copied()).unwrap();
+        cfg.explicit_features = features.iter().map(|feature| (*feature).to_owned()).collect();
+        cfg.rehash();
+        cfg
+    }
+
+    #[test]
+    fn selected_explicit_feature_is_true() {
+        let cfg = HostCfg::test_with_features(
+            &["unix", "target_os=\"linux\""],
+            &["fast"],
+        );
+        assert_eq!(cfg.evaluate(&parse_quote!(feature = "fast")), Truth::True);
+        assert_eq!(cfg.evaluate(&parse_quote!(feature = "other")), Truth::Unknown);
     }
 }
 
@@ -281,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn preserves_unknown_custom_and_feature_cfg() {
+    fn preserves_unknown_custom_and_unselected_feature_cfg() {
         let cfg = linux();
         assert_eq!(cfg.evaluate(&parse_quote!(feature = "fast")), Truth::Unknown);
         assert_eq!(cfg.evaluate(&parse_quote!(my_custom_cfg)), Truth::Unknown);
