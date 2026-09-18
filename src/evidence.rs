@@ -5,7 +5,7 @@ use std::{
 
 use serde::Deserialize;
 
-use crate::model::{ImportedEvidence, ImportedObservation, Snapshot};
+use crate::model::{AnalysisProfile, ImportedEvidence, ImportedObservation, Snapshot};
 
 const MAX_IMPORT_BYTES: u64 = 16 * 1024 * 1024;
 const IMPORT_SCHEMA_VERSION: u32 = 1;
@@ -47,7 +47,11 @@ struct Observation {
     note: Option<String>,
 }
 
-pub fn load(path: &Path, snapshot: &Snapshot) -> Result<ImportedEvidence, String> {
+pub fn load(
+    path: &Path,
+    snapshot: &Snapshot,
+    profile: &AnalysisProfile,
+) -> Result<ImportedEvidence, String> {
     let metadata = fs::metadata(path)
         .map_err(|error| format!("cannot inspect evidence import {}: {error}", path.display()))?;
     if metadata.len() > MAX_IMPORT_BYTES {
@@ -96,13 +100,13 @@ pub fn load(path: &Path, snapshot: &Snapshot) -> Result<ImportedEvidence, String
                 .zip(snapshot.git_head.as_deref())
                 .is_some_and(|(expected, actual)| expected == actual));
 
-    let configuration_matches =
-        envelope.configuration.target == "host" && envelope.configuration.features.is_empty();
+    let configuration_matches = envelope.configuration.target == profile.target
+        && envelope.configuration.features == profile.features;
 
     let (attached, attachment_reason) = match (source_matches, configuration_matches) {
         (true, true) => (
             true,
-            "source identity and host/default configuration match the current snapshot".to_owned(),
+            "source identity and analysis profile match the current snapshot".to_owned(),
         ),
         (false, true) => (
             false,
@@ -110,7 +114,7 @@ pub fn load(path: &Path, snapshot: &Snapshot) -> Result<ImportedEvidence, String
         ),
         (true, false) => (
             false,
-            "configuration does not match the current host/default analysis".to_owned(),
+            "configuration does not match the current analysis profile".to_owned(),
         ),
         (false, false) => (
             false,
@@ -210,7 +214,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use crate::model::Snapshot;
+    use crate::model::{AnalysisProfile, Snapshot};
 
     use super::load;
 
@@ -224,6 +228,16 @@ mod tests {
         ));
         fs::write(&path, contents).unwrap();
         path
+    }
+
+    fn profile() -> AnalysisProfile {
+        AnalysisProfile {
+            id: "target=host;features=default".into(),
+            target: "host".into(),
+            resolved_target: "x86_64-unknown-linux-gnu".into(),
+            features: Vec::new(),
+            target_cfg: Vec::new(),
+        }
     }
 
     fn snapshot() -> Snapshot {
@@ -249,7 +263,7 @@ mod tests {
             }"#,
         );
 
-        let imported = load(&path, &snapshot()).unwrap();
+        let imported = load(&path, &snapshot(), &profile()).unwrap();
         assert!(imported.attached);
         assert_eq!(imported.observations.len(), 1);
         fs::remove_file(path).unwrap();
@@ -267,7 +281,7 @@ mod tests {
             }"#,
         );
 
-        let imported = load(&path, &snapshot()).unwrap();
+        let imported = load(&path, &snapshot(), &profile()).unwrap();
         assert!(!imported.attached);
         fs::remove_file(path).unwrap();
     }
@@ -286,7 +300,7 @@ mod tests {
             }"#,
         );
 
-        assert!(load(&path, &snapshot()).is_err());
+        assert!(load(&path, &snapshot(), &profile()).is_err());
         fs::remove_file(path).unwrap();
     }
 }
