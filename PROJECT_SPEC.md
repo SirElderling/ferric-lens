@@ -8,6 +8,8 @@ It produces a unified structural model of a Rust repository, identifies evidence
 
 The initial product is static and offline. It does not modify source code and does not depend on AI, network services, or project-specific configuration.
 
+[ARCHITECTURE.md](ARCHITECTURE.md) defines the proposed implementation and records decision rationale. This specification defines behavior; the vision defines intent. Neither document claims that performance or rule precision has already been measured.
+
 ## 2. Primary goals
 
 Ferric Lens must:
@@ -72,6 +74,10 @@ Purpose:
 
 The meaning of findings must not differ between modes. The fast mode may omit optional enrichment that is not required to reach a gate decision.
 
+Both commands use the same engine and gate rules. `check` emits a compact summary and canonical JSON; HTML is optional. `analyze` adds the full report and bounded enrichment. With identical inputs, both must return the same gate verdict and gate findings. An inconclusive verdict also has the same meaning in both modes.
+
+Default source input is the working tree, including tracked modifications and non-ignored untracked Rust files reachable from selected targets. Deleted files are absent. A CI run normally uses a clean checkout. Record a content digest; never label dirty content as the HEAD commit alone. Detect changes during reading and return inconclusive rather than mixing revisions.
+
 ## 5. Canonical analysis model
 
 All human and machine outputs must derive from one canonical deterministic analysis model.
@@ -94,6 +100,8 @@ The model must represent at least:
 - platform/configuration origin.
 
 No output path may independently recompute the same semantic result.
+
+Every relationship records its origin and resolution status. Keep declared dependencies, resolved imports, observed syntax, inferred relationships, and imported measurements distinct. Unknown edges are not absent edges. Configuration and source class are part of graph membership.
 
 ## 6. Zero-configuration analysis
 
@@ -118,6 +126,8 @@ Examples of repository-relative evidence include:
 - concentrated churn,
 - co-change relationships,
 - increasing public-surface exposure.
+
+Use like-for-like populations (same item kind, source class, and concrete configuration). Freeze the baseline population for both sides of a gate comparison. Percentile movement alone is not deterioration. Tiny or degenerate populations produce descriptive metrics, not outlier-based gates. Built-in statistical definitions and minimum samples ship with the binary; users do not maintain them.
 
 ## 7. Finding model
 
@@ -149,6 +159,8 @@ Definitions:
 - **strong**: supported by multiple independent deterministic signals.
 - **candidate**: notable evidence exists, but not enough to justify a strong conclusion.
 
+Evidence strength describes the claim, not permission to fail CI. For example, a syntax-level `.clone()` occurrence proves only that syntax exists; it does not establish allocation, unnecessary copying, or a runtime bottleneck. A complete observed dependency cycle proves a graph property, not a policy violation.
+
 ### 7.2 Priority
 
 Ferric Lens must not produce an opaque overall quality score.
@@ -179,12 +191,26 @@ Ferric Lens should maximize signal while avoiding noisy gates.
 
 ### 8.1 Gate rule
 
-CI fails when either:
+CI reports a regression only for a gate-eligible rule when either:
 
-1. a new proven regression is introduced, or
-2. a new material regression is supported by a quorum of independent evidence.
+1. a proven regression is new or materially worsened, or
+2. a new or worsened material regression satisfies the rule's independent-evidence quorum.
 
 A single non-provable heuristic must never fail CI by itself.
+
+Each shipped gate rule must define its scope, required capabilities, evidence families, material-change formula, baseline comparability, identity, and positive/negative fixtures. Two transformations of the same fact (such as fan-out and its percentile) count as one signal. Operational independence means distinct underlying observations supporting the same concern; it does not claim statistical independence.
+
+V1 gates use core structural evidence only. History and external imports may refine advisory confidence and presentation but cannot create or remove a gate regression. The initial concrete rule and conservative thresholds are specified in ARCHITECTURE.md; measured false-positive validation is a release requirement, not an assumed result.
+
+Exit codes for both commands:
+
+| Code | Verdict | Meaning |
+| --- | --- | --- |
+| 0 | pass | All enabled gate checks completed; no unaccepted gate regression. |
+| 1 | regression | At least one unaccepted gate regression established. |
+| 2 | inconclusive/error | Required comparison/evidence unavailable, input changed, or execution failed. |
+
+If a regression is established alongside missing required evidence, return 1 and record incomplete coverage. If no regression is established and required evidence is missing, return 2. Missing optional enrichment alone does not prevent a pass. Without a baseline, `analyze` still writes a useful report but returns 2 for the unavailable gate.
 
 ### 8.2 Existing debt
 
@@ -198,6 +224,8 @@ Ferric Lens should classify findings relative to the baseline as:
 - unchanged,
 - carried through structural movement.
 
+Delta status, movement, and acceptance are separate fields. An accepted finding remains in JSON and HTML with its reason. A finding may be marked resolved only when the relevant evidence is complete on both sides; otherwise its delta is unknown.
+
 ### 8.3 Baseline source
 
 Ferric Lens does not require a committed baseline snapshot.
@@ -207,6 +235,12 @@ Git is the source of truth.
 For PR-style analysis, Ferric Lens should use merge-base-aware attribution rather than naive comparison against only the current tip of `main`.
 
 Large changes must not receive relaxed quality standards. They must receive better attribution.
+
+Resolve the target in this order: explicit `--base <ref>`, recognized local CI target ref, local remote-default symbolic ref, then local `main`. Never use the feature branch's tracking ref as an assumed PR target. Record the chosen ref and immutable object ID. If unavailable, ambiguous, equal to HEAD without an explicit base, or without one usable merge base, report inconclusive; never fetch or silently compare with an empty repository. `--base` selects an input, not a maintained policy.
+
+Analyze the unique merge base and current source snapshot with the same Ferric Lens version and configuration. Missing baseline objects in a shallow clone require locally supplying the target/history. A merge-base comparison attributes branch changes; it does not certify compatibility with the latest target tip.
+
+Structural movement is matched conservatively: stable qualified identity first, then unique exact structural matches ignoring location, comments, and whitespace. Ambiguous rewrites, splits, and merges remain unmatched with an explanation; never invent semantic equivalence or hide an eligible new finding using fuzzy matching.
 
 ## 9. Git history
 
@@ -236,6 +270,8 @@ History is evidence only; Ferric Lens does not provide a general historical time
 
 If history is insufficient, Ferric Lens must report that condition explicitly and must not silently calculate misleading history-derived results.
 
+History enrichment has versioned deterministic work limits and reports examined commits, exclusions, and truncation. Co-change denominators must describe the sampled commit population; a path-filtered history query must not discard the other paths needed to establish co-change. No full-repository pairwise co-change matrix is required.
+
 ## 10. Structural architecture analysis
 
 Ferric Lens should infer structural boundaries deterministically from objective repository structure.
@@ -255,6 +291,8 @@ Inferred boundaries are evidence, not policy.
 Ferric Lens may report a boundary-crossing dependency as a structural anomaly but must not call it a policy violation unless a future product version gains explicit repository policy support.
 
 Project-specific architecture rules are out of scope for v1.
+
+V1 uses Cargo crates and Rust modules as boundaries. It reports observable coupling, cycles, public declarations, and change concentration. Automatic semantic responsibility clustering, complete call graphs, type/behavior ownership inference, and architecture-policy generation are deferred. This preserves useful structural guidance without requiring compiler-grade semantics or speculative clustering.
 
 ## 11. Refactor candidates
 
@@ -308,6 +346,8 @@ A suspicious pattern warrants investigation but is not proven to matter at runti
 
 Ferric Lens must never call a static risk a measured runtime bottleneck.
 
+V1 syntax patterns are candidates unless a rule proves its exact source-level claim. Method names alone do not identify allocator behavior or concrete types. Suggestions must state the unknowns and the evidence needed to validate them; no estimated milliseconds, bytes allocated, or speedups may be invented.
+
 Examples of relevant static runtime signals may include:
 
 - unnecessary or repeated allocation,
@@ -332,6 +372,8 @@ Relevant evidence may include:
 - compilation concentration.
 
 Runtime and build findings must not be merged into one score.
+
+Core v1 reports dependency reach, feature/dependency structure where resolved, and potential rebuild exposure. Monomorphization counts, code-size contribution, and actual compilation cost require matching imported measurements. Generic syntax counts and graph reach must be labelled structural proxies, never measured build cost.
 
 ## 14. Third-party dependencies
 
@@ -372,6 +414,8 @@ Rules:
 - imported evidence may refine confidence or priority,
 - imported evidence must be identified in the analysis snapshot.
 
+V1 accepts one versioned normalized local JSON envelope, not a collection of vendor-specific parsers. It includes producer/version, source digest or clean commit, target/features, units, and repository-relative subjects. Validate schema, size, source/configuration match, and paths. Reject malformed imports; retain stale or mismatched imports only as explicitly unattached context, never as current evidence. Cross-revision measurements require matched artifacts for both sides. This envelope is an exchange interface; project configuration remains unnecessary.
+
 ## 16. Source scopes
 
 Production code is the primary analysis scope.
@@ -401,6 +445,10 @@ Linux and macOS are first-class supported platforms.
 
 A CI setup may use one canonical full analysis plus targeted platform validation so shared work is not unnecessarily duplicated.
 
+The default is one host target, default Cargo features, and production library/binary targets. Explicit target/feature input selects additional concrete runs; v1 does not enumerate the feature powerset or assume `--all-features` is valid. Record rustc target cfg facts, selected features, Cargo resolution identity, and relevant input digests.
+
+Unknown build-script cfg, unresolved feature activation, and macro-generated structure are unknown, not false. Exclude unresolved branches from definite graphs and mark affected capabilities incomplete. Do not gate rules that require those missing facts. Combining platform results preserves separate configuration keys; cache only facts actually shared across configurations.
+
 ## 18. Partial analysis
 
 Ferric Lens should provide useful partial analysis when the target repository does not compile completely.
@@ -422,6 +470,8 @@ Findings requiring unavailable evidence must not be emitted.
 
 Partial analysis must never be presented as complete analysis.
 
+Completeness is tracked per capability, subject, configuration, and baseline side, rather than one repository-wide boolean. Each rule declares its dependencies. A compiler error in unrelated code must not erase reliable syntax findings elsewhere; missing evidence within a rule's required scope cannot be treated as a zero metric.
+
 ## 19. Output
 
 ### 19.1 Static HTML
@@ -439,6 +489,8 @@ Presentation and interaction should use HTML and CSS wherever reasonably possibl
 JavaScript is permitted only where equivalent behavior cannot reasonably be achieved with HTML/CSS.
 
 Browser code only explores the immutable result. It performs no analysis.
+
+V1 uses a linked hierarchy, summary tables, and native `details` disclosure. Avoid a force-directed graph engine and rendering every dependency edge into the DOM. Summarize repeated evidence, retain all findings, and link findings to compact source excerpts rather than embedding every source file. Report deterministic excerpt/display limits explicitly. Escape all repository/imported strings as untrusted content. The report must remain useful with JavaScript disabled.
 
 ### 19.2 Integrated codebase map
 
@@ -472,6 +524,8 @@ JSON is a first-class machine interface.
 
 It must represent the same canonical findings as the HTML report and CI decision.
 
+Publish a schema version independently of the tool version. Use explicit unavailable/null states, deterministic ordering, stable string identifiers, exact integer metrics, and documented units. Runtime timings and cache statistics belong in separate diagnostic output, not canonical artifacts.
+
 ## 20. Reproducibility
 
 Given identical:
@@ -481,6 +535,9 @@ Given identical:
 - Rust toolchain,
 - concrete analysis configuration,
 - imported evidence,
+- resolved baseline and available Git objects,
+- source and acceptance-file contents,
+- Cargo resolution and relevant cfg/environment facts,
 
 Ferric Lens must produce equivalent canonical results.
 
@@ -494,6 +551,8 @@ Canonical output should avoid:
 
 Finding fingerprints must remain deterministic for the analyzed state.
 
+Canonical JSON and HTML must be byte-identical for identical effective inputs, regardless of thread scheduling, cache hits, or checkout location. The snapshot records the exact bounded history slice and coverage. Resource interruption can produce an explicit partial result but must not be mistaken for the complete canonical result.
+
 ## 21. Accepted findings
 
 Intentional findings may be accepted explicitly.
@@ -506,11 +565,15 @@ Acceptances live in a tool-managed repository file:
 
 Users should not need to edit it manually.
 
-An acceptance is tied to a deterministic finding fingerprint and includes a reason.
+An acceptance is tied to a deterministic finding fingerprint and includes a reason. Separate entity identity (for movement/baseline matching) from evidence fingerprint (for accepting an exact material condition).
 
 When the underlying evidence materially changes, the previous fingerprint no longer matches and the finding becomes visible again.
 
 Ferric Lens suppresses specific understood findings, not broad categories of evidence.
+
+The evidence fingerprint includes rule semantics, configuration, stable subject identity, and material core evidence; exclude line numbers, report ordering, optional enrichment, and timestamps. Pure movement can preserve acceptance only with an unambiguous identity match. An ambiguous match cannot inherit acceptance. New rule semantics or materially changed core evidence invalidate acceptance.
+
+`ferric-lens accept <fingerprint> --reason <text>` reads a current local result, verifies its source digest, and atomically updates only the acceptance file. Existing acceptances are applied after comparison; accepted findings remain visible and auditable. Invalid/stale result input cannot create an acceptance.
 
 ## 22. Network contract
 
@@ -523,6 +586,8 @@ No analysis or report generation may depend on:
 - telemetry services,
 - external web services,
 - remote configuration.
+
+Native Git and stable Cargo/rustc are local prerequisites for their capabilities. Use Cargo metadata in offline, locked mode; never build, invoke project scripts, install toolchains, or change Cargo.lock. If metadata cannot resolve locally, fall back to manifest/source facts with explicit missing capabilities. Offline operation does not imply that uncached third-party metadata becomes available.
 
 ## 23. Toolchain contract
 
@@ -537,6 +602,8 @@ Ferric Lens does not maintain a separately pinned ruleset version.
 The installed Ferric Lens version defines the current desired analysis behavior.
 
 If a newer version finds an issue that an older version did not, the newer result is authoritative.
+
+Recompute both baseline and head using that same version. Never classify a new rule's discovery of unchanged historical debt as a PR regression merely by comparing output from different tool versions.
 
 ## 25. Success criteria
 

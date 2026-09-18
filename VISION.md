@@ -20,6 +20,8 @@ It builds one coherent model of the current Rust codebase and combines independe
 
 Ferric Lens should be useful even when run with no configuration.
 
+The behavioral contract lives in [PROJECT_SPEC.md](PROJECT_SPEC.md). The proposed implementation boundaries, trade-offs, and validation criteria live in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Core principles
 
 ### Deterministic by design
@@ -27,6 +29,8 @@ Ferric Lens should be useful even when run with no configuration.
 The same repository state, Ferric Lens version, Rust toolchain, analysis profile, and imported evidence must produce the same canonical findings and report content.
 
 Ferric Lens must avoid hidden inputs, random ordering, machine-specific paths, timestamps in canonical artifacts, or environment-dependent scoring.
+
+Resolved baseline, available history, source contents, Cargo resolution, and configuration are explicit snapshot inputs. Cache availability and worker scheduling must never change conclusions.
 
 ### Zero configuration by default
 
@@ -58,6 +62,8 @@ One heuristic should not block CI.
 Non-provable findings become important only when multiple independent signals agree and the change is materially worse than the baseline.
 
 A single unusual metric may be worth observing. A cluster of independent signals may justify action.
+
+An observable fact is not automatically a harmful regression: an added dependency, cycle, or clone must not fail CI merely because its presence can be proven. Gate eligibility requires a published rule with a material-change predicate and sufficient comparable evidence.
 
 ### Static performance analysis without false certainty
 
@@ -116,6 +122,14 @@ After installation, Ferric Lens must be fully functional without network access.
 
 It analyzes local repository state, local Cargo metadata, local Git history, and explicitly supplied local evidence.
 
+Missing local dependency artifacts reduce resolution coverage, not offline usability. The default analysis does not compile the project, execute build scripts, expand procedural macros, or fetch missing data.
+
+### Small operational footprint
+
+One short-lived native process should do the useful work, then exit. No daemon, database service, compiler fork, embedded browser, or frontend build system is required.
+
+Parse source once per content version, retain compact facts, reuse unchanged work, and enrich only relevant findings. Resource limits must be visible when they limit coverage; fast must never mean silently incomplete.
+
 ### Stable Rust only
 
 Ferric Lens should build and operate using stable Rust.
@@ -170,8 +184,10 @@ CI should be powerful without becoming noisy.
 
 A gate fails when:
 
-- a proven regression is introduced, or
-- a material regression is supported by a quorum of independent evidence.
+- a gate-eligible proven regression is introduced or materially worsened, or
+- a new or worsened material regression satisfies a published quorum rule.
+
+The outcome is pass, regression, or inconclusive. Inconclusive means evidence needed for the gate is missing; it is not a clean pass. Optional history or imported evidence cannot change the v1 gate decision.
 
 Existing debt does not fail a PR merely because it exists.
 
@@ -214,6 +230,8 @@ Reports should distinguish:
 - excluded/generated/support code.
 
 Partial evidence may produce partial insight, but never false certainty.
+
+V1 starts with syntax, explicit resolvable relationships, Cargo structure, and bounded history. Full type inference, inferred semantic ownership, macro expansion, and measured codegen/runtime costs are not implied by a successful source scan. Measurements are shown only when supplied with matching provenance.
 
 ## What success looks like
 
