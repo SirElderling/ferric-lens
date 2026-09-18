@@ -41,13 +41,18 @@ pub fn current_snapshot_findings(modules: &[ModuleMetrics]) -> Vec<Finding> {
         for module in population {
             let dependencies = module.local_dependency_modules.len();
             if module.decision_sites > decision_p90 && dependencies > dependency_p90 {
+                let subject = subject(crate_name, &module.module_path);
                 findings.push(Finding {
+                    fingerprint: String::new(),
                     rule: "structure.current_coupled_outlier".into(),
-                    subject: subject(crate_name, &module.module_path),
+                    subject: subject.clone(),
+                    identity: subject,
                     evidence_class: EvidenceClass::Strong,
                     priority: Priority::Investigate,
                     delta: DeltaStatus::Current,
                     gate: false,
+                    accepted: false,
+                    acceptance_reason: None,
                     summary: "module is simultaneously an outlier for decision sites and local dependency breadth".into(),
                     direction: "investigate whether responsibility and dependency surface can be reduced without changing behavior".into(),
                     evidence: vec![
@@ -137,13 +142,14 @@ pub fn evaluate_regressions(
                 continue;
             }
 
-            let (baseline_decisions, baseline_dependencies, delta) =
+            let (baseline_decisions, baseline_dependencies, delta, identity) =
                 if let Some(&baseline_index) = correspondence.head_to_baseline.get(&head_index) {
                     let previous = &baseline[baseline_index];
                     (
                         previous.decision_sites,
                         previous.local_dependency_modules.len(),
                         DeltaStatus::Worsened,
+                        subject(&previous.crate_name, &previous.module_path),
                     )
                 } else if correspondence.ambiguous_head.contains(&head_index) {
                     incomplete.insert(format!(
@@ -152,7 +158,12 @@ pub fn evaluate_regressions(
                     ));
                     continue;
                 } else if changes.added.contains(&module.path) {
-                    (0, 0, DeltaStatus::New)
+                    (
+                        0,
+                        0,
+                        DeltaStatus::New,
+                        subject(crate_name, &module.module_path),
+                    )
                 } else {
                     incomplete.insert(format!(
                         "{} changed without reliable baseline correspondence",
@@ -176,12 +187,16 @@ pub fn evaluate_regressions(
 
             if regressed {
                 evaluation.findings.push(Finding {
+                    fingerprint: String::new(),
                     rule: "structure.coupled_complexity_growth".into(),
                     subject: subject(crate_name, &module.module_path),
+                    identity,
                     evidence_class: EvidenceClass::Strong,
                     priority: Priority::ActFirst,
                     delta,
                     gate: true,
+                    accepted: false,
+                    acceptance_reason: None,
                     summary: "module materially increased both decision-site count and local dependency breadth beyond the frozen baseline p90".into(),
                     direction: "inspect whether the change combines responsibilities or broadens dependency surface unnecessarily before merging".into(),
                     evidence: vec![
