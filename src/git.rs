@@ -1,4 +1,13 @@
-use std::{path::Path, process::Command};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ffi::OsStr,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+static WORKTREE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
 pub struct GitState {
@@ -6,15 +15,61 @@ pub struct GitState {
     pub dirty: Option<bool>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BaselineSelection {
+    pub target_ref: String,
+    pub target_oid: String,
+    pub merge_base: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ChangeSet {
+    pub renames: BTreeMap<String, String>,
+    pub added: BTreeSet<String>,
+    pub deleted: BTreeSet<String>,
+    pub modified: BTreeSet<String>,
+}
+
+pub struct TemporaryWorktree {
+    repo_root: PathBuf,
+    path: PathBuf,
+}
+
+impl TemporaryWorktree {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TemporaryWorktree {
+    fn drop(&mut self) {
+        let _ = git_bytes(
+            &self.repo_root,
+            [
+                OsStr::new("worktree"),
+                OsStr::new("remove"),
+                OsStr::new("--force"),
+                self.path.as_os_str(),
+            ],
+        );
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
 pub fn inspect(root: &Path) -> GitState {
-    let head = command(root, &["rev-parse", "HEAD"])
+    let head = git_text(root, ["rev-parse", "HEAD"])
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty());
 
-    let dirty = command(
+    let dirty = git_bytes(
         root,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        [
+            OsStr::new("status"),
+            OsStr::new("--porcelain=v1"),
+            OsStr::new("-z"),
+            OsStr::new("--untracked-files=all"),
+        ],
     )
     .ok()
     .map(|value| !value.is_empty());
@@ -22,7 +77,208 @@ pub fn inspect(root: &Path) -> GitState {
     GitState { head, dirty }
 }
 
-fn command(root: &Path, args: &[&str]) -> Result<String, String> {
+pub fn resolve_baseline(root: &Path, explicit: Option<&str>) -> Result<BaselineSelection, String> {
+    let head = git_text(root, ["rev-parse", "HEAD"])?.trim().to_owned();
+
+    let candidates = if let Some(explicit) = explicit {
+        vec![(explicit.to_owned(), true)]
+    } else {
+        automatic_target_candidates(root)
+    };
+
+    let mut selected = None;
+    for (candidate, was_explicit) in candidates {
+        if let Ok(target_oid) = resolve_commit(root, &candidate) {
+            selected = Some((candidate, target_oid, was_explicit));
+            break;
+        }
+    }
+
+    let Some((target_ref, target_oid, was_explicit)) = selected else {
+        return Err("no usable baseline target ref is available locally".into());
+    };
+
+    if target_oid == head && !was_explicit {
+        return Err(format!(
+            "automatically selected baseline {target_ref} resolves to HEAD; provide --base explicitly"
+        ));
+    }
+
+    let merge_bases = git_text(
+        root,
+        ["merge-base", "--all", head.as_str(), target_oid.as_str()],
+    )?;
+    let merge_bases = merge_bases
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+
+    if merge_bases.len() != 1 {
+        return Err(format!(
+            "baseline target {target_ref} does not have exactly one usable merge base"
+        ));
+    }
+
+    Ok(BaselineSelection {
+        target_ref,
+        target_oid,
+        merge_base: merge_bases[0].to_owned(),
+    })
+}
+
+pub fn changes_since(root: &Path, merge_base: &str) -> Result<ChangeSet, String> {
+    let output = git_bytes(
+        root,
+        [
+            OsStr::new("diff"),
+            OsStr::new("--name-status"),
+            OsStr::new("-z"),
+            OsStr::new("-M"),
+            OsStr::new("--no-ext-diff"),
+            OsStr::new(merge_base),
+            OsStr::new("--"),
+        ],
+    )?;
+
+    let records = output
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+        .map(|record| String::from_utf8_lossy(record).into_owned())
+        .collect::<Vec<_>>();
+
+    let mut changes = ChangeSet::default();
+    let mut index = 0;
+    while index < records.len() {
+        let status = &records[index];
+        index += 1;
+
+        if status.starts_with('R') {
+            if index + 1 >= records.len() {
+                return Err("git diff returned a truncated rename record".into());
+            }
+            let old = records[index].clone();
+            let new = records[index + 1].clone();
+            changes.renames.insert(old, new);
+            index += 2;
+            continue;
+        }
+
+        if index >= records.len() {
+            return Err("git diff returned a truncated path record".into());
+        }
+        let path = records[index].clone();
+        index += 1;
+
+        match status.chars().next() {
+            Some('A') => {
+                changes.added.insert(path);
+            }
+            Some('D') => {
+                changes.deleted.insert(path);
+            }
+            Some('M') | Some('T') => {
+                changes.modified.insert(path);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(changes)
+}
+
+pub fn materialize_worktree(root: &Path, commit: &str) -> Result<TemporaryWorktree, String> {
+    let counter = WORKTREE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "ferric-lens-baseline-{}-{counter}",
+        std::process::id()
+    ));
+    if path.exists() {
+        fs::remove_dir_all(&path)
+            .map_err(|error| format!("cannot clear temporary baseline directory: {error}"))?;
+    }
+
+    git_bytes(
+        root,
+        [
+            OsStr::new("worktree"),
+            OsStr::new("add"),
+            OsStr::new("--detach"),
+            OsStr::new("--quiet"),
+            path.as_os_str(),
+            OsStr::new(commit),
+        ],
+    )
+    .map_err(|error| format!("cannot materialize baseline {commit}: {error}"))?;
+
+    Ok(TemporaryWorktree {
+        repo_root: root.to_path_buf(),
+        path,
+    })
+}
+
+fn automatic_target_candidates(root: &Path) -> Vec<(String, bool)> {
+    let mut candidates = Vec::new();
+
+    if let Ok(base) = std::env::var("GITHUB_BASE_REF") {
+        let base = base.trim();
+        if !base.is_empty() {
+            candidates.push((format!("refs/remotes/origin/{base}"), false));
+            candidates.push((base.to_owned(), false));
+        }
+    }
+
+    if let Ok(symbolic) = git_text(
+        root,
+        [
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    ) {
+        let symbolic = symbolic.trim();
+        if !symbolic.is_empty() {
+            candidates.push((symbolic.to_owned(), false));
+        }
+    }
+
+    candidates.push(("refs/remotes/origin/main".into(), false));
+    candidates.push(("main".into(), false));
+
+    candidates
+}
+
+fn resolve_commit(root: &Path, reference: &str) -> Result<String, String> {
+    let spec = format!("{reference}^{{commit}}");
+    let output = git_bytes(
+        root,
+        [
+            OsStr::new("rev-parse"),
+            OsStr::new("--verify"),
+            OsStr::new("--end-of-options"),
+            OsStr::new(&spec),
+        ],
+    )?;
+    let value = String::from_utf8_lossy(&output).trim().to_owned();
+    if value.is_empty() {
+        Err(format!("ref {reference} did not resolve to a commit"))
+    } else {
+        Ok(value)
+    }
+}
+
+fn git_text<const N: usize>(root: &Path, args: [&str; N]) -> Result<String, String> {
+    let args = args.map(OsStr::new);
+    let output = git_bytes(root, args)?;
+    Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+fn git_bytes<I, S>(root: &Path, args: I) -> Result<Vec<u8>, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     let output = Command::new("git")
         .current_dir(root)
         .args(args)
@@ -31,5 +287,19 @@ fn command(root: &Path, args: &[&str]) -> Result<String, String> {
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(output.stdout)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChangeSet;
+
+    #[test]
+    fn change_set_defaults_empty() {
+        let changes = ChangeSet::default();
+        assert!(changes.renames.is_empty());
+        assert!(changes.added.is_empty());
+        assert!(changes.deleted.is_empty());
+        assert!(changes.modified.is_empty());
+    }
 }
