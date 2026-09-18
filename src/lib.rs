@@ -7,6 +7,7 @@
 pub mod acceptance;
 pub mod architecture;
 pub mod cache;
+pub mod cfg;
 pub mod compare;
 pub mod evidence;
 pub mod extract;
@@ -58,7 +59,11 @@ fn analyze_internal(
     include_history: bool,
     evidence_path: Option<&Path>,
 ) -> Result<AnalysisResult, String> {
-    let mut current = analyze_snapshot(root, root)?;
+    let (host_cfg, cfg_detail) = match cfg::HostCfg::detect() {
+        Ok(cfg) => (cfg, None),
+        Err(error) => (cfg::HostCfg::unavailable(), Some(error)),
+    };
+    let mut current = analyze_snapshot(root, root, &host_cfg)?;
     let architecture = architecture::summarize(&current.modules);
     let git_state = git::inspect(root);
     let snapshot = Snapshot {
@@ -69,6 +74,15 @@ fn analyze_internal(
     };
 
     let mut capabilities = snapshot_capabilities("head", &current);
+    capabilities.push(Capability {
+        name: "host_cfg".into(),
+        status: if cfg_detail.is_none() {
+            CapabilityStatus::Complete
+        } else {
+            CapabilityStatus::Unavailable
+        },
+        detail: cfg_detail,
+    });
     let imported_evidence = if let Some(path) = evidence_path {
         let imported = evidence::load(path, &snapshot)?;
         capabilities.push(Capability {
@@ -141,7 +155,7 @@ fn analyze_internal(
         }
     };
 
-    let baseline_snapshot = match analyze_snapshot(baseline_worktree.path(), root) {
+    let baseline_snapshot = match analyze_snapshot(baseline_worktree.path(), root, &host_cfg) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             capabilities.push(Capability {
@@ -427,21 +441,25 @@ fn finalize_findings(root: &Path, findings: &mut [model::Finding]) -> Result<(),
     Ok(())
 }
 
-fn analyze_snapshot(root: &Path, cache_root: &Path) -> Result<SnapshotAnalysis, String> {
+fn analyze_snapshot(
+    root: &Path,
+    cache_root: &Path,
+    host_cfg: &cfg::HostCfg,
+) -> Result<SnapshotAnalysis, String> {
     let inventory = input::inventory(root)?;
     let fact_cache = cache::RawFactCache::new(cache_root);
     let mut modules = Vec::with_capacity(inventory.sources.len());
     let mut parse_failures = 0usize;
 
     for source in &inventory.sources {
-        if let Some(module) = fact_cache.load(source) {
+        if let Some(module) = fact_cache.load(source, host_cfg.digest()) {
             modules.push(module);
             continue;
         }
 
-        match extract::extract(source) {
+        match extract::extract(source, host_cfg) {
             Ok(module) => {
-                fact_cache.store(source, &module);
+                fact_cache.store(source, host_cfg.digest(), &module);
                 modules.push(module);
             }
             Err(error) => {
