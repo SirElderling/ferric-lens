@@ -100,6 +100,21 @@ pub fn html(result: &AnalysisResult) -> String {
         modules.push_str("</div></details>");
     }
 
+    let profile_summary = format!(
+        "<p><strong>{}</strong><br>resolved target <code>{}</code><br>{}<br>{} rustc cfg fact(s)</p>",
+        escape(&result.profile.id),
+        escape(&result.profile.resolved_target),
+        if result.profile.features.is_empty() {
+            "default features only".to_owned()
+        } else {
+            format!(
+                "default + explicit features <code>{}</code>",
+                escape(&result.profile.features.join(","))
+            )
+        },
+        result.profile.target_cfg.len()
+    );
+
     let history_summary = result.history.as_ref().map_or_else(
         || "<p>Not collected for this analysis mode.</p>".to_owned(),
         |history| {
@@ -228,6 +243,7 @@ code {{ overflow-wrap: anywhere; }}
 <section class="grid">
 <div class="card"><h2>Snapshot</h2><p><strong>Digest</strong><br><code>{digest}</code></p><p>{source_files} source files<br>{applicable} applicable gate subjects</p></div>
 <div class="card"><h2>Baseline</h2>{baseline}</div>
+<div class="card"><h2>Profile</h2>{profile_summary}</div>
 <div class="card"><h2>Architecture</h2>{architecture_summary}</div>
 <div class="card"><h2>History</h2>{history_summary}</div>
 <div class="card"><h2>External evidence</h2>{imported_evidence}</div>
