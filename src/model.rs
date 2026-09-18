@@ -63,6 +63,8 @@ pub struct ModuleMetrics {
     pub gate_complete: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limitation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<HistoryEvidence>,
 }
 
 impl ModuleMetrics {
@@ -85,8 +87,30 @@ impl ModuleMetrics {
             parse_complete: false,
             gate_complete: false,
             limitation: Some(limitation),
+            history: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct CoChangeEvidence {
+    pub path: String,
+    pub shared_commits: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct HistoryEvidence {
+    pub change_commits: usize,
+    pub sampled_commits: usize,
+    pub cochange: Vec<CoChangeEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct HistorySummary {
+    pub sampled_commits: usize,
+    pub changed_path_records: usize,
+    pub broad_commits_excluded_from_cochange: usize,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -155,6 +179,8 @@ pub struct AnalysisResult {
     pub verdict: GateVerdict,
     pub verdict_reason: String,
     pub applicable_gate_subjects: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<HistorySummary>,
     pub capabilities: Vec<Capability>,
     pub modules: Vec<ModuleMetrics>,
     pub findings: Vec<Finding>,
