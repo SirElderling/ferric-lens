@@ -699,7 +699,7 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("src")).unwrap();
-        root
+        root.canonicalize().unwrap()
     }
 
     #[test]
