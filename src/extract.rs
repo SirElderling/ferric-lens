@@ -85,7 +85,7 @@ impl<'ast> Visit<'ast> for MetricsVisitor {
 
     fn visit_expr_match(&mut self, node: &'ast ExprMatch) {
         for arm in &node.arms {
-            if !matches!(arm.pat, Pat::Wild(_)) {
+            if !matches!(&arm.pat, Pat::Wild(_)) {
                 self.decision_sites += 1;
             }
             if arm.guard.is_some() {
@@ -233,7 +233,7 @@ fn resolve_import(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeSet, path::PathBuf};
+    use std::collections::BTreeSet;
 
     use super::{extract, resolve_import};
     use crate::input::SourceFile;
