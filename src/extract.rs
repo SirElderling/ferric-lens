@@ -185,11 +185,7 @@ pub fn resolve_local_dependencies(modules: &mut [ModuleMetrics]) {
     }
 }
 
-fn resolve_import(
-    current: &str,
-    segments: &[String],
-    known: &BTreeSet<String>,
-) -> Option<String> {
+fn resolve_import(current: &str, segments: &[String], known: &BTreeSet<String>) -> Option<String> {
     if segments.is_empty() {
         return None;
     }
