@@ -19,7 +19,12 @@ pub fn match_modules(
     let baseline_by_identity = baseline
         .iter()
         .enumerate()
-        .map(|(index, module)| ((module.crate_name.as_str(), module.module_path.as_str()), index))
+        .map(|(index, module)| {
+            (
+                (module.crate_name.as_str(), module.module_path.as_str()),
+                index,
+            )
+        })
         .collect::<BTreeMap<_, _>>();
 
     for (head_index, module) in head.iter().enumerate() {
@@ -101,10 +106,7 @@ pub fn match_modules(
 #[cfg(test)]
 mod tests {
     use super::match_modules;
-    use crate::{
-        git::ChangeSet,
-        model::ModuleMetrics,
-    };
+    use crate::{git::ChangeSet, model::ModuleMetrics};
 
     fn module(path: &str, module_path: &str, digest: &str) -> ModuleMetrics {
         ModuleMetrics {
