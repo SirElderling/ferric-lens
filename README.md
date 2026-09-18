@@ -20,7 +20,8 @@ Ferric Lens currently:
 - emits one self-contained HTML/CSS report with no JavaScript,
 - reuses content-addressed raw syntax facts through a disposable 256 MiB repository cache,
 - enriches full `analyze` reports with bounded recent churn and co-change evidence,
-- keeps `check` on the fast core path without optional history enrichment,
+- keeps `check` on the fast core path without optional history or imported evidence,
+- accepts one validated, normalized local JSON evidence envelope for full-report enrichment,
 - supports fingerprinted, reasoned finding acceptances in a tool-managed repository file,
 - keeps accepted findings visible while excluding only exact accepted gate evidence from failure,
 - uses exit codes `0=pass`, `1=regression`, and `2=inconclusive/error`.
@@ -53,6 +54,40 @@ cargo run -- check /path/to/rust/repository --base origin/main --json ferric-len
 The initial blocking rule requires a baseline crate population of at least 20 production modules with complete required evidence. Smaller crates still receive descriptive/advisory output.
 
 Full `analyze` mode samples at most 2,000 recent non-merge commits and 100,000 changed-path records for advisory history context. Commits touching more than 200 paths are excluded from co-change calculations and reported as such. History never changes the gate verdict.
+
+## Importing deterministic evidence
+
+Full `analyze` mode can attach an optional normalized local evidence envelope:
+
+```bash
+cargo run -- analyze /path/to/repository \
+  --base origin/main \
+  --evidence measurements.json
+```
+
+The V1 envelope is intentionally generic rather than vendor-specific:
+
+```json
+{
+  "schema_version": 1,
+  "producer": {"name": "my-benchmark", "version": "1.0"},
+  "source": {"content_digest": "<Ferric Lens snapshot digest>"},
+  "configuration": {"target": "host", "features": []},
+  "observations": [
+    {
+      "subject": "src/engine.rs",
+      "metric": "instructions",
+      "value": 123456,
+      "unit": "count",
+      "note": "representative simulation workload"
+    }
+  ]
+}
+```
+
+Imports are limited to 16 MiB, require repository-relative subjects, and are sorted deterministically. Source/configuration matches are explicit. Mismatched evidence is retained only as unattached context.
+
+Imported evidence is advisory in V1. It never changes the `check` gate verdict and Ferric Lens never invokes the producing tool automatically.
 
 ## Accepting an intentional finding
 
