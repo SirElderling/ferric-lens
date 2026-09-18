@@ -81,7 +81,7 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
                 let complete = limitations.is_empty();
                 let detail = summarize_limitations(&limitations);
                 (sources, aliases, complete, detail)
-            },
+            }
             Err(error) => (
                 fallback_inventory(&root)?,
                 WorkspaceAliases::new(),
@@ -250,20 +250,14 @@ fn inventory_from_metadata(
             }
 
             let crate_name = rust_name(&target.name);
-            target_roots.push((
-                crate_name.clone(),
-                source,
-                package_root.to_path_buf(),
-            ));
+            target_roots.push((crate_name.clone(), source, package_root.to_path_buf()));
             crate_package_roots
                 .entry(crate_name)
                 .or_insert_with(|| package_root.to_path_buf());
         }
     }
 
-    target_roots.sort_by(|left, right| {
-        (&left.0, &left.1).cmp(&(&right.0, &right.1))
-    });
+    target_roots.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
 
     let mut aliases = WorkspaceAliases::new();
     for (crate_name, package_root) in &crate_package_roots {
@@ -475,11 +469,7 @@ fn discover_child_modules(
             Truth::True => {}
         }
 
-        if module
-            .attrs
-            .iter()
-            .any(|attr| attr.path().is_ident("path"))
-        {
+        if module.attrs.iter().any(|attr| attr.path().is_ident("path")) {
             limitations.push(format!(
                 "{crate_name}: module {} uses #[path] and reachability is incomplete",
                 child_module_path(parent_module, module)
@@ -580,7 +570,10 @@ fn summarize_limitations(limitations: &[String]) -> Option<String> {
 
     let shown = limitations.iter().take(3).cloned().collect::<Vec<_>>();
     let suffix = if limitations.len() > shown.len() {
-        format!("; {} additional inventory limitation(s)", limitations.len() - shown.len())
+        format!(
+            "; {} additional inventory limitation(s)",
+            limitations.len() - shown.len()
+        )
     } else {
         String::new()
     };
@@ -779,8 +772,7 @@ mod tests {
         .unwrap();
 
         assert!(sources.iter().any(|source| {
-            source.relative_path == "src/outer/child.rs"
-                && source.module_path == "outer::child"
+            source.relative_path == "src/outer/child.rs" && source.module_path == "outer::child"
         }));
         assert!(limitations.is_empty());
 
