@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{input::SourceFile, model::ModuleMetrics};
 
-const RAW_FACT_SCHEMA: u32 = 2;
+const RAW_FACT_SCHEMA: u32 = 3;
 const MAX_CACHE_BYTES: u64 = 256 * 1024 * 1024;
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -36,8 +36,8 @@ impl RawFactCache {
         }
     }
 
-    pub fn load(&self, source: &SourceFile) -> Option<ModuleMetrics> {
-        let key = key(source);
+    pub fn load(&self, source: &SourceFile, profile_digest: &str) -> Option<ModuleMetrics> {
+        let key = key(source, profile_digest);
         let path = self.directory.join(format!("{key}.json"));
         let bytes = fs::read(path).ok()?;
         let entry: RawFactEntry = serde_json::from_slice(&bytes).ok()?;
@@ -63,15 +63,20 @@ impl RawFactCache {
         Some(module)
     }
 
-    pub fn store(&self, source: &SourceFile, module: &ModuleMetrics) {
-        let _ = self.try_store(source, module);
+    pub fn store(&self, source: &SourceFile, profile_digest: &str, module: &ModuleMetrics) {
+        let _ = self.try_store(source, profile_digest, module);
     }
 
-    fn try_store(&self, source: &SourceFile, module: &ModuleMetrics) -> Result<(), String> {
+    fn try_store(
+        &self,
+        source: &SourceFile,
+        profile_digest: &str,
+        module: &ModuleMetrics,
+    ) -> Result<(), String> {
         fs::create_dir_all(&self.directory)
             .map_err(|error| format!("cannot create fact cache: {error}"))?;
 
-        let key = key(source);
+        let key = key(source, profile_digest);
         let mut raw = module.clone();
         raw.crate_name.clear();
         raw.module_path.clear();
@@ -128,11 +133,12 @@ impl RawFactCache {
     }
 }
 
-fn key(source: &SourceFile) -> String {
+fn key(source: &SourceFile, profile_digest: &str) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"ferric-lens-raw-fact");
     hasher.update(&RAW_FACT_SCHEMA.to_le_bytes());
     hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
+    hasher.update(profile_digest.as_bytes());
     hasher.update(&source.bytes);
     hasher.finalize().to_hex().to_string()
 }
@@ -221,7 +227,7 @@ mod tests {
         let root = temp_root();
         let cache = RawFactCache::new(&root);
         let original = source("src/engine.rs");
-        cache.store(&original, &module("src/engine.rs"));
+        cache.store(&original, "profile", &module("src/engine.rs"));
 
         let moved = SourceFile {
             crate_name: "demo".into(),
@@ -229,7 +235,7 @@ mod tests {
             relative_path: "src/nested/engine.rs".into(),
             bytes: original.bytes.clone(),
         };
-        let cached = cache.load(&moved).unwrap();
+        let cached = cache.load(&moved, "profile").unwrap();
 
         assert_eq!(cached.module_path, "nested::engine");
         assert_eq!(cached.path, "src/nested/engine.rs");
@@ -240,17 +246,29 @@ mod tests {
     }
 
     #[test]
+    fn profile_digest_separates_platform_specific_facts() {
+        let root = temp_root();
+        let cache = RawFactCache::new(&root);
+        let source = source("src/engine.rs");
+        cache.store(&source, "linux", &module("src/engine.rs"));
+
+        assert!(cache.load(&source, "macos").is_none());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn corrupt_entry_is_a_cache_miss() {
         let root = temp_root();
         let cache = RawFactCache::new(&root);
         let source = source("src/engine.rs");
-        cache.store(&source, &module("src/engine.rs"));
+        cache.store(&source, "profile", &module("src/engine.rs"));
 
         let cache_dir = root.join(".ferric-lens/cache/v1/raw");
         let entry = fs::read_dir(&cache_dir).unwrap().next().unwrap().unwrap();
         fs::write(entry.path(), b"not-json").unwrap();
 
-        assert!(cache.load(&source).is_none());
+        assert!(cache.load(&source, "profile").is_none());
 
         fs::remove_dir_all(root).unwrap();
     }
