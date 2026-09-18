@@ -65,9 +65,9 @@ pub fn html(result: &AnalysisResult) -> String {
             current_crate = module.crate_name.clone();
             modules.push_str("<details><summary><strong>");
             modules.push_str(&escape(&current_crate));
-            modules.push_str("</strong></summary><div class="crate">");
+            modules.push_str(r#"</strong></summary><div class="crate">"#);
         }
-        modules.push_str("<div class="module"><code>");
+        modules.push_str(r#"<div class="module"><code>"#);
         modules.push_str(&escape(if module.module_path.is_empty() {
             "crate root"
         } else {
