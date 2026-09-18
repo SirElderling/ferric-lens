@@ -81,12 +81,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             path,
             base,
         } => {
-            ferric_lens::accept_finding_with_base(
-                &path,
-                base.as_deref(),
-                &fingerprint,
-                &reason,
-            )?;
+            ferric_lens::accept_finding_with_base(&path, base.as_deref(), &fingerprint, &reason)?;
             println!("accepted finding {fingerprint}");
             Ok(ExitCode::SUCCESS)
         }
