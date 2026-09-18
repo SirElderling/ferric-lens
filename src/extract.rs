@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use quote::ToTokens;
 use syn::{
     visit::{self, Visit},
-    BinOp, ExprBinary, ExprForLoop, ExprIf, ExprLoop, ExprMatch, ExprWhile, File, Item, ItemMod,
-    ItemUse, Pat, UseTree, Visibility,
+    Attribute, BinOp, ExprBinary, ExprForLoop, ExprIf, ExprLoop, ExprMatch, ExprWhile, File, Item,
+    ItemMod, ItemUse, Macro, Pat, UseTree, Visibility,
 };
 
 use crate::{
@@ -16,6 +17,10 @@ pub fn extract(source: &SourceFile) -> Result<ModuleMetrics, String> {
         .map_err(|error| format!("source is not valid UTF-8: {error}"))?;
     let syntax: File =
         syn::parse_file(text).map_err(|error| format!("Rust parse failed: {error}"))?;
+
+    let structure_digest = blake3::hash(syntax.to_token_stream().to_string().as_bytes())
+        .to_hex()
+        .to_string();
 
     let mut visitor = MetricsVisitor::default();
     visitor.visit_file(&syntax);
@@ -33,8 +38,10 @@ pub fn extract(source: &SourceFile) -> Result<ModuleMetrics, String> {
         public_items: visitor.public_items,
         explicit_imports: visitor.imports,
         local_dependency_modules: Vec::new(),
+        structure_digest,
         parse_complete: true,
-        limitation: None,
+        gate_complete: visitor.gate_limitation.is_none(),
+        limitation: visitor.gate_limitation,
     })
 }
 
@@ -43,10 +50,26 @@ struct MetricsVisitor {
     decision_sites: usize,
     public_items: usize,
     imports: Vec<ImportPath>,
+    gate_limitation: Option<String>,
+}
+
+impl MetricsVisitor {
+    fn limit_gate(&mut self, reason: &str) {
+        if self.gate_limitation.is_none() {
+            self.gate_limitation = Some(reason.to_owned());
+        }
+    }
 }
 
 impl<'ast> Visit<'ast> for MetricsVisitor {
     fn visit_item(&mut self, item: &'ast Item) {
+        let attrs = item_attributes(item);
+        if attrs.iter().any(is_exact_cfg_test) {
+            return;
+        }
+        if attrs.iter().any(|attr| attr.path().is_ident("cfg")) {
+            self.limit_gate("module contains cfg-dependent production syntax not yet selected");
+        }
         if is_public(item) {
             self.public_items += 1;
         }
@@ -61,6 +84,10 @@ impl<'ast> Visit<'ast> for MetricsVisitor {
     fn visit_item_use(&mut self, item: &'ast ItemUse) {
         let mut prefix = Vec::new();
         flatten_use_tree(&item.tree, &mut prefix, &mut self.imports);
+    }
+
+    fn visit_macro(&mut self, _node: &'ast Macro) {
+        self.limit_gate("module contains macro syntax that Ferric Lens does not expand");
     }
 
     fn visit_expr_if(&mut self, node: &'ast ExprIf) {
@@ -101,6 +128,34 @@ impl<'ast> Visit<'ast> for MetricsVisitor {
         }
         visit::visit_expr_binary(self, node);
     }
+}
+
+fn item_attributes(item: &Item) -> &[Attribute] {
+    match item {
+        Item::Const(item) => &item.attrs,
+        Item::Enum(item) => &item.attrs,
+        Item::ExternCrate(item) => &item.attrs,
+        Item::Fn(item) => &item.attrs,
+        Item::ForeignMod(item) => &item.attrs,
+        Item::Impl(item) => &item.attrs,
+        Item::Macro(item) => &item.attrs,
+        Item::Mod(item) => &item.attrs,
+        Item::Static(item) => &item.attrs,
+        Item::Struct(item) => &item.attrs,
+        Item::Trait(item) => &item.attrs,
+        Item::TraitAlias(item) => &item.attrs,
+        Item::Type(item) => &item.attrs,
+        Item::Union(item) => &item.attrs,
+        Item::Use(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn is_exact_cfg_test(attr: &Attribute) -> bool {
+    attr.path().is_ident("cfg")
+        && attr
+            .parse_args::<syn::Path>()
+            .is_ok_and(|path| path.is_ident("test"))
 }
 
 fn is_public(item: &Item) -> bool {
@@ -209,7 +264,10 @@ fn resolve_import(current: &str, segments: &[String], known: &BTreeSet<String>) 
             }
             index
         }
-        _ => return None,
+        _ => {
+            base.clear();
+            0
+        }
     };
 
     let mut candidate = base.into_iter().map(str::to_owned).collect::<Vec<_>>();
@@ -260,6 +318,38 @@ mod tests {
     }
 
     #[test]
+    fn ignores_exact_cfg_test_items_for_production_metrics() {
+        let metrics = extract(&source(
+            r#"
+            fn production() { if true {} }
+            #[cfg(test)]
+            fn only_test() { if true {} }
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(metrics.decision_sites, 1);
+        assert!(metrics.gate_complete);
+    }
+
+    #[test]
+    fn marks_unknown_cfg_and_macros_incomplete_for_gating() {
+        let cfg_metrics =
+            extract(&source("#[cfg(target_os = \"linux\")] fn platform() {}")).unwrap();
+        assert!(!cfg_metrics.gate_complete);
+
+        let macro_metrics = extract(&source("fn f() { vec![1, 2, 3]; }")).unwrap();
+        assert!(!macro_metrics.gate_complete);
+    }
+
+    #[test]
+    fn formatting_does_not_change_structure_digest() {
+        let left = extract(&source("fn f(){if true{}}")).unwrap();
+        let right = extract(&source("fn f() { if true { } }")).unwrap();
+        assert_eq!(left.structure_digest, right.structure_digest);
+    }
+
+    #[test]
     fn flattens_grouped_imports_deterministically() {
         let metrics = extract(&source("use crate::model::{Thing, nested::Other};")).unwrap();
         let paths = metrics
@@ -292,6 +382,10 @@ mod tests {
                 &known
             ),
             Some("model::nested".into())
+        );
+        assert_eq!(
+            resolve_import("engine", &["model".into(), "Thing".into()], &known),
+            Some("model".into())
         );
     }
 }
