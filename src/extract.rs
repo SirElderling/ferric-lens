@@ -281,6 +281,15 @@ pub fn resolve_workspace_dependencies(
         let mut unresolved_repository_import = false;
 
         for import in &module.explicit_imports {
+            if import.glob {
+                unresolved_repository_import = true;
+                append_limitation(
+                    module,
+                    "module contains a glob import whose gate dependency surface is ambiguous",
+                );
+                continue;
+            }
+
             match resolve_import(
                 &current_crate,
                 &current_module,
@@ -573,6 +582,19 @@ mod tests {
             vec!["demo::model", "shared::nested"]
         );
         assert!(modules[0].gate_complete);
+    }
+
+    #[test]
+    fn glob_import_makes_gate_dependency_evidence_incomplete() {
+        let mut modules = vec![
+            extracted("demo", "engine", "src/engine.rs", "use crate::model::*;"),
+            extracted("demo", "model", "src/model.rs", ""),
+        ];
+
+        resolve_workspace_dependencies(&mut modules, &WorkspaceAliases::new());
+
+        assert!(!modules[0].gate_complete);
+        assert!(modules[0].local_dependency_modules.is_empty());
     }
 
     #[test]
