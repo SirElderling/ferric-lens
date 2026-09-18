@@ -39,3 +39,9 @@ jobs:
 
       - name: Test
         run: cargo test --all-targets --all-features
+
+      - name: End-to-end check
+        run: cargo run --locked -- check . --base origin/main --json target/ferric-lens-self-check.json
+
+      - name: Release build
+        run: cargo build --release --locked
