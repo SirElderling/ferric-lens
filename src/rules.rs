@@ -69,7 +69,7 @@ fn nearest_rank_p90(values: &[usize]) -> usize {
     debug_assert!(!values.is_empty());
     let mut sorted = values.to_vec();
     sorted.sort_unstable();
-    let rank = (9 * sorted.len() + 9) / 10;
+    let rank = (9 * sorted.len()).div_ceil(10);
     sorted[rank.saturating_sub(1)]
 }
 
