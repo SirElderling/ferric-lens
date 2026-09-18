@@ -238,7 +238,9 @@ fn analyze_internal(
             capabilities.push(Capability {
                 name: "history_enrichment".into(),
                 status: CapabilityStatus::Complete,
-                detail: Some("no changed or finding-related production paths required enrichment".into()),
+                detail: Some(
+                    "no changed or finding-related production paths required enrichment".into(),
+                ),
             });
             None
         } else {
