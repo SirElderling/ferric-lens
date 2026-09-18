@@ -851,7 +851,7 @@ mod tests {
 
     use super::{
         collect_reachable_module, inventory_from_metadata, module_path_from_relative, rust_name,
-        Metadata, Package, SourceBudget, Target,
+        Metadata, Package, SourceBudget, Target, MAX_SNAPSHOT_SOURCE_BYTES,
     };
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -874,6 +874,14 @@ mod tests {
         assert_eq!(module_path_from_relative("src/foo/mod.rs"), "foo");
         assert_eq!(module_path_from_relative("src/foo/bar.rs"), "foo::bar");
         assert_eq!(module_path_from_relative("crates/a/src/x.rs"), "x");
+    }
+
+    #[test]
+    fn source_budget_stops_at_the_snapshot_limit() {
+        let mut budget = SourceBudget::default();
+        assert!(budget.reserve(MAX_SNAPSHOT_SOURCE_BYTES));
+        assert!(!budget.reserve(1));
+        assert!(budget.exhausted);
     }
 
     #[test]
