@@ -288,9 +288,7 @@ fn inventory_from_metadata(
         })
         .collect::<Vec<_>>();
 
-    target_roots.sort_by(|left, right| {
-        (&left.id, &left.source).cmp(&(&right.id, &right.source))
-    });
+    target_roots.sort_by(|left, right| (&left.id, &left.source).cmp(&(&right.id, &right.source)));
 
     let mut package_library_crates = BTreeMap::<PathBuf, (String, String)>::new();
     for target in &target_roots {
@@ -839,9 +837,17 @@ mod tests {
     #[test]
     fn library_and_binary_with_same_target_name_remain_distinct() {
         let root = temp_root();
-        fs::write(root.join("Cargo.toml"), "[package]\nname='demo'\nversion='0.1.0'\n").unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname='demo'\nversion='0.1.0'\n",
+        )
+        .unwrap();
         fs::write(root.join("src/lib.rs"), "pub fn library() {}").unwrap();
-        fs::write(root.join("src/main.rs"), "use demo::library; fn main() { library(); }").unwrap();
+        fs::write(
+            root.join("src/main.rs"),
+            "use demo::library; fn main() { library(); }",
+        )
+        .unwrap();
 
         let package_id = "path+file:///demo#0.1.0".to_owned();
         let metadata = Metadata {
@@ -871,8 +877,12 @@ mod tests {
             inventory_from_metadata(&root, metadata, None).unwrap();
 
         assert!(limitations.is_empty());
-        assert!(sources.iter().any(|source| source.crate_name == "demo[lib]"));
-        assert!(sources.iter().any(|source| source.crate_name == "demo[bin]"));
+        assert!(sources
+            .iter()
+            .any(|source| source.crate_name == "demo[lib]"));
+        assert!(sources
+            .iter()
+            .any(|source| source.crate_name == "demo[bin]"));
         assert_eq!(
             aliases
                 .get("demo[bin]")
