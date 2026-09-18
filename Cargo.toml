@@ -5,7 +5,6 @@ edition = "2021"
 description = "Deterministic, zero-configuration structural analysis for Rust codebases"
 license = "MIT"
 repository = "https://github.com/SirElderling/ferric-lens"
-rust-version = "1.82"
 
 [dependencies]
 blake3 = "1.5"
