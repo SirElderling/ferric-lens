@@ -8,6 +8,7 @@ pub mod acceptance;
 pub mod architecture;
 pub mod cache;
 pub mod compare;
+pub mod evidence;
 pub mod extract;
 pub mod git;
 pub mod history;
@@ -32,21 +33,30 @@ struct SnapshotAnalysis {
 }
 
 pub fn analyze(root: &Path) -> Result<AnalysisResult, String> {
-    analyze_internal(root, None, true)
+    analyze_internal(root, None, true, None)
 }
 
 pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResult, String> {
-    analyze_internal(root, base, true)
+    analyze_internal(root, base, true, None)
+}
+
+pub fn analyze_with_base_and_evidence(
+    root: &Path,
+    base: Option<&str>,
+    evidence_path: Option<&Path>,
+) -> Result<AnalysisResult, String> {
+    analyze_internal(root, base, true, evidence_path)
 }
 
 pub fn check_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResult, String> {
-    analyze_internal(root, base, false)
+    analyze_internal(root, base, false, None)
 }
 
 fn analyze_internal(
     root: &Path,
     base: Option<&str>,
     include_history: bool,
+    evidence_path: Option<&Path>,
 ) -> Result<AnalysisResult, String> {
     let mut current = analyze_snapshot(root, root)?;
     let architecture = architecture::summarize(&current.modules);
@@ -59,6 +69,21 @@ fn analyze_internal(
     };
 
     let mut capabilities = snapshot_capabilities("head", &current);
+    let imported_evidence = if let Some(path) = evidence_path {
+        let imported = evidence::load(path, &snapshot)?;
+        capabilities.push(Capability {
+            name: "external_evidence".into(),
+            status: if imported.attached {
+                CapabilityStatus::Complete
+            } else {
+                CapabilityStatus::Partial
+            },
+            detail: Some(imported.attachment_reason.clone()),
+        });
+        Some(imported)
+    } else {
+        None
+    };
     let mut findings = rules::current_snapshot_findings(&current.modules);
     finalize_findings(root, &mut findings)?;
 
@@ -81,6 +106,7 @@ fn analyze_internal(
                 applicable_gate_subjects: 0,
                 architecture: architecture.clone(),
                 history: None,
+                imported_evidence: imported_evidence.clone(),
                 capabilities,
                 modules: current.modules,
                 findings,
@@ -107,6 +133,7 @@ fn analyze_internal(
                 applicable_gate_subjects: 0,
                 architecture: architecture.clone(),
                 history: None,
+                imported_evidence: imported_evidence.clone(),
                 capabilities,
                 modules: current.modules,
                 findings,
@@ -133,6 +160,7 @@ fn analyze_internal(
                 applicable_gate_subjects: 0,
                 architecture: architecture.clone(),
                 history: None,
+                imported_evidence: imported_evidence.clone(),
                 capabilities,
                 modules: current.modules,
                 findings,
@@ -301,6 +329,7 @@ fn analyze_internal(
         applicable_gate_subjects: gate.applicable_subjects,
         architecture,
         history: history_summary,
+        imported_evidence,
         capabilities,
         modules: current.modules,
         findings,
