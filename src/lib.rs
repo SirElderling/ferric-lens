@@ -406,7 +406,14 @@ pub fn accept_finding_with_profile(
         ));
     }
 
-    acceptance::record(root, fingerprint, reason, &result.snapshot.content_digest)
+    let profile = profile::ProfileContext::resolve(target, features)?;
+    acceptance::record(
+        root,
+        &profile,
+        fingerprint,
+        reason,
+        &result.snapshot.content_digest,
+    )
 }
 
 fn history_candidates(
