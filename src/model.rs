@@ -92,20 +92,20 @@ impl ModuleMetrics {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CoChangeEvidence {
     pub path: String,
     pub shared_commits: usize,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HistoryEvidence {
     pub change_commits: usize,
     pub sampled_commits: usize,
     pub cochange: Vec<CoChangeEvidence>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HistorySummary {
     pub sampled_commits: usize,
     pub changed_path_records: usize,
