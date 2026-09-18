@@ -34,7 +34,6 @@ struct Metadata {
     packages: Vec<Package>,
     workspace_members: Vec<String>,
     workspace_root: String,
-    target_directory: String,
 }
 
 #[derive(Debug, Deserialize)]
