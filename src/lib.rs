@@ -4,6 +4,7 @@
 //! modules mirror the boundaries described in ARCHITECTURE.md without
 //! introducing a framework or cross-module trait hierarchy prematurely.
 
+pub mod acceptance;
 pub mod compare;
 pub mod extract;
 pub mod git;
@@ -43,6 +44,7 @@ pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResu
 
     let mut capabilities = snapshot_capabilities("head", &current);
     let mut findings = rules::current_snapshot_findings(&current.modules);
+    finalize_findings(root, &mut findings)?;
 
     let baseline_selection = match git::resolve_baseline(root, base) {
         Ok(selection) => selection,
@@ -150,13 +152,16 @@ pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResu
     gate.incomplete_reasons.dedup();
 
     findings.extend(gate.findings);
+    finalize_findings(root, &mut findings)?;
     findings.sort_by(|a, b| {
         b.gate
             .cmp(&a.gate)
             .then_with(|| (&a.rule, &a.subject).cmp(&(&b.rule, &b.subject)))
     });
 
-    let has_regression = findings.iter().any(|finding| finding.gate);
+    let has_regression = findings
+        .iter()
+        .any(|finding| finding.gate && !finding.accepted);
     let (verdict, verdict_reason) = if has_regression {
         (
             GateVerdict::Regression,
@@ -224,6 +229,33 @@ pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResu
         modules: current.modules,
         findings,
     })
+}
+
+pub fn accept_finding_with_base(
+    root: &Path,
+    base: Option<&str>,
+    fingerprint: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let result = analyze_with_base(root, base)?;
+    if !result
+        .findings
+        .iter()
+        .any(|finding| finding.fingerprint == fingerprint)
+    {
+        return Err(format!(
+            "finding fingerprint {fingerprint} is not present in the current analysis"
+        ));
+    }
+
+    acceptance::record(root, fingerprint, reason, &result.snapshot.content_digest)
+}
+
+fn finalize_findings(root: &Path, findings: &mut [model::Finding]) -> Result<(), String> {
+    acceptance::fingerprint_findings(findings);
+    let acceptances = acceptance::load(root)?;
+    acceptance::apply(findings, &acceptances);
+    Ok(())
 }
 
 fn analyze_snapshot(root: &Path) -> Result<SnapshotAnalysis, String> {
