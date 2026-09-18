@@ -6,8 +6,9 @@ use std::{
 };
 
 use serde::Deserialize;
+use syn::{Attribute, Item, ItemMod};
 
-use crate::profile::ProfileContext;
+use crate::{cfg::Truth, profile::ProfileContext};
 
 pub type WorkspaceAliases = BTreeMap<String, BTreeMap<String, String>>;
 
@@ -75,8 +76,12 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
 
     let metadata = load_metadata(&root, profile);
     let (mut sources, workspace_aliases, complete, detail) = match metadata {
-        Ok(metadata) => match inventory_from_metadata(&root, metadata) {
-            Ok((sources, aliases)) => (sources, aliases, true, None),
+        Ok(metadata) => match inventory_from_metadata(&root, metadata, profile) {
+            Ok((sources, aliases, limitations)) => {
+                let complete = limitations.is_empty();
+                let detail = summarize_limitations(&limitations);
+                (sources, aliases, complete, detail)
+            },
             Err(error) => (
                 fallback_inventory(&root)?,
                 WorkspaceAliases::new(),
@@ -174,9 +179,9 @@ fn load_metadata(root: &Path, profile: Option<&ProfileContext>) -> Result<Metada
 fn inventory_from_metadata(
     root: &Path,
     metadata: Metadata,
-) -> Result<(Vec<SourceFile>, WorkspaceAliases), String> {
+    profile: Option<&ProfileContext>,
+) -> Result<(Vec<SourceFile>, WorkspaceAliases, Vec<String>), String> {
     let metadata_root = PathBuf::from(&metadata.workspace_root);
-    let target_directory = PathBuf::from(&metadata.target_directory);
     let members: BTreeSet<&str> = metadata
         .workspace_members
         .iter()
@@ -214,7 +219,7 @@ fn inventory_from_metadata(
         }
     }
 
-    let mut crate_roots = BTreeMap::<PathBuf, String>::new();
+    let mut target_roots = Vec::<(String, PathBuf, PathBuf)>::new();
     let mut crate_package_roots = BTreeMap::<String, PathBuf>::new();
 
     for package in &packages {
@@ -237,17 +242,28 @@ fn inventory_from_metadata(
             }
 
             let source = PathBuf::from(&target.src_path);
-            if let Some(src_dir) = production_source_root(package_root, &source) {
-                let crate_name = rust_name(&target.name);
-                crate_roots
-                    .entry(src_dir)
-                    .or_insert_with(|| crate_name.clone());
-                crate_package_roots
-                    .entry(crate_name)
-                    .or_insert_with(|| package_root.to_path_buf());
+            if !source.starts_with(package_root)
+                || !source.starts_with(root)
+                || source.extension().and_then(|value| value.to_str()) != Some("rs")
+            {
+                continue;
             }
+
+            let crate_name = rust_name(&target.name);
+            target_roots.push((
+                crate_name.clone(),
+                source,
+                package_root.to_path_buf(),
+            ));
+            crate_package_roots
+                .entry(crate_name)
+                .or_insert_with(|| package_root.to_path_buf());
         }
     }
+
+    target_roots.sort_by(|left, right| {
+        (&left.0, &left.1).cmp(&(&right.0, &right.1))
+    });
 
     let mut aliases = WorkspaceAliases::new();
     for (crate_name, package_root) in &crate_package_roots {
@@ -280,22 +296,295 @@ fn inventory_from_metadata(
     }
 
     let mut sources = Vec::new();
-    for (src_root, crate_name) in crate_roots {
-        collect_rust_files(
+    let mut limitations = Vec::new();
+
+    for (crate_name, source, _package_root) in target_roots {
+        let mut visited = BTreeSet::new();
+        collect_reachable_module(
             root,
-            &src_root,
-            &target_directory,
             &crate_name,
+            &source,
+            "",
+            true,
+            profile,
+            &mut visited,
             &mut sources,
+            &mut limitations,
         )?;
     }
 
-    Ok((sources, aliases))
+    limitations.sort();
+    limitations.dedup();
+    Ok((sources, aliases, limitations))
 }
 
-fn production_source_root(package_root: &Path, target_source: &Path) -> Option<PathBuf> {
-    let src = package_root.join("src");
-    target_source.starts_with(&src).then_some(src)
+#[allow(clippy::too_many_arguments)]
+fn collect_reachable_module(
+    repo_root: &Path,
+    crate_name: &str,
+    source_path: &Path,
+    module_path: &str,
+    is_crate_root: bool,
+    profile: Option<&ProfileContext>,
+    visited: &mut BTreeSet<PathBuf>,
+    out: &mut Vec<SourceFile>,
+    limitations: &mut Vec<String>,
+) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(source_path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            limitations.push(format!(
+                "{crate_name}: module source {} is unavailable: {error}",
+                source_path.display()
+            ));
+            return Ok(());
+        }
+    };
+
+    if metadata.file_type().is_symlink() {
+        limitations.push(format!(
+            "{crate_name}: module source {} is a symlink and was not followed",
+            source_path.display()
+        ));
+        return Ok(());
+    }
+
+    if metadata.len() > 8 * 1024 * 1024 {
+        limitations.push(format!(
+            "{crate_name}: module source {} exceeds the 8 MiB source limit",
+            source_path.display()
+        ));
+        return Ok(());
+    }
+
+    let canonical = source_path
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve {}: {error}", source_path.display()))?;
+    if !canonical.starts_with(repo_root) {
+        limitations.push(format!(
+            "{crate_name}: module source {} resolves outside the repository",
+            source_path.display()
+        ));
+        return Ok(());
+    }
+
+    if !visited.insert(canonical.clone()) {
+        return Ok(());
+    }
+
+    let bytes = fs::read(&canonical)
+        .map_err(|error| format!("cannot read {}: {error}", canonical.display()))?;
+    let relative = canonical
+        .strip_prefix(repo_root)
+        .map_err(|_| format!("source escaped repository: {}", canonical.display()))?;
+    let relative_path = slash_path(relative);
+
+    out.push(SourceFile {
+        crate_name: crate_name.to_owned(),
+        module_path: module_path.to_owned(),
+        relative_path,
+        bytes: bytes.clone(),
+    });
+
+    let text = match std::str::from_utf8(&bytes) {
+        Ok(text) => text,
+        Err(error) => {
+            limitations.push(format!(
+                "{crate_name}: cannot discover child modules from {} because it is not UTF-8: {error}",
+                canonical.display()
+            ));
+            return Ok(());
+        }
+    };
+    let syntax = match syn::parse_file(text) {
+        Ok(syntax) => syntax,
+        Err(error) => {
+            limitations.push(format!(
+                "{crate_name}: cannot discover child modules from {}: {error}",
+                canonical.display()
+            ));
+            return Ok(());
+        }
+    };
+
+    let parent = canonical
+        .parent()
+        .ok_or_else(|| format!("module source has no parent: {}", canonical.display()))?;
+    let module_dir = if is_crate_root
+        || canonical.file_name().and_then(|name| name.to_str()) == Some("mod.rs")
+    {
+        parent.to_path_buf()
+    } else {
+        let stem = canonical
+            .file_stem()
+            .ok_or_else(|| format!("module source has no stem: {}", canonical.display()))?;
+        parent.join(stem)
+    };
+
+    discover_child_modules(
+        repo_root,
+        crate_name,
+        &syntax.items,
+        module_path,
+        &module_dir,
+        profile,
+        visited,
+        out,
+        limitations,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn discover_child_modules(
+    repo_root: &Path,
+    crate_name: &str,
+    items: &[Item],
+    parent_module: &str,
+    module_dir: &Path,
+    profile: Option<&ProfileContext>,
+    visited: &mut BTreeSet<PathBuf>,
+    out: &mut Vec<SourceFile>,
+    limitations: &mut Vec<String>,
+) -> Result<(), String> {
+    for item in items {
+        let Item::Mod(module) = item else {
+            continue;
+        };
+
+        if module
+            .attrs
+            .iter()
+            .any(|attr| attr.path().is_ident("cfg_attr"))
+        {
+            limitations.push(format!(
+                "{crate_name}: module {} uses cfg_attr and reachability is incomplete",
+                child_module_path(parent_module, module)
+            ));
+            continue;
+        }
+
+        match module_cfg_state(&module.attrs, profile) {
+            Truth::False => continue,
+            Truth::Unknown => {
+                limitations.push(format!(
+                    "{crate_name}: module {} has unresolved cfg reachability",
+                    child_module_path(parent_module, module)
+                ));
+                continue;
+            }
+            Truth::True => {}
+        }
+
+        if module
+            .attrs
+            .iter()
+            .any(|attr| attr.path().is_ident("path"))
+        {
+            limitations.push(format!(
+                "{crate_name}: module {} uses #[path] and reachability is incomplete",
+                child_module_path(parent_module, module)
+            ));
+            continue;
+        }
+
+        let child_path = child_module_path(parent_module, module);
+        if let Some((_, inline_items)) = &module.content {
+            let inline_dir = module_dir.join(module.ident.to_string());
+            discover_child_modules(
+                repo_root,
+                crate_name,
+                inline_items,
+                &child_path,
+                &inline_dir,
+                profile,
+                visited,
+                out,
+                limitations,
+            )?;
+            continue;
+        }
+
+        let ident = module.ident.to_string();
+        let flat = module_dir.join(format!("{ident}.rs"));
+        let nested = module_dir.join(&ident).join("mod.rs");
+        let flat_exists = flat.is_file() || flat.is_symlink();
+        let nested_exists = nested.is_file() || nested.is_symlink();
+
+        let source = match (flat_exists, nested_exists) {
+            (true, false) => flat,
+            (false, true) => nested,
+            (false, false) => {
+                limitations.push(format!(
+                    "{crate_name}: module {child_path} has no discoverable source file"
+                ));
+                continue;
+            }
+            (true, true) => {
+                limitations.push(format!(
+                    "{crate_name}: module {child_path} has ambiguous source files"
+                ));
+                continue;
+            }
+        };
+
+        collect_reachable_module(
+            repo_root,
+            crate_name,
+            &source,
+            &child_path,
+            false,
+            profile,
+            visited,
+            out,
+            limitations,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn child_module_path(parent: &str, module: &ItemMod) -> String {
+    if parent.is_empty() {
+        module.ident.to_string()
+    } else {
+        format!("{parent}::{}", module.ident)
+    }
+}
+
+fn module_cfg_state(attrs: &[Attribute], profile: Option<&ProfileContext>) -> Truth {
+    let Some(profile) = profile else {
+        return Truth::True;
+    };
+
+    let mut state = Truth::True;
+    for attr in attrs.iter().filter(|attr| attr.path().is_ident("cfg")) {
+        let Ok(meta) = attr.parse_args::<syn::Meta>() else {
+            return Truth::Unknown;
+        };
+        state = match (state, profile.cfg.evaluate(&meta)) {
+            (Truth::False, _) | (_, Truth::False) => Truth::False,
+            (Truth::Unknown, _) | (_, Truth::Unknown) => Truth::Unknown,
+            (Truth::True, Truth::True) => Truth::True,
+        };
+        if state == Truth::False {
+            break;
+        }
+    }
+    state
+}
+
+fn summarize_limitations(limitations: &[String]) -> Option<String> {
+    if limitations.is_empty() {
+        return None;
+    }
+
+    let shown = limitations.iter().take(3).cloned().collect::<Vec<_>>();
+    let suffix = if limitations.len() > shown.len() {
+        format!("; {} additional inventory limitation(s)", limitations.len() - shown.len())
+    } else {
+        String::new()
+    };
+    Some(format!("{}{}", shown.join("; "), suffix))
 }
 
 fn fallback_inventory(root: &Path) -> Result<Vec<SourceFile>, String> {
