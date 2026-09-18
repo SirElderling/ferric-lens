@@ -43,7 +43,10 @@ version = "0.1.0"
 
         git(&root, &["init", "-b", "main"]);
         git(&root, &["config", "user.name", "Ferric Lens Test"]);
-        git(&root, &["config", "user.email", "ferric-lens@example.invalid"]);
+        git(
+            &root,
+            &["config", "user.email", "ferric-lens@example.invalid"],
+        );
 
         Self { root }
     }
@@ -74,11 +77,7 @@ version = "0.1.0"
     }
 
     fn introduce_regression(&self) {
-        fs::write(
-            self.root.join("src/m0.rs"),
-            module_source(0, 18, 7),
-        )
-        .unwrap();
+        fs::write(self.root.join("src/m0.rs"), module_source(0, 18, 7)).unwrap();
         git(&self.root, &["add", "src/m0.rs"]);
         git(&self.root, &["commit", "-m", "regression"]);
     }
@@ -140,10 +139,7 @@ fn material_two_signal_growth_is_a_regression() {
 
     let result = ferric_lens::check_with_base(&fixture.root, Some("main")).unwrap();
 
-    assert_eq!(
-        result.verdict,
-        ferric_lens::model::GateVerdict::Regression
-    );
+    assert_eq!(result.verdict, ferric_lens::model::GateVerdict::Regression);
     let gate = result
         .findings
         .iter()
