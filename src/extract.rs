@@ -481,15 +481,18 @@ mod tests {
 
     #[test]
     fn counts_inline_module_decision_sites_in_containing_file() {
-        let metrics = extract(&source(
-            r#"
+        let metrics = extract(
+            &source(
+                r#"
             pub fn run(x: bool) {
                 if x && true { loop { break; } }
                 match x { true => (), _ => () }
             }
             mod child { fn hidden() { if true {} } }
             "#,
-        ), &host())
+            ),
+            &host(),
+        )
         .unwrap();
 
         assert_eq!(metrics.decision_sites, 5);
@@ -498,13 +501,16 @@ mod tests {
 
     #[test]
     fn ignores_exact_cfg_test_items_for_production_metrics() {
-        let metrics = extract(&source(
-            r#"
+        let metrics = extract(
+            &source(
+                r#"
             fn production() { if true {} }
             #[cfg(test)]
             fn only_test() { if true {} }
             "#,
-        ), &host())
+            ),
+            &host(),
+        )
         .unwrap();
 
         assert_eq!(metrics.decision_sites, 1);
@@ -550,7 +556,11 @@ mod tests {
 
     #[test]
     fn flattens_grouped_imports_deterministically() {
-        let metrics = extract(&source("use crate::model::{Thing, nested::Other};"), &host()).unwrap();
+        let metrics = extract(
+            &source("use crate::model::{Thing, nested::Other};"),
+            &host(),
+        )
+        .unwrap();
         let paths = metrics
             .explicit_imports
             .iter()
