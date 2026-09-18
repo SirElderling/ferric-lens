@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use crate::model::{AnalysisResult, GateVerdict};
+use crate::model::{AnalysisResult, Finding, GateVerdict};
 
 pub fn json(result: &AnalysisResult) -> Result<String, String> {
     serde_json::to_string_pretty(result).map_err(|error| format!("cannot serialize JSON: {error}"))
@@ -26,31 +26,22 @@ pub fn html(result: &AnalysisResult) -> String {
         capabilities.push_str("</li>");
     }
 
-    let mut findings = String::new();
-    if result.findings.is_empty() {
-        findings.push_str(
-            "<p>No advisory coupled outliers were found in eligible crate populations.</p>",
-        );
-    } else {
-        for finding in &result.findings {
-            findings.push_str("<article><h3>");
-            findings.push_str(&escape(&finding.subject));
-            findings.push_str("</h3><p>");
-            findings.push_str(&escape(&finding.summary));
-            findings.push_str("</p><ul>");
-            for evidence in &finding.evidence {
-                findings.push_str("<li>");
-                findings.push_str(&escape(&format!(
-                    "{} = {} (p90 reference {}, population {})",
-                    evidence.metric, evidence.value, evidence.reference, evidence.population
-                )));
-                findings.push_str("</li>");
-            }
-            findings.push_str("</ul><p><strong>Direction:</strong> ");
-            findings.push_str(&escape(&finding.direction));
-            findings.push_str("</p></article>");
-        }
-    }
+    let gate_findings = result
+        .findings
+        .iter()
+        .filter(|finding| finding.gate)
+        .collect::<Vec<_>>();
+    let advisory_findings = result
+        .findings
+        .iter()
+        .filter(|finding| !finding.gate)
+        .collect::<Vec<_>>();
+
+    let gate_html = render_findings(&gate_findings, "No gate regression was established.");
+    let advisory_html = render_findings(
+        &advisory_findings,
+        "No advisory coupled outliers were found in eligible crate populations.",
+    );
 
     let mut modules = String::new();
     let mut current_crate = String::new();
@@ -72,17 +63,34 @@ pub fn html(result: &AnalysisResult) -> String {
         }));
         modules.push_str("</code><span>");
         modules.push_str(&escape(&format!(
-            "{} decisions · {} local deps · {} public items · {} lines",
+            "{} decisions · {} local deps · {} public items · {} lines{}",
             module.decision_sites,
             module.local_dependency_modules.len(),
             module.public_items,
-            module.lines
+            module.lines,
+            if module.gate_complete {
+                ""
+            } else {
+                " · gate evidence incomplete"
+            }
         )));
         modules.push_str("</span></div>");
     }
     if !current_crate.is_empty() {
         modules.push_str("</div></details>");
     }
+
+    let baseline = result.baseline.as_ref().map_or_else(
+        || "<p>No comparable baseline was available.</p>".to_owned(),
+        |baseline| {
+            format!(
+                "<p><strong>Target:</strong> <code>{}</code><br><strong>Merge base:</strong> <code>{}</code><br>{} baseline source files</p>",
+                escape(&baseline.target_ref),
+                escape(&baseline.merge_base),
+                baseline.source_files
+            )
+        },
+    );
 
     format!(
         r#"<!doctype html>
@@ -98,6 +106,7 @@ header {{ border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transpar
 .verdict {{ font-size: 1.5rem; font-weight: 700; }}
 .grid {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap: 1rem; }}
 .card, article, details {{ border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: .6rem; padding: 1rem; margin: .8rem 0; }}
+article.gate {{ border-width: 2px; }}
 summary {{ cursor: pointer; }}
 .module {{ display: flex; justify-content: space-between; gap: 1rem; padding: .35rem 0; border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent); }}
 .module span {{ text-align: right; opacity: .8; }}
@@ -107,16 +116,68 @@ code {{ overflow-wrap: anywhere; }}
 <body>
 <header><h1>Ferric Lens</h1><p class="verdict">{verdict}</p><p>{reason}</p></header>
 <section class="grid">
-<div class="card"><h2>Snapshot</h2><p><strong>Digest</strong><br><code>{digest}</code></p><p>{source_files} source files</p></div>
+<div class="card"><h2>Snapshot</h2><p><strong>Digest</strong><br><code>{digest}</code></p><p>{source_files} source files<br>{applicable} applicable gate subjects</p></div>
+<div class="card"><h2>Baseline</h2>{baseline}</div>
 <div class="card"><h2>Coverage</h2><ul>{capabilities}</ul></div>
 </section>
-<section><h2>Advisory findings</h2>{findings}</section>
+<section><h2>Gate regressions</h2>{gate_html}</section>
+<section><h2>Advisory findings</h2>{advisory_html}</section>
 <section><h2>Codebase map</h2>{modules}</section>
 </body></html>"#,
         reason = escape(&result.verdict_reason),
         digest = escape(&result.snapshot.content_digest),
         source_files = result.snapshot.source_files,
+        applicable = result.applicable_gate_subjects,
     )
+}
+
+fn render_findings(findings: &[&Finding], empty: &str) -> String {
+    if findings.is_empty() {
+        return format!("<p>{}</p>", escape(empty));
+    }
+
+    let mut html = String::new();
+    for finding in findings {
+        html.push_str(if finding.gate {
+            r#"<article class="gate">"#
+        } else {
+            "<article>"
+        });
+        html.push_str("<h3>");
+        html.push_str(&escape(&finding.subject));
+        html.push_str("</h3><p><strong>");
+        html.push_str(&escape(&finding.rule));
+        html.push_str("</strong> · ");
+        html.push_str(&escape(&format!("{:?}", finding.delta).to_lowercase()));
+        html.push_str("</p><p>");
+        html.push_str(&escape(&finding.summary));
+        html.push_str("</p><ul>");
+        for evidence in &finding.evidence {
+            html.push_str("<li>");
+            let baseline = evidence
+                .baseline
+                .map(|value| format!(", baseline {value}"))
+                .unwrap_or_default();
+            let material = evidence
+                .material_delta
+                .map(|value| format!(", required growth {value}"))
+                .unwrap_or_default();
+            html.push_str(&escape(&format!(
+                "{} = {} (p90 {}, population {}{}{})",
+                evidence.metric,
+                evidence.value,
+                evidence.reference,
+                evidence.population,
+                baseline,
+                material
+            )));
+            html.push_str("</li>");
+        }
+        html.push_str("</ul><p><strong>Direction:</strong> ");
+        html.push_str(&escape(&finding.direction));
+        html.push_str("</p></article>");
+    }
+    html
 }
 
 pub fn write(path: &Path, contents: &str) -> Result<(), String> {
