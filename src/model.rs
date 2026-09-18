@@ -25,6 +25,15 @@ pub struct Capability {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AnalysisProfile {
+    pub id: String,
+    pub target: String,
+    pub resolved_target: String,
+    pub features: Vec<String>,
+    pub target_cfg: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Snapshot {
     pub content_digest: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -170,6 +179,7 @@ pub struct Finding {
     pub rule: String,
     pub subject: String,
     pub identity: String,
+    pub configuration: String,
     pub evidence_class: EvidenceClass,
     pub priority: Priority,
     pub delta: DeltaStatus,
@@ -210,6 +220,7 @@ pub struct AnalysisResult {
     pub schema_version: u32,
     pub tool_version: String,
     pub snapshot: Snapshot,
+    pub profile: AnalysisProfile,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub baseline: Option<BaselineContext>,
     pub verdict: GateVerdict,
