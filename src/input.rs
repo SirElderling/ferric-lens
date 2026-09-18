@@ -7,6 +7,8 @@ use std::{
 
 use serde::Deserialize;
 
+pub type WorkspaceAliases = BTreeMap<String, BTreeMap<String, String>>;
+
 #[derive(Debug, Clone)]
 pub struct SourceFile {
     pub crate_name: String,
@@ -18,6 +20,7 @@ pub struct SourceFile {
 #[derive(Debug)]
 pub struct Inventory {
     pub sources: Vec<SourceFile>,
+    pub workspace_aliases: WorkspaceAliases,
     pub content_digest: String,
     pub metadata_complete: bool,
     pub metadata_detail: Option<String>,
@@ -37,12 +40,22 @@ struct Package {
     id: String,
     manifest_path: String,
     targets: Vec<Target>,
+    #[serde(default)]
+    dependencies: Vec<Dependency>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Target {
+    name: String,
     kind: Vec<String>,
     src_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Dependency {
+    name: String,
+    rename: Option<String>,
+    path: Option<String>,
 }
 
 pub fn inventory(root: &Path) -> Result<Inventory, String> {
@@ -51,35 +64,63 @@ pub fn inventory(root: &Path) -> Result<Inventory, String> {
         .map_err(|error| format!("cannot resolve {}: {error}", root.display()))?;
 
     let metadata = load_metadata(&root);
-    let (mut sources, complete, detail) = match metadata {
+    let (mut sources, workspace_aliases, complete, detail) = match metadata {
         Ok(metadata) => match inventory_from_metadata(&root, metadata) {
-            Ok(sources) => (sources, true, None),
+            Ok((sources, aliases)) => (sources, aliases, true, None),
             Err(error) => (
                 fallback_inventory(&root)?,
+                WorkspaceAliases::new(),
                 false,
                 Some(format!("Cargo metadata inventory failed: {error}")),
             ),
         },
         Err(error) => (
             fallback_inventory(&root)?,
+            WorkspaceAliases::new(),
             false,
             Some(format!("Cargo metadata unavailable: {error}")),
         ),
     };
 
-    sources.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
-    sources.dedup_by(|a, b| a.relative_path == b.relative_path);
+    sources.sort_by(|a, b| {
+        (&a.crate_name, &a.module_path, &a.relative_path).cmp(&(
+            &b.crate_name,
+            &b.module_path,
+            &b.relative_path,
+        ))
+    });
+    sources.dedup_by(|a, b| {
+        a.crate_name == b.crate_name
+            && a.module_path == b.module_path
+            && a.relative_path == b.relative_path
+    });
 
     let mut hasher = blake3::Hasher::new();
     for source in &sources {
+        hasher.update(source.crate_name.as_bytes());
+        hasher.update(&[0]);
+        hasher.update(source.module_path.as_bytes());
+        hasher.update(&[0]);
         hasher.update(source.relative_path.as_bytes());
         hasher.update(&[0]);
         hasher.update(&source.bytes);
         hasher.update(&[0xff]);
     }
 
+    for (crate_name, aliases) in &workspace_aliases {
+        hasher.update(crate_name.as_bytes());
+        hasher.update(&[0xfe]);
+        for (alias, target) in aliases {
+            hasher.update(alias.as_bytes());
+            hasher.update(&[0]);
+            hasher.update(target.as_bytes());
+            hasher.update(&[0xfd]);
+        }
+    }
+
     Ok(Inventory {
         sources,
+        workspace_aliases,
         content_digest: hasher.finalize().to_hex().to_string(),
         metadata_complete: complete,
         metadata_detail: detail,
@@ -108,7 +149,10 @@ fn load_metadata(root: &Path) -> Result<Metadata, String> {
         .map_err(|error| format!("invalid cargo metadata JSON: {error}"))
 }
 
-fn inventory_from_metadata(root: &Path, metadata: Metadata) -> Result<Vec<SourceFile>, String> {
+fn inventory_from_metadata(
+    root: &Path,
+    metadata: Metadata,
+) -> Result<(Vec<SourceFile>, WorkspaceAliases), String> {
     let metadata_root = PathBuf::from(&metadata.workspace_root);
     let target_directory = PathBuf::from(&metadata.target_directory);
     let members: BTreeSet<&str> = metadata
@@ -116,37 +160,104 @@ fn inventory_from_metadata(root: &Path, metadata: Metadata) -> Result<Vec<Source
         .iter()
         .map(String::as_str)
         .collect();
-    let mut crate_roots = BTreeMap::<PathBuf, String>::new();
 
-    for package in metadata
+    let packages = metadata
         .packages
         .into_iter()
         .filter(|package| members.contains(package.id.as_str()))
-    {
+        .collect::<Vec<_>>();
+
+    let mut package_roots = BTreeMap::<PathBuf, String>::new();
+    let mut package_library_crates = BTreeMap::<PathBuf, String>::new();
+
+    for package in &packages {
         let manifest = PathBuf::from(&package.manifest_path);
         let package_root = manifest
             .parent()
-            .ok_or_else(|| format!("manifest has no parent directory: {}", manifest.display()))?;
+            .ok_or_else(|| format!("manifest has no parent directory: {}", manifest.display()))?
+            .to_path_buf();
 
         if !package_root.starts_with(&metadata_root) || !package_root.starts_with(root) {
             continue;
         }
 
-        for target in package.targets {
+        package_roots.insert(package_root.clone(), package.name.clone());
+        if let Some(target) = package.targets.iter().find(|target| {
+            target
+                .kind
+                .iter()
+                .any(|kind| kind == "lib" || kind == "rlib")
+        }) {
+            package_library_crates.insert(package_root, rust_name(&target.name));
+        }
+    }
+
+    let mut crate_roots = BTreeMap::<PathBuf, String>::new();
+    let mut crate_package_roots = BTreeMap::<String, PathBuf>::new();
+
+    for package in &packages {
+        let manifest = PathBuf::from(&package.manifest_path);
+        let package_root = manifest
+            .parent()
+            .ok_or_else(|| format!("manifest has no parent directory: {}", manifest.display()))?;
+
+        if !package_roots.contains_key(package_root) {
+            continue;
+        }
+
+        for target in &package.targets {
             if !target
                 .kind
                 .iter()
-                .any(|kind| kind == "lib" || kind == "bin")
+                .any(|kind| kind == "lib" || kind == "rlib" || kind == "bin")
             {
                 continue;
             }
-            let source = PathBuf::from(target.src_path);
+
+            let source = PathBuf::from(&target.src_path);
             if let Some(src_dir) = production_source_root(package_root, &source) {
+                let crate_name = rust_name(&target.name);
                 crate_roots
                     .entry(src_dir)
-                    .or_insert_with(|| package.name.clone());
+                    .or_insert_with(|| crate_name.clone());
+                crate_package_roots
+                    .entry(crate_name)
+                    .or_insert_with(|| package_root.to_path_buf());
             }
         }
+    }
+
+    let mut aliases = WorkspaceAliases::new();
+    for (crate_name, package_root) in &crate_package_roots {
+        let Some(package) = packages.iter().find(|package| {
+            Path::new(&package.manifest_path).parent() == Some(package_root.as_path())
+        }) else {
+            continue;
+        };
+
+        let mut crate_aliases = BTreeMap::new();
+        for dependency in &package.dependencies {
+            let Some(path) = &dependency.path else {
+                continue;
+            };
+            let dependency_root = PathBuf::from(path);
+            let Some(target_crate) = package_library_crates.get(&dependency_root) else {
+                continue;
+            };
+            let alias = dependency
+                .rename
+                .as_deref()
+                .unwrap_or(&dependency.name);
+            crate_aliases.insert(rust_name(alias), target_crate.clone());
+        }
+
+        if let Some(library_crate) = package_library_crates.get(package_root) {
+            if library_crate != crate_name {
+                crate_aliases.insert(library_crate.clone(), library_crate.clone());
+            }
+        }
+
+        aliases.insert(crate_name.clone(), crate_aliases);
     }
 
     let mut sources = Vec::new();
@@ -159,7 +270,8 @@ fn inventory_from_metadata(root: &Path, metadata: Metadata) -> Result<Vec<Source
             &mut sources,
         )?;
     }
-    Ok(sources)
+
+    Ok((sources, aliases))
 }
 
 fn production_source_root(package_root: &Path, target_source: &Path) -> Option<PathBuf> {
@@ -239,6 +351,10 @@ fn collect_rust_files(
     Ok(())
 }
 
+fn rust_name(value: &str) -> String {
+    value.replace('-', "_")
+}
+
 fn slash_path(path: &Path) -> String {
     path.components()
         .map(|component| component.as_os_str().to_string_lossy())
@@ -264,7 +380,7 @@ fn module_path_from_relative(relative: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::module_path_from_relative;
+    use super::{module_path_from_relative, rust_name};
 
     #[test]
     fn derives_module_paths_from_common_layouts() {
@@ -273,5 +389,11 @@ mod tests {
         assert_eq!(module_path_from_relative("src/foo/mod.rs"), "foo");
         assert_eq!(module_path_from_relative("src/foo/bar.rs"), "foo::bar");
         assert_eq!(module_path_from_relative("crates/a/src/x.rs"), "x");
+    }
+
+    #[test]
+    fn normalizes_cargo_names_for_rust_imports() {
+        assert_eq!(rust_name("jeko-core"), "jeko_core");
+        assert_eq!(rust_name("custom_name"), "custom_name");
     }
 }
