@@ -5,6 +5,7 @@
 //! introducing a framework or cross-module trait hierarchy prematurely.
 
 pub mod acceptance;
+pub mod architecture;
 pub mod cache;
 pub mod compare;
 pub mod extract;
@@ -48,6 +49,7 @@ fn analyze_internal(
     include_history: bool,
 ) -> Result<AnalysisResult, String> {
     let mut current = analyze_snapshot(root, root)?;
+    let architecture = architecture::summarize(&current.modules);
     let git_state = git::inspect(root);
     let snapshot = Snapshot {
         content_digest: current.content_digest.clone(),
@@ -77,6 +79,7 @@ fn analyze_internal(
                 verdict: GateVerdict::Inconclusive,
                 verdict_reason: format!("baseline comparison unavailable: {error}"),
                 applicable_gate_subjects: 0,
+                architecture: architecture.clone(),
                 history: None,
                 capabilities,
                 modules: current.modules,
@@ -102,6 +105,7 @@ fn analyze_internal(
                 verdict: GateVerdict::Inconclusive,
                 verdict_reason: format!("baseline materialization unavailable: {error}"),
                 applicable_gate_subjects: 0,
+                architecture: architecture.clone(),
                 history: None,
                 capabilities,
                 modules: current.modules,
@@ -127,6 +131,7 @@ fn analyze_internal(
                 verdict: GateVerdict::Inconclusive,
                 verdict_reason: format!("baseline analysis failed: {error}"),
                 applicable_gate_subjects: 0,
+                architecture: architecture.clone(),
                 history: None,
                 capabilities,
                 modules: current.modules,
@@ -294,6 +299,7 @@ fn analyze_internal(
         verdict,
         verdict_reason,
         applicable_gate_subjects: gate.applicable_subjects,
+        architecture,
         history: history_summary,
         capabilities,
         modules: current.modules,
