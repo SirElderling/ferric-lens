@@ -75,10 +75,47 @@ pub fn html(result: &AnalysisResult) -> String {
             }
         )));
         modules.push_str("</span></div>");
+        if let Some(history) = &module.history {
+            modules.push_str(r#"<div class="history"><small>"#);
+            modules.push_str(&escape(&format!(
+                "history: changed in {} of {} sampled non-merge commits",
+                history.change_commits, history.sampled_commits
+            )));
+            if !history.cochange.is_empty() {
+                modules.push_str(" · co-change: ");
+                for (index, related) in history.cochange.iter().enumerate() {
+                    if index > 0 {
+                        modules.push_str(", ");
+                    }
+                    modules.push_str("<code>");
+                    modules.push_str(&escape(&related.path));
+                    modules.push_str("</code> ");
+                    modules.push_str(&escape(&format!("({})", related.shared_commits)));
+                }
+            }
+            modules.push_str("</small></div>");
+        }
     }
     if !current_crate.is_empty() {
         modules.push_str("</div></details>");
     }
+
+    let history_summary = result.history.as_ref().map_or_else(
+        || "<p>Not collected for this analysis mode.</p>".to_owned(),
+        |history| {
+            format!(
+                "<p>{} sampled non-merge commits<br>{} changed-path records<br>{} broad commits excluded from co-change{}</p>",
+                history.sampled_commits,
+                history.changed_path_records,
+                history.broad_commits_excluded_from_cochange,
+                if history.truncated {
+                    "<br><strong>Sample truncated at deterministic work limit.</strong>"
+                } else {
+                    ""
+                }
+            )
+        },
+    );
 
     let baseline = result.baseline.as_ref().map_or_else(
         || "<p>No comparable baseline was available.</p>".to_owned(),
@@ -110,6 +147,7 @@ article.gate {{ border-width: 2px; }}
 summary {{ cursor: pointer; }}
 .module {{ display: flex; justify-content: space-between; gap: 1rem; padding: .35rem 0; border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent); }}
 .module span {{ text-align: right; opacity: .8; }}
+.history {{ margin: -.15rem 0 .5rem; padding-left: .5rem; opacity: .8; }}
 code {{ overflow-wrap: anywhere; }}
 </style>
 </head>
@@ -118,6 +156,7 @@ code {{ overflow-wrap: anywhere; }}
 <section class="grid">
 <div class="card"><h2>Snapshot</h2><p><strong>Digest</strong><br><code>{digest}</code></p><p>{source_files} source files<br>{applicable} applicable gate subjects</p></div>
 <div class="card"><h2>Baseline</h2>{baseline}</div>
+<div class="card"><h2>History</h2>{history_summary}</div>
 <div class="card"><h2>Coverage</h2><ul>{capabilities}</ul></div>
 </section>
 <section><h2>Gate findings</h2>{gate_html}</section>
