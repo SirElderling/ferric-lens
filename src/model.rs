@@ -34,6 +34,15 @@ pub struct Snapshot {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BaselineContext {
+    pub target_ref: String,
+    pub target_oid: String,
+    pub merge_base: String,
+    pub source_files: usize,
+    pub content_digest: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ImportPath {
     pub segments: Vec<String>,
     pub glob: bool,
@@ -49,7 +58,9 @@ pub struct ModuleMetrics {
     pub public_items: usize,
     pub explicit_imports: Vec<ImportPath>,
     pub local_dependency_modules: Vec<String>,
+    pub structure_digest: String,
     pub parse_complete: bool,
+    pub gate_complete: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limitation: Option<String>,
 }
@@ -70,7 +81,9 @@ impl ModuleMetrics {
             public_items: 0,
             explicit_imports: Vec::new(),
             local_dependency_modules: Vec::new(),
+            structure_digest: String::new(),
             parse_complete: false,
+            gate_complete: false,
             limitation: Some(limitation),
         }
     }
@@ -87,8 +100,19 @@ pub enum EvidenceClass {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Priority {
+    ActFirst,
     Investigate,
     Observe,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeltaStatus {
+    Current,
+    New,
+    Worsened,
+    Unchanged,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -97,6 +121,10 @@ pub struct Evidence {
     pub value: usize,
     pub reference: usize,
     pub population: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub material_delta: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -105,6 +133,8 @@ pub struct Finding {
     pub subject: String,
     pub evidence_class: EvidenceClass,
     pub priority: Priority,
+    pub delta: DeltaStatus,
+    pub gate: bool,
     pub summary: String,
     pub direction: String,
     pub evidence: Vec<Evidence>,
@@ -115,8 +145,11 @@ pub struct AnalysisResult {
     pub schema_version: u32,
     pub tool_version: String,
     pub snapshot: Snapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<BaselineContext>,
     pub verdict: GateVerdict,
     pub verdict_reason: String,
+    pub applicable_gate_subjects: usize,
     pub capabilities: Vec<Capability>,
     pub modules: Vec<ModuleMetrics>,
     pub findings: Vec<Finding>,
