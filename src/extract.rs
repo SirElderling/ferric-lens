@@ -317,7 +317,10 @@ fn resolve_import(
 
     let first = segments[0].as_str();
     let looks_local = known_current.iter().any(|module| {
-        module.split("::").next().is_some_and(|segment| segment == first)
+        module
+            .split("::")
+            .next()
+            .is_some_and(|segment| segment == first)
     });
     if looks_local {
         return resolve_absolute(segments, known_current)
@@ -365,10 +368,7 @@ fn resolve_absolute(segments: &[String], known: &BTreeSet<String>) -> Option<Str
     longest_module_prefix(segments.to_vec(), known)
 }
 
-fn longest_module_prefix(
-    mut candidate: Vec<String>,
-    known: &BTreeSet<String>,
-) -> Option<String> {
+fn longest_module_prefix(mut candidate: Vec<String>, known: &BTreeSet<String>) -> Option<String> {
     loop {
         let joined = candidate.join("::");
         if known.contains(&joined) {
@@ -405,7 +405,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{extract, resolve_workspace_dependencies};
-    use crate::{input::{SourceFile, WorkspaceAliases}, model::ModuleMetrics};
+    use crate::{
+        input::{SourceFile, WorkspaceAliases},
+        model::ModuleMetrics,
+    };
 
     fn source(text: &str) -> SourceFile {
         SourceFile {
@@ -482,7 +485,12 @@ mod tests {
     #[test]
     fn resolves_local_and_workspace_module_imports() {
         let mut modules = vec![
-            extracted("demo", "engine", "src/engine.rs", "use crate::model::Thing; use shared::nested::Other;"),
+            extracted(
+                "demo",
+                "engine",
+                "src/engine.rs",
+                "use crate::model::Thing; use shared::nested::Other;",
+            ),
             extracted("demo", "model", "src/model.rs", ""),
             extracted("shared", "", "crates/shared/src/lib.rs", ""),
             extracted("shared", "nested", "crates/shared/src/nested.rs", ""),
@@ -534,5 +542,4 @@ mod tests {
         };
         extract(&source).unwrap()
     }
-
 }
