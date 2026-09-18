@@ -18,6 +18,8 @@ Ferric Lens currently:
 - reports incomplete macro/cfg evidence as `inconclusive` rather than pretending the gate passed,
 - emits deterministic JSON,
 - emits one self-contained HTML/CSS report with no JavaScript,
+- supports fingerprinted, reasoned finding acceptances in a tool-managed repository file,
+- keeps accepted findings visible while excluding only exact accepted gate evidence from failure,
 - uses exit codes `0=pass`, `1=regression`, and `2=inconclusive/error`.
 
 Existing unchanged debt does not fail a branch.
@@ -46,6 +48,26 @@ cargo run -- check /path/to/rust/repository --base origin/main --json ferric-len
 `--base` is optional. Without it, Ferric Lens tries the GitHub PR target, the local remote-default branch, then local `main`. It always compares against the unique merge base, not the moving target tip.
 
 The initial blocking rule requires a baseline crate population of at least 20 production modules with complete required evidence. Smaller crates still receive descriptive/advisory output.
+
+## Accepting an intentional finding
+
+Every finding has a deterministic fingerprint. To accept one exact current condition:
+
+```bash
+cargo run -- accept <fingerprint> \
+  --reason "Intentional boundary for the current design" \
+  --base origin/main
+```
+
+Ferric Lens verifies that the fingerprint exists in a fresh local analysis, re-checks the source digest immediately before writing, and atomically updates:
+
+```text
+.ferric-lens/acceptances.toml
+```
+
+The file is intended to be reviewed and committed. Accepted findings remain visible in JSON and HTML with their reason.
+
+An acceptance does not suppress a rule broadly. Material evidence changes produce a different fingerprint, so the finding becomes active again automatically. An unambiguous pure move can preserve the stable entity identity.
 
 ## Evidence limits
 
