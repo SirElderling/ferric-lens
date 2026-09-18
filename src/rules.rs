@@ -277,6 +277,7 @@ mod tests {
             parse_complete: true,
             gate_complete: true,
             limitation: None,
+            history: None,
         }
     }
 
