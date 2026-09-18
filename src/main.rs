@@ -86,7 +86,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Check { path, base, json } => {
-            let result = ferric_lens::analyze_with_base(&path, base.as_deref())?;
+            let result = ferric_lens::check_with_base(&path, base.as_deref())?;
             if let Some(path) = json {
                 report::write(&path, &report::json(&result)?)?;
             }
