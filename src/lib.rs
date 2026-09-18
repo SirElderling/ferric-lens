@@ -15,6 +15,7 @@ pub mod git;
 pub mod history;
 pub mod input;
 pub mod model;
+pub mod profile;
 pub mod report;
 pub mod rules;
 
@@ -34,11 +35,11 @@ struct SnapshotAnalysis {
 }
 
 pub fn analyze(root: &Path) -> Result<AnalysisResult, String> {
-    analyze_internal(root, None, true, None)
+    analyze_internal(root, None, true, None, None, &[])
 }
 
 pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResult, String> {
-    analyze_internal(root, base, true, None)
+    analyze_internal(root, base, true, None, None, &[])
 }
 
 pub fn analyze_with_base_and_evidence(
@@ -46,11 +47,30 @@ pub fn analyze_with_base_and_evidence(
     base: Option<&str>,
     evidence_path: Option<&Path>,
 ) -> Result<AnalysisResult, String> {
-    analyze_internal(root, base, true, evidence_path)
+    analyze_internal(root, base, true, evidence_path, None, &[])
+}
+
+pub fn analyze_with_profile(
+    root: &Path,
+    base: Option<&str>,
+    target: Option<&str>,
+    features: &[String],
+    evidence_path: Option<&Path>,
+) -> Result<AnalysisResult, String> {
+    analyze_internal(root, base, true, evidence_path, target, features)
 }
 
 pub fn check_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResult, String> {
-    analyze_internal(root, base, false, None)
+    analyze_internal(root, base, false, None, None, &[])
+}
+
+pub fn check_with_profile(
+    root: &Path,
+    base: Option<&str>,
+    target: Option<&str>,
+    features: &[String],
+) -> Result<AnalysisResult, String> {
+    analyze_internal(root, base, false, None, target, features)
 }
 
 fn analyze_internal(
@@ -58,12 +78,11 @@ fn analyze_internal(
     base: Option<&str>,
     include_history: bool,
     evidence_path: Option<&Path>,
+    target: Option<&str>,
+    features: &[String],
 ) -> Result<AnalysisResult, String> {
-    let (host_cfg, cfg_detail) = match cfg::HostCfg::detect() {
-        Ok(cfg) => (cfg, None),
-        Err(error) => (cfg::HostCfg::unavailable(), Some(error)),
-    };
-    let mut current = analyze_snapshot(root, root, &host_cfg)?;
+    let profile = profile::ProfileContext::resolve(target, features)?;
+    let mut current = analyze_snapshot(root, root, &profile)?;
     let architecture = architecture::summarize(&current.modules);
     let git_state = git::inspect(root);
     let snapshot = Snapshot {
@@ -75,16 +94,21 @@ fn analyze_internal(
 
     let mut capabilities = snapshot_capabilities("head", &current);
     capabilities.push(Capability {
-        name: "host_cfg".into(),
-        status: if cfg_detail.is_none() {
-            CapabilityStatus::Complete
-        } else {
-            CapabilityStatus::Unavailable
-        },
-        detail: cfg_detail,
+        name: "analysis_profile".into(),
+        status: CapabilityStatus::Complete,
+        detail: Some(format!(
+            "{} resolved as {}; explicit features: {}",
+            profile.public.target,
+            profile.public.resolved_target,
+            if profile.public.features.is_empty() {
+                "none".to_owned()
+            } else {
+                profile.public.features.join(",")
+            }
+        )),
     });
     let imported_evidence = if let Some(path) = evidence_path {
-        let imported = evidence::load(path, &snapshot)?;
+        let imported = evidence::load(path, &snapshot, &profile.public)?;
         capabilities.push(Capability {
             name: "external_evidence".into(),
             status: if imported.attached {
@@ -99,7 +123,7 @@ fn analyze_internal(
         None
     };
     let mut findings = rules::current_snapshot_findings(&current.modules);
-    finalize_findings(root, &mut findings)?;
+    finalize_findings(root, &profile.public.id, &mut findings)?;
 
     let baseline_selection = match git::resolve_baseline(root, base) {
         Ok(selection) => selection,
@@ -114,6 +138,7 @@ fn analyze_internal(
                 schema_version: 1,
                 tool_version: env!("CARGO_PKG_VERSION").into(),
                 snapshot,
+                profile: profile.public.clone(),
                 baseline: None,
                 verdict: GateVerdict::Inconclusive,
                 verdict_reason: format!("baseline comparison unavailable: {error}"),
@@ -141,6 +166,7 @@ fn analyze_internal(
                 schema_version: 1,
                 tool_version: env!("CARGO_PKG_VERSION").into(),
                 snapshot,
+                profile: profile.public.clone(),
                 baseline: None,
                 verdict: GateVerdict::Inconclusive,
                 verdict_reason: format!("baseline materialization unavailable: {error}"),
@@ -155,7 +181,7 @@ fn analyze_internal(
         }
     };
 
-    let baseline_snapshot = match analyze_snapshot(baseline_worktree.path(), root, &host_cfg) {
+    let baseline_snapshot = match analyze_snapshot(baseline_worktree.path(), root, &profile) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             capabilities.push(Capability {
@@ -168,6 +194,7 @@ fn analyze_internal(
                 schema_version: 1,
                 tool_version: env!("CARGO_PKG_VERSION").into(),
                 snapshot,
+                profile: profile.public.clone(),
                 baseline: None,
                 verdict: GateVerdict::Inconclusive,
                 verdict_reason: format!("baseline analysis failed: {error}"),
@@ -222,7 +249,7 @@ fn analyze_internal(
     gate.incomplete_reasons.dedup();
 
     findings.extend(gate.findings);
-    finalize_findings(root, &mut findings)?;
+    finalize_findings(root, &profile.public.id, &mut findings)?;
     findings.sort_by(|a, b| {
         b.gate
             .cmp(&a.gate)
@@ -331,6 +358,7 @@ fn analyze_internal(
         schema_version: 1,
         tool_version: env!("CARGO_PKG_VERSION").into(),
         snapshot,
+        profile: profile.public.clone(),
         baseline: Some(BaselineContext {
             target_ref: baseline_selection.target_ref,
             target_oid: baseline_selection.target_oid,
@@ -356,7 +384,18 @@ pub fn accept_finding_with_base(
     fingerprint: &str,
     reason: &str,
 ) -> Result<(), String> {
-    let result = check_with_base(root, base)?;
+    accept_finding_with_profile(root, base, None, &[], fingerprint, reason)
+}
+
+pub fn accept_finding_with_profile(
+    root: &Path,
+    base: Option<&str>,
+    target: Option<&str>,
+    features: &[String],
+    fingerprint: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let result = check_with_profile(root, base, target, features)?;
     if !result
         .findings
         .iter()
@@ -434,7 +473,14 @@ fn display_subject(crate_name: &str, module_path: &str) -> String {
     }
 }
 
-fn finalize_findings(root: &Path, findings: &mut [model::Finding]) -> Result<(), String> {
+fn finalize_findings(
+    root: &Path,
+    profile_id: &str,
+    findings: &mut [model::Finding],
+) -> Result<(), String> {
+    for finding in findings.iter_mut() {
+        finding.configuration = profile_id.to_owned();
+    }
     acceptance::fingerprint_findings(findings);
     let acceptances = acceptance::load(root)?;
     acceptance::apply(findings, &acceptances);
@@ -444,22 +490,22 @@ fn finalize_findings(root: &Path, findings: &mut [model::Finding]) -> Result<(),
 fn analyze_snapshot(
     root: &Path,
     cache_root: &Path,
-    host_cfg: &cfg::HostCfg,
+    profile: &profile::ProfileContext,
 ) -> Result<SnapshotAnalysis, String> {
-    let inventory = input::inventory(root)?;
+    let inventory = input::inventory_with_profile(root, profile)?;
     let fact_cache = cache::RawFactCache::new(cache_root);
     let mut modules = Vec::with_capacity(inventory.sources.len());
     let mut parse_failures = 0usize;
 
     for source in &inventory.sources {
-        if let Some(module) = fact_cache.load(source, host_cfg.digest()) {
+        if let Some(module) = fact_cache.load(source, profile.cfg.digest()) {
             modules.push(module);
             continue;
         }
 
-        match extract::extract(source, host_cfg) {
+        match extract::extract(source, &profile.cfg) {
             Ok(module) => {
-                fact_cache.store(source, host_cfg.digest(), &module);
+                fact_cache.store(source, profile.cfg.digest(), &module);
                 modules.push(module);
             }
             Err(error) => {
