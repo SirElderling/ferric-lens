@@ -42,6 +42,7 @@ pub fn extract(source: &SourceFile) -> Result<ModuleMetrics, String> {
         parse_complete: true,
         gate_complete: visitor.gate_limitation.is_none(),
         limitation: visitor.gate_limitation,
+        history: None,
     })
 }
 
