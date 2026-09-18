@@ -466,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn counts_documented_decision_sites_without_child_module_body() {
+    fn counts_inline_module_decision_sites_in_containing_file() {
         let metrics = extract(&source(
             r#"
             pub fn run(x: bool) {
@@ -478,7 +478,7 @@ mod tests {
         ), &host())
         .unwrap();
 
-        assert_eq!(metrics.decision_sites, 4);
+        assert_eq!(metrics.decision_sites, 5);
         assert_eq!(metrics.public_items, 1);
     }
 
