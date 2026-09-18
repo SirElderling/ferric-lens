@@ -8,7 +8,7 @@ use syn::{
 };
 
 use crate::{
-    input::SourceFile,
+    input::{SourceFile, WorkspaceAliases},
     model::{ImportPath, ModuleMetrics},
 };
 
@@ -216,7 +216,10 @@ fn flatten_use_tree(tree: &UseTree, prefix: &mut Vec<String>, out: &mut Vec<Impo
     }
 }
 
-pub fn resolve_local_dependencies(modules: &mut [ModuleMetrics]) {
+pub fn resolve_workspace_dependencies(
+    modules: &mut [ModuleMetrics],
+    workspace_aliases: &WorkspaceAliases,
+) {
     let mut by_crate = BTreeMap::<String, BTreeSet<String>>::new();
     for module in modules.iter().filter(|module| module.parse_complete) {
         by_crate
@@ -226,37 +229,123 @@ pub fn resolve_local_dependencies(modules: &mut [ModuleMetrics]) {
     }
 
     for module in modules.iter_mut().filter(|module| module.parse_complete) {
-        let Some(known) = by_crate.get(&module.crate_name) else {
+        let current_crate = module.crate_name.clone();
+        let current_module = module.module_path.clone();
+        let Some(known_current) = by_crate.get(&current_crate) else {
             continue;
         };
+
+        let aliases = workspace_aliases.get(&current_crate);
         let mut dependencies = BTreeSet::new();
+        let mut unresolved_repository_import = false;
+
         for import in &module.explicit_imports {
-            if let Some(target) = resolve_import(&module.module_path, &import.segments, known) {
-                if target != module.module_path {
-                    dependencies.insert(target);
+            match resolve_import(
+                &current_crate,
+                &current_module,
+                &import.segments,
+                &by_crate,
+                aliases,
+            ) {
+                ImportResolution::Repository(target) => {
+                    let current_subject = qualify(&current_crate, &current_module);
+                    if target != current_subject {
+                        dependencies.insert(target);
+                    }
                 }
+                ImportResolution::UnresolvedRepository => {
+                    unresolved_repository_import = true;
+                }
+                ImportResolution::External => {}
             }
         }
+
+        if unresolved_repository_import {
+            module.gate_complete = false;
+            append_limitation(
+                module,
+                "one or more repository-owned explicit imports could not be resolved",
+            );
+        }
+
+        // Keep the historical field name in the v1 JSON schema. Its values are
+        // repository-qualified modules, including cross-crate dependencies.
         module.local_dependency_modules = dependencies.into_iter().collect();
+
+        debug_assert!(known_current.contains(&current_module));
     }
 }
 
-fn resolve_import(current: &str, segments: &[String], known: &BTreeSet<String>) -> Option<String> {
+enum ImportResolution {
+    Repository(String),
+    External,
+    UnresolvedRepository,
+}
+
+fn resolve_import(
+    current_crate: &str,
+    current_module: &str,
+    segments: &[String],
+    known_by_crate: &BTreeMap<String, BTreeSet<String>>,
+    aliases: Option<&BTreeMap<String, String>>,
+) -> ImportResolution {
     if segments.is_empty() {
-        return None;
+        return ImportResolution::External;
     }
 
-    let mut base: Vec<&str> = current
+    let Some(known_current) = known_by_crate.get(current_crate) else {
+        return ImportResolution::UnresolvedRepository;
+    };
+
+    match segments[0].as_str() {
+        "crate" | "self" | "super" => {
+            return resolve_in_crate(current_module, segments, known_current)
+                .map(|module| ImportResolution::Repository(qualify(current_crate, &module)))
+                .unwrap_or(ImportResolution::UnresolvedRepository);
+        }
+        _ => {}
+    }
+
+    if let Some(target_crate) = aliases.and_then(|aliases| aliases.get(&segments[0])) {
+        let Some(known_target) = known_by_crate.get(target_crate) else {
+            return ImportResolution::UnresolvedRepository;
+        };
+        return resolve_absolute(&segments[1..], known_target)
+            .map(|module| ImportResolution::Repository(qualify(target_crate, &module)))
+            .unwrap_or(ImportResolution::UnresolvedRepository);
+    }
+
+    let first = segments[0].as_str();
+    let looks_local = known_current.iter().any(|module| {
+        module.split("::").next().is_some_and(|segment| segment == first)
+    });
+    if looks_local {
+        return resolve_absolute(segments, known_current)
+            .map(|module| ImportResolution::Repository(qualify(current_crate, &module)))
+            .unwrap_or(ImportResolution::UnresolvedRepository);
+    }
+
+    ImportResolution::External
+}
+
+fn resolve_in_crate(
+    current: &str,
+    segments: &[String],
+    known: &BTreeSet<String>,
+) -> Option<String> {
+    let mut base = current
         .split("::")
         .filter(|segment| !segment.is_empty())
-        .collect();
-    let index = match segments[0].as_str() {
-        "crate" => {
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+    let index = match segments.first().map(String::as_str) {
+        Some("crate") => {
             base.clear();
             1
         }
-        "self" => 1,
-        "super" => {
+        Some("self") => 1,
+        Some("super") => {
             base.pop();
             let mut index = 1;
             while segments.get(index).map(String::as_str) == Some("super") {
@@ -265,32 +354,58 @@ fn resolve_import(current: &str, segments: &[String], known: &BTreeSet<String>) 
             }
             index
         }
-        _ => {
-            base.clear();
-            0
-        }
+        _ => return None,
     };
 
-    let mut candidate = base.into_iter().map(str::to_owned).collect::<Vec<_>>();
-    candidate.extend(segments[index..].iter().cloned());
+    base.extend(segments[index..].iter().cloned());
+    longest_module_prefix(base, known)
+}
 
-    while !candidate.is_empty() {
+fn resolve_absolute(segments: &[String], known: &BTreeSet<String>) -> Option<String> {
+    longest_module_prefix(segments.to_vec(), known)
+}
+
+fn longest_module_prefix(
+    mut candidate: Vec<String>,
+    known: &BTreeSet<String>,
+) -> Option<String> {
+    loop {
         let joined = candidate.join("::");
         if known.contains(&joined) {
             return Some(joined);
         }
+        if candidate.is_empty() {
+            return None;
+        }
         candidate.pop();
     }
+}
 
-    None
+fn qualify(crate_name: &str, module_path: &str) -> String {
+    if module_path.is_empty() {
+        crate_name.to_owned()
+    } else {
+        format!("{crate_name}::{module_path}")
+    }
+}
+
+fn append_limitation(module: &mut ModuleMetrics, reason: &str) {
+    match &mut module.limitation {
+        Some(existing) if !existing.contains(reason) => {
+            existing.push_str("; ");
+            existing.push_str(reason);
+        }
+        Some(_) => {}
+        None => module.limitation = Some(reason.to_owned()),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::BTreeMap;
 
-    use super::{extract, resolve_import};
-    use crate::input::SourceFile;
+    use super::{extract, resolve_workspace_dependencies};
+    use crate::{input::{SourceFile, WorkspaceAliases}, model::ModuleMetrics};
 
     fn source(text: &str) -> SourceFile {
         SourceFile {
@@ -365,28 +480,59 @@ mod tests {
     }
 
     #[test]
-    fn resolves_longest_known_local_module_prefix() {
-        let known = BTreeSet::from([
-            "engine".to_string(),
-            "model".to_string(),
-            "model::nested".to_string(),
-        ]);
+    fn resolves_local_and_workspace_module_imports() {
+        let mut modules = vec![
+            extracted("demo", "engine", "src/engine.rs", "use crate::model::Thing; use shared::nested::Other;"),
+            extracted("demo", "model", "src/model.rs", ""),
+            extracted("shared", "", "crates/shared/src/lib.rs", ""),
+            extracted("shared", "nested", "crates/shared/src/nested.rs", ""),
+        ];
+        let aliases = WorkspaceAliases::from([(
+            "demo".into(),
+            BTreeMap::from([("shared".into(), "shared".into())]),
+        )]);
+
+        resolve_workspace_dependencies(&mut modules, &aliases);
+
         assert_eq!(
-            resolve_import(
-                "engine",
-                &[
-                    "crate".into(),
-                    "model".into(),
-                    "nested".into(),
-                    "Thing".into()
-                ],
-                &known
-            ),
-            Some("model::nested".into())
+            modules[0].local_dependency_modules,
+            vec!["demo::model", "shared::nested"]
         );
-        assert_eq!(
-            resolve_import("engine", &["model".into(), "Thing".into()], &known),
-            Some("model".into())
-        );
+        assert!(modules[0].gate_complete);
     }
+
+    #[test]
+    fn unresolved_workspace_import_makes_gate_evidence_incomplete() {
+        let mut modules = vec![extracted(
+            "demo",
+            "engine",
+            "src/engine.rs",
+            "use shared::missing::Thing;",
+        )];
+        let aliases = WorkspaceAliases::from([(
+            "demo".into(),
+            BTreeMap::from([("shared".into(), "shared".into())]),
+        )]);
+
+        resolve_workspace_dependencies(&mut modules, &aliases);
+
+        assert!(!modules[0].gate_complete);
+        assert!(modules[0].local_dependency_modules.is_empty());
+    }
+
+    fn extracted(
+        crate_name: &str,
+        module_path: &str,
+        relative_path: &str,
+        text: &str,
+    ) -> ModuleMetrics {
+        let source = SourceFile {
+            crate_name: crate_name.into(),
+            module_path: module_path.into(),
+            relative_path: relative_path.into(),
+            bytes: text.as_bytes().to_vec(),
+        };
+        extract(&source).unwrap()
+    }
+
 }
