@@ -409,7 +409,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_history, ChangeSet};
+    use std::path::Path;
+
+    use super::{parse_history, sample_history, ChangeSet};
 
     #[test]
     fn change_set_defaults_empty() {
@@ -427,7 +429,7 @@ mod tests {
         let bytes = [
             b"\0\0".as_slice(),
             first.as_bytes(),
-            b"\0src/a.rs\0src/b.rs\0\0".as_slice(),
+            b"\0src/a.rs\0src/b.rs\0\0\0".as_slice(),
             second.as_bytes(),
             b"\0src/a.rs\0".as_slice(),
         ]
@@ -438,5 +440,19 @@ mod tests {
         assert_eq!(sample.changed_path_records, 3);
         assert_eq!(sample.commits[0].paths, ["src/a.rs", "src/b.rs"]);
         assert_eq!(sample.commits[1].paths, ["src/a.rs"]);
+    }
+
+    #[test]
+    fn samples_real_checkout_when_git_metadata_is_available() {
+        if !Path::new(".git").exists() {
+            return;
+        }
+
+        let sample = sample_history(Path::new(".")).unwrap();
+        assert!(!sample.commits.is_empty());
+        assert!(sample
+            .commits
+            .iter()
+            .all(|commit| matches!(commit.oid.len(), 40 | 64)));
     }
 }
