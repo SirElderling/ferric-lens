@@ -17,6 +17,7 @@ pub struct HostCfg {
     flags: BTreeSet<String>,
     values: BTreeMap<String, BTreeSet<String>>,
     digest: String,
+    reliable: bool,
 }
 
 impl HostCfg {
@@ -34,11 +35,27 @@ impl HostCfg {
         Self::from_lines(text.lines())
     }
 
+    pub fn unavailable() -> Self {
+        Self {
+            flags: BTreeSet::new(),
+            values: BTreeMap::new(),
+            digest: "cfg-unavailable".into(),
+            reliable: false,
+        }
+    }
+
     pub fn digest(&self) -> &str {
         &self.digest
     }
 
     pub fn evaluate(&self, meta: &Meta) -> Truth {
+        if !self.reliable {
+            if matches!(meta, Meta::Path(path) if path.is_ident("test")) {
+                return Truth::False;
+            }
+            return Truth::Unknown;
+        }
+
         match meta {
             Meta::Path(path) => {
                 let Some(ident) = path.get_ident() else {
@@ -140,6 +157,7 @@ impl HostCfg {
             flags,
             values,
             digest: hasher.finalize().to_hex().to_string(),
+            reliable: true,
         })
     }
 
