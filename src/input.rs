@@ -7,6 +7,8 @@ use std::{
 
 use serde::Deserialize;
 
+use crate::profile::ProfileContext;
+
 pub type WorkspaceAliases = BTreeMap<String, BTreeMap<String, String>>;
 
 #[derive(Debug, Clone)]
@@ -59,11 +61,19 @@ struct Dependency {
 }
 
 pub fn inventory(root: &Path) -> Result<Inventory, String> {
+    inventory_impl(root, None)
+}
+
+pub fn inventory_with_profile(root: &Path, profile: &ProfileContext) -> Result<Inventory, String> {
+    inventory_impl(root, Some(profile))
+}
+
+fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inventory, String> {
     let root = root
         .canonicalize()
         .map_err(|error| format!("cannot resolve {}: {error}", root.display()))?;
 
-    let metadata = load_metadata(&root);
+    let metadata = load_metadata(&root, profile);
     let (mut sources, workspace_aliases, complete, detail) = match metadata {
         Ok(metadata) => match inventory_from_metadata(&root, metadata) {
             Ok((sources, aliases)) => (sources, aliases, true, None),
@@ -127,17 +137,29 @@ pub fn inventory(root: &Path) -> Result<Inventory, String> {
     })
 }
 
-fn load_metadata(root: &Path) -> Result<Metadata, String> {
-    let output = Command::new("cargo")
-        .current_dir(root)
-        .args([
-            "metadata",
-            "--format-version",
-            "1",
-            "--no-deps",
-            "--offline",
-            "--locked",
-        ])
+fn load_metadata(root: &Path, profile: Option<&ProfileContext>) -> Result<Metadata, String> {
+    let mut command = Command::new("cargo");
+    command.current_dir(root).args([
+        "metadata",
+        "--format-version",
+        "1",
+        "--no-deps",
+        "--offline",
+        "--locked",
+    ]);
+
+    if let Some(profile) = profile {
+        command
+            .arg("--filter-platform")
+            .arg(&profile.public.resolved_target);
+        if !profile.public.features.is_empty() {
+            command
+                .arg("--features")
+                .arg(profile.public.features.join(","));
+        }
+    }
+
+    let output = command
         .output()
         .map_err(|error| format!("could not execute cargo metadata: {error}"))?;
 
