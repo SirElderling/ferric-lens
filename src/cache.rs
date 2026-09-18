@@ -77,8 +77,8 @@ impl RawFactCache {
         raw.path.clear();
         raw.local_dependency_modules.clear();
 
-        let payload =
-            serde_json::to_vec(&raw).map_err(|error| format!("cannot encode cached facts: {error}"))?;
+        let payload = serde_json::to_vec(&raw)
+            .map_err(|error| format!("cannot encode cached facts: {error}"))?;
         let entry = RawFactEntry {
             schema: RAW_FACT_SCHEMA,
             tool_version: env!("CARGO_PKG_VERSION").into(),
@@ -143,10 +143,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
 
     let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let temporary = parent.join(format!(
-        ".raw.tmp-{}-{counter}",
-        std::process::id()
-    ));
+    let temporary = parent.join(format!(".raw.tmp-{}-{counter}", std::process::id()));
     fs::write(&temporary, bytes)
         .map_err(|error| format!("cannot write cache temporary file: {error}"))?;
 
