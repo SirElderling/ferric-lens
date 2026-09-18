@@ -123,9 +123,10 @@ code {{ overflow-wrap: anywhere; }}
 }
 
 pub fn write(path: &Path, contents: &str) -> Result<(), String> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)
-        .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    }
     fs::write(path, contents)
         .map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
