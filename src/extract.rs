@@ -194,24 +194,23 @@ fn resolve_import(current: &str, segments: &[String], known: &BTreeSet<String>) 
         .split("::")
         .filter(|segment| !segment.is_empty())
         .collect();
-    let mut index = 0;
-
-    match segments[0].as_str() {
+    let index = match segments[0].as_str() {
         "crate" => {
             base.clear();
-            index = 1;
+            1
         }
-        "self" => index = 1,
+        "self" => 1,
         "super" => {
             base.pop();
-            index = 1;
+            let mut index = 1;
             while segments.get(index).map(String::as_str) == Some("super") {
                 base.pop();
                 index += 1;
             }
+            index
         }
         _ => return None,
-    }
+    };
 
     let mut candidate = base.into_iter().map(str::to_owned).collect::<Vec<_>>();
     candidate.extend(segments[index..].iter().cloned());
