@@ -9,12 +9,13 @@ pub mod cache;
 pub mod compare;
 pub mod extract;
 pub mod git;
+pub mod history;
 pub mod input;
 pub mod model;
 pub mod report;
 pub mod rules;
 
-use std::path::Path;
+use std::{collections::BTreeSet, path::Path};
 
 use model::{
     AnalysisResult, BaselineContext, Capability, CapabilityStatus, GateVerdict, ModuleMetrics,
@@ -30,11 +31,23 @@ struct SnapshotAnalysis {
 }
 
 pub fn analyze(root: &Path) -> Result<AnalysisResult, String> {
-    analyze_with_base(root, None)
+    analyze_internal(root, None, true)
 }
 
 pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResult, String> {
-    let current = analyze_snapshot(root, root)?;
+    analyze_internal(root, base, true)
+}
+
+pub fn check_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResult, String> {
+    analyze_internal(root, base, false)
+}
+
+fn analyze_internal(
+    root: &Path,
+    base: Option<&str>,
+    include_history: bool,
+) -> Result<AnalysisResult, String> {
+    let mut current = analyze_snapshot(root, root)?;
     let git_state = git::inspect(root);
     let snapshot = Snapshot {
         content_digest: current.content_digest.clone(),
@@ -219,6 +232,50 @@ pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResu
             Some(gate.incomplete_reasons.join("; "))
         },
     });
+    let history_summary = if include_history {
+        let candidates = history_candidates(&current.modules, &changes, &findings);
+        if candidates.is_empty() {
+            capabilities.push(Capability {
+                name: "history_enrichment".into(),
+                status: CapabilityStatus::Complete,
+                detail: Some("no changed or finding-related production paths required enrichment".into()),
+            });
+            None
+        } else {
+            match git::sample_history(root) {
+                Ok(sample) => {
+                    let summary = history::enrich(&mut current.modules, &sample, &candidates);
+                    capabilities.push(Capability {
+                        name: "history_enrichment".into(),
+                        status: if summary.truncated {
+                            CapabilityStatus::Partial
+                        } else {
+                            CapabilityStatus::Complete
+                        },
+                        detail: Some(format!(
+                            "{} non-merge commits sampled; {} changed-path records; {} broad commits excluded from co-change{}",
+                            summary.sampled_commits,
+                            summary.changed_path_records,
+                            summary.broad_commits_excluded_from_cochange,
+                            if summary.truncated { "; sample truncated at deterministic work limit" } else { "" }
+                        )),
+                    });
+                    Some(summary)
+                }
+                Err(error) => {
+                    capabilities.push(Capability {
+                        name: "history_enrichment".into(),
+                        status: CapabilityStatus::Unavailable,
+                        detail: Some(error),
+                    });
+                    None
+                }
+            }
+        }
+    } else {
+        None
+    };
+
     capabilities.sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(AnalysisResult {
@@ -235,7 +292,7 @@ pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResu
         verdict,
         verdict_reason,
         applicable_gate_subjects: gate.applicable_subjects,
-        history: None,
+        history: history_summary,
         capabilities,
         modules: current.modules,
         findings,
@@ -248,7 +305,7 @@ pub fn accept_finding_with_base(
     fingerprint: &str,
     reason: &str,
 ) -> Result<(), String> {
-    let result = analyze_with_base(root, base)?;
+    let result = check_with_base(root, base)?;
     if !result
         .findings
         .iter()
@@ -260,6 +317,39 @@ pub fn accept_finding_with_base(
     }
 
     acceptance::record(root, fingerprint, reason, &result.snapshot.content_digest)
+}
+
+fn history_candidates(
+    modules: &[ModuleMetrics],
+    changes: &git::ChangeSet,
+    findings: &[model::Finding],
+) -> BTreeSet<String> {
+    let module_paths = modules
+        .iter()
+        .map(|module| module.path.as_str())
+        .collect::<BTreeSet<_>>();
+
+    let mut candidates = BTreeSet::new();
+    for path in changes
+        .added
+        .iter()
+        .chain(changes.modified.iter())
+        .chain(changes.renames.values())
+    {
+        if module_paths.contains(path.as_str()) {
+            candidates.insert(path.clone());
+        }
+    }
+
+    for finding in findings {
+        if let Some(module) = modules.iter().find(|module| {
+            display_subject(&module.crate_name, &module.module_path) == finding.subject
+        }) {
+            candidates.insert(module.path.clone());
+        }
+    }
+
+    candidates
 }
 
 fn rebind_advisory_identities(
