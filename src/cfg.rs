@@ -225,15 +225,6 @@ impl HostCfg {
         cfg
     }
 
-    #[test]
-    fn selected_explicit_feature_is_true() {
-        let cfg = HostCfg::test_with_features(
-            &["unix", "target_os=\"linux\""],
-            &["fast"],
-        );
-        assert_eq!(cfg.evaluate(&parse_quote!(feature = "fast")), Truth::True);
-        assert_eq!(cfg.evaluate(&parse_quote!(feature = "other")), Truth::Unknown);
-    }
 }
 
 fn all(values: impl IntoIterator<Item = Truth>) -> Truth {
@@ -356,6 +347,20 @@ mod tests {
         assert_eq!(cfg.evaluate(&parse_quote!(my_custom_cfg)), Truth::Unknown);
         assert_eq!(
             cfg.evaluate(&parse_quote!(any(my_custom_cfg, windows))),
+            Truth::Unknown
+        );
+    }
+
+
+    #[test]
+    fn selected_explicit_feature_is_true() {
+        let cfg = HostCfg::test_with_features(
+            &["unix", "target_os=\"linux\""],
+            &["fast"],
+        );
+        assert_eq!(cfg.evaluate(&parse_quote!(feature = "fast")), Truth::True);
+        assert_eq!(
+            cfg.evaluate(&parse_quote!(feature = "other")),
             Truth::Unknown
         );
     }
