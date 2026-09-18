@@ -3,8 +3,7 @@ use std::{fs, path::Path};
 use crate::model::{AnalysisResult, GateVerdict};
 
 pub fn json(result: &AnalysisResult) -> Result<String, String> {
-    serde_json::to_string_pretty(result)
-        .map_err(|error| format!("cannot serialize JSON: {error}"))
+    serde_json::to_string_pretty(result).map_err(|error| format!("cannot serialize JSON: {error}"))
 }
 
 pub fn html(result: &AnalysisResult) -> String {
@@ -19,9 +18,7 @@ pub fn html(result: &AnalysisResult) -> String {
         capabilities.push_str("<li><strong>");
         capabilities.push_str(&escape(&capability.name));
         capabilities.push_str("</strong>: ");
-        capabilities.push_str(&escape(
-            &format!("{:?}", capability.status).to_lowercase(),
-        ));
+        capabilities.push_str(&escape(&format!("{:?}", capability.status).to_lowercase()));
         if let Some(detail) = &capability.detail {
             capabilities.push_str(" — ");
             capabilities.push_str(&escape(detail));
@@ -123,12 +120,14 @@ code {{ overflow-wrap: anywhere; }}
 }
 
 pub fn write(path: &Path, contents: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
-    fs::write(path, contents)
-        .map_err(|error| format!("cannot write {}: {error}", path.display()))
+    fs::write(path, contents).map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
 fn escape(value: &str) -> String {
@@ -152,9 +151,6 @@ mod tests {
 
     #[test]
     fn escapes_html_metacharacters() {
-        assert_eq!(
-            escape("<a x='&'>\""),
-            "&lt;a x=&#39;&amp;&#39;&gt;&quot;"
-        );
+        assert_eq!(escape("<a x='&'>\""), "&lt;a x=&#39;&amp;&#39;&gt;&quot;");
     }
 }
