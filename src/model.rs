@@ -34,8 +34,16 @@ pub struct AnalysisProfile {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AnalysisConfiguration {
+    pub target: String,
+    pub features: Vec<String>,
+    pub rustc_cfg: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Snapshot {
     pub content_digest: String,
+    pub configuration: AnalysisConfiguration,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_head: Option<String>,
     pub dirty: Option<bool>,
