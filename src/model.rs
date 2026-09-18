@@ -183,6 +183,29 @@ pub struct Finding {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ImportedObservation {
+    pub subject: String,
+    pub metric: String,
+    pub value: i64,
+    pub unit: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ImportedEvidence {
+    pub producer: String,
+    pub producer_version: String,
+    pub source_content_digest: Option<String>,
+    pub source_git_commit: Option<String>,
+    pub target: String,
+    pub features: Vec<String>,
+    pub attached: bool,
+    pub attachment_reason: String,
+    pub observations: Vec<ImportedObservation>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct AnalysisResult {
     pub schema_version: u32,
     pub tool_version: String,
@@ -195,6 +218,8 @@ pub struct AnalysisResult {
     pub architecture: ArchitectureSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history: Option<HistorySummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imported_evidence: Option<ImportedEvidence>,
     pub capabilities: Vec<Capability>,
     pub modules: Vec<ModuleMetrics>,
     pub findings: Vec<Finding>,
