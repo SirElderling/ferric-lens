@@ -422,7 +422,7 @@ fn analyze_snapshot(root: &Path, cache_root: &Path) -> Result<SnapshotAnalysis, 
     modules.sort_by(|a, b| {
         (&a.crate_name, &a.module_path, &a.path).cmp(&(&b.crate_name, &b.module_path, &b.path))
     });
-    extract::resolve_local_dependencies(&mut modules);
+    extract::resolve_workspace_dependencies(&mut modules, &inventory.workspace_aliases);
 
     Ok(SnapshotAnalysis {
         content_digest: inventory.content_digest,
