@@ -1,6 +1,12 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::Path,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use crate::model::{AnalysisResult, Finding, GateVerdict};
+
+static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn json(result: &AnalysisResult) -> Result<String, String> {
     serde_json::to_string_pretty(result).map_err(|error| format!("cannot serialize JSON: {error}"))
@@ -321,14 +327,32 @@ fn render_findings(findings: &[&Finding], empty: &str) -> String {
 }
 
 pub fn write(path: &Path, contents: &str) -> Result<(), String> {
-    if let Some(parent) = path
+    let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| format!("output path has no file name: {}", path.display()))?
+        .to_string_lossy();
+    let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temporary = parent.join(format!(
+        ".{file_name}.tmp-{}-{counter}",
+        std::process::id()
+    ));
+
+    fs::write(&temporary, contents)
+        .map_err(|error| format!("cannot write {}: {error}", temporary.display()))?;
+    match fs::rename(&temporary, path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(&temporary);
+            Err(format!("cannot replace {}: {error}", path.display()))
+        }
     }
-    fs::write(path, contents).map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
 fn escape(value: &str) -> String {
