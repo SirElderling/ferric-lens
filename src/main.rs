@@ -19,6 +19,12 @@ enum Command {
         /// Explicit target ref to compare against. The merge base is analyzed.
         #[arg(long)]
         base: Option<String>,
+        /// Rust target triple. Defaults to the host target.
+        #[arg(long)]
+        target: Option<String>,
+        /// Additional Cargo feature to enable; may be repeated.
+        #[arg(long = "feature")]
+        features: Vec<String>,
         #[arg(long, default_value = "ferric-lens.json")]
         json: PathBuf,
         #[arg(long, default_value = "ferric-lens-report.html")]
@@ -40,6 +46,12 @@ enum Command {
         /// Explicit target ref to compare against. The merge base is analyzed.
         #[arg(long)]
         base: Option<String>,
+        /// Rust target triple. Defaults to the host target.
+        #[arg(long)]
+        target: Option<String>,
+        /// Additional Cargo feature to enable; may be repeated.
+        #[arg(long = "feature")]
+        features: Vec<String>,
     },
     /// Run the CI-oriented analysis path.
     Check {
@@ -48,6 +60,12 @@ enum Command {
         /// Explicit target ref to compare against. The merge base is analyzed.
         #[arg(long)]
         base: Option<String>,
+        /// Rust target triple. Defaults to the host target.
+        #[arg(long)]
+        target: Option<String>,
+        /// Additional Cargo feature to enable; may be repeated.
+        #[arg(long = "feature")]
+        features: Vec<String>,
         #[arg(long)]
         json: Option<PathBuf>,
     },
@@ -68,13 +86,17 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
         Command::Analyze {
             path,
             base,
+            target,
+            features,
             json,
             html,
             evidence,
         } => {
-            let result = ferric_lens::analyze_with_base_and_evidence(
+            let result = ferric_lens::analyze_with_profile(
                 &path,
                 base.as_deref(),
+                target.as_deref(),
+                &features,
                 evidence.as_deref(),
             )?;
             let json_text = report::json(&result)?;
@@ -88,13 +110,33 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             reason,
             path,
             base,
+            target,
+            features,
         } => {
-            ferric_lens::accept_finding_with_base(&path, base.as_deref(), &fingerprint, &reason)?;
+            ferric_lens::accept_finding_with_profile(
+                &path,
+                base.as_deref(),
+                target.as_deref(),
+                &features,
+                &fingerprint,
+                &reason,
+            )?;
             println!("accepted finding {fingerprint}");
             Ok(ExitCode::SUCCESS)
         }
-        Command::Check { path, base, json } => {
-            let result = ferric_lens::check_with_base(&path, base.as_deref())?;
+        Command::Check {
+            path,
+            base,
+            target,
+            features,
+            json,
+        } => {
+            let result = ferric_lens::check_with_profile(
+                &path,
+                base.as_deref(),
+                target.as_deref(),
+                &features,
+            )?;
             if let Some(path) = json {
                 report::write(&path, &report::json(&result)?)?;
             }
