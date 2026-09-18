@@ -138,12 +138,11 @@ impl HostCfg {
                 let Some(ident) = list.path.get_ident() else {
                     return Truth::Unknown;
                 };
-                let nested = match list.parse_args_with(
-                    Punctuated::<Meta, Token![,]>::parse_terminated,
-                ) {
-                    Ok(nested) => nested,
-                    Err(_) => return Truth::Unknown,
-                };
+                let nested =
+                    match list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) {
+                        Ok(nested) => nested,
+                        Err(_) => return Truth::Unknown,
+                    };
 
                 match ident.to_string().as_str() {
                     "all" => all(nested.iter().map(|meta| self.evaluate(meta))),
@@ -220,11 +219,13 @@ impl HostCfg {
     #[cfg(test)]
     pub fn test_with_features(lines: &[&str], features: &[&str]) -> Self {
         let mut cfg = Self::from_lines(lines.iter().copied()).unwrap();
-        cfg.explicit_features = features.iter().map(|feature| (*feature).to_owned()).collect();
+        cfg.explicit_features = features
+            .iter()
+            .map(|feature| (*feature).to_owned())
+            .collect();
         cfg.rehash();
         cfg
     }
-
 }
 
 fn all(values: impl IntoIterator<Item = Truth>) -> Truth {
@@ -270,12 +271,7 @@ fn negate(value: Truth) -> Truth {
 fn is_known_bare_cfg(key: &str) -> bool {
     matches!(
         key,
-        "unix"
-            | "windows"
-            | "debug_assertions"
-            | "proc_macro"
-            | "target_thread_local"
-            | "doctest"
+        "unix" | "windows" | "debug_assertions" | "proc_macro" | "target_thread_local" | "doctest"
     )
 }
 
@@ -343,7 +339,10 @@ mod tests {
     #[test]
     fn preserves_unknown_custom_and_unselected_feature_cfg() {
         let cfg = linux();
-        assert_eq!(cfg.evaluate(&parse_quote!(feature = "fast")), Truth::Unknown);
+        assert_eq!(
+            cfg.evaluate(&parse_quote!(feature = "fast")),
+            Truth::Unknown
+        );
         assert_eq!(cfg.evaluate(&parse_quote!(my_custom_cfg)), Truth::Unknown);
         assert_eq!(
             cfg.evaluate(&parse_quote!(any(my_custom_cfg, windows))),
@@ -351,13 +350,9 @@ mod tests {
         );
     }
 
-
     #[test]
     fn selected_explicit_feature_is_true() {
-        let cfg = HostCfg::test_with_features(
-            &["unix", "target_os=\"linux\""],
-            &["fast"],
-        );
+        let cfg = HostCfg::test_with_features(&["unix", "target_os=\"linux\""], &["fast"]);
         assert_eq!(cfg.evaluate(&parse_quote!(feature = "fast")), Truth::True);
         assert_eq!(
             cfg.evaluate(&parse_quote!(feature = "other")),
