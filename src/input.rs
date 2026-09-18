@@ -12,6 +12,33 @@ use crate::{cfg::Truth, profile::ProfileContext};
 
 pub type WorkspaceAliases = BTreeMap<String, BTreeMap<String, String>>;
 
+const MAX_SOURCE_FILE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_SNAPSHOT_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
+
+#[derive(Debug, Default)]
+struct SourceBudget {
+    used: u64,
+    exhausted: bool,
+}
+
+impl SourceBudget {
+    fn reserve(&mut self, bytes: u64) -> bool {
+        if self.exhausted {
+            return false;
+        }
+        match self.used.checked_add(bytes) {
+            Some(total) if total <= MAX_SNAPSHOT_SOURCE_BYTES => {
+                self.used = total;
+                true
+            }
+            _ => {
+                self.exhausted = true;
+                false
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SourceFile {
     pub crate_name: String,
@@ -81,19 +108,31 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
                 let detail = summarize_limitations(&limitations);
                 (sources, aliases, complete, detail)
             }
-            Err(error) => (
-                fallback_inventory(&root)?,
+            Err(error) => {
+                let (sources, limitations) = fallback_inventory(&root)?;
+                (
+                    sources,
+                    WorkspaceAliases::new(),
+                    false,
+                    fallback_detail(
+                        &format!("Cargo metadata inventory failed: {error}"),
+                        &limitations,
+                    ),
+                )
+            }
+        },
+        Err(error) => {
+            let (sources, limitations) = fallback_inventory(&root)?;
+            (
+                sources,
                 WorkspaceAliases::new(),
                 false,
-                Some(format!("Cargo metadata inventory failed: {error}")),
-            ),
-        },
-        Err(error) => (
-            fallback_inventory(&root)?,
-            WorkspaceAliases::new(),
-            false,
-            Some(format!("Cargo metadata unavailable: {error}")),
-        ),
+                fallback_detail(
+                    &format!("Cargo metadata unavailable: {error}"),
+                    &limitations,
+                ),
+            )
+        }
     };
 
     sources.sort_by(|a, b| {
@@ -343,8 +382,12 @@ fn inventory_from_metadata(
 
     let mut sources = Vec::new();
     let mut limitations = Vec::new();
+    let mut budget = SourceBudget::default();
 
     for target in target_roots {
+        if budget.exhausted {
+            break;
+        }
         let mut visited = BTreeSet::new();
         collect_reachable_module(
             root,
@@ -354,6 +397,7 @@ fn inventory_from_metadata(
             true,
             profile,
             &mut visited,
+            &mut budget,
             &mut sources,
             &mut limitations,
         )?;
@@ -373,6 +417,7 @@ fn collect_reachable_module(
     is_crate_root: bool,
     profile: Option<&ProfileContext>,
     visited: &mut BTreeSet<PathBuf>,
+    budget: &mut SourceBudget,
     out: &mut Vec<SourceFile>,
     limitations: &mut Vec<String>,
 ) -> Result<(), String> {
@@ -395,7 +440,7 @@ fn collect_reachable_module(
         return Ok(());
     }
 
-    if metadata.len() > 8 * 1024 * 1024 {
+    if metadata.len() > MAX_SOURCE_FILE_BYTES {
         limitations.push(format!(
             "{crate_name}: module source {} exceeds the 8 MiB source limit",
             source_path.display()
@@ -415,6 +460,14 @@ fn collect_reachable_module(
     }
 
     if !visited.insert(canonical.clone()) {
+        return Ok(());
+    }
+
+    if !budget.reserve(metadata.len()) {
+        limitations.push(
+            "aggregate production source input exceeds the 512 MiB snapshot limit; remaining modules were not acquired"
+                .into(),
+        );
         return Ok(());
     }
 
@@ -475,6 +528,7 @@ fn collect_reachable_module(
         &module_dir,
         profile,
         visited,
+        budget,
         out,
         limitations,
     )
@@ -489,6 +543,7 @@ fn discover_child_modules(
     module_dir: &Path,
     profile: Option<&ProfileContext>,
     visited: &mut BTreeSet<PathBuf>,
+    budget: &mut SourceBudget,
     out: &mut Vec<SourceFile>,
     limitations: &mut Vec<String>,
 ) -> Result<(), String> {
@@ -540,6 +595,7 @@ fn discover_child_modules(
                 &inline_dir,
                 profile,
                 visited,
+                budget,
                 out,
                 limitations,
             )?;
@@ -577,6 +633,7 @@ fn discover_child_modules(
             false,
             profile,
             visited,
+            budget,
             out,
             limitations,
         )?;
@@ -632,11 +689,30 @@ fn summarize_limitations(limitations: &[String]) -> Option<String> {
     Some(format!("{}{}", shown.join("; "), suffix))
 }
 
-fn fallback_inventory(root: &Path) -> Result<Vec<SourceFile>, String> {
+fn fallback_detail(primary: &str, limitations: &[String]) -> Option<String> {
+    match summarize_limitations(limitations) {
+        Some(detail) => Some(format!("{primary}; {detail}")),
+        None => Some(primary.to_owned()),
+    }
+}
+
+fn fallback_inventory(root: &Path) -> Result<(Vec<SourceFile>, Vec<String>), String> {
     let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    let mut budget = SourceBudget::default();
     let target = root.join("target");
-    collect_rust_files(root, root, &target, "unknown", &mut sources)?;
-    Ok(sources)
+    collect_rust_files(
+        root,
+        root,
+        &target,
+        "unknown",
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )?;
+    limitations.sort();
+    limitations.dedup();
+    Ok((sources, limitations))
 }
 
 fn collect_rust_files(
@@ -644,19 +720,32 @@ fn collect_rust_files(
     directory: &Path,
     target_directory: &Path,
     crate_name: &str,
+    budget: &mut SourceBudget,
     out: &mut Vec<SourceFile>,
+    limitations: &mut Vec<String>,
 ) -> Result<(), String> {
+    if budget.exhausted {
+        return Ok(());
+    }
+
     let entries = fs::read_dir(directory)
         .map_err(|error| format!("cannot read {}: {error}", directory.display()))?;
+    let mut entries = entries
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("cannot read directory entry: {error}"))?;
+    entries.sort_by_key(|entry| entry.file_name());
 
     for entry in entries {
-        let entry = entry.map_err(|error| format!("cannot read directory entry: {error}"))?;
         let path = entry.path();
         let file_type = entry
             .file_type()
             .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
 
         if file_type.is_symlink() {
+            limitations.push(format!(
+                "fallback inventory skipped symlink {}",
+                path.display()
+            ));
             continue;
         }
 
@@ -672,7 +761,15 @@ fn collect_rust_files(
             {
                 continue;
             }
-            collect_rust_files(repo_root, &path, target_directory, crate_name, out)?;
+            collect_rust_files(
+                repo_root,
+                &path,
+                target_directory,
+                crate_name,
+                budget,
+                out,
+                limitations,
+            )?;
             continue;
         }
 
@@ -682,8 +779,20 @@ fn collect_rust_files(
 
         let metadata = fs::metadata(&path)
             .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
-        if metadata.len() > 8 * 1024 * 1024 {
+        if metadata.len() > MAX_SOURCE_FILE_BYTES {
+            limitations.push(format!(
+                "fallback inventory skipped {} because it exceeds the 8 MiB source limit",
+                path.display()
+            ));
             continue;
+        }
+
+        if !budget.reserve(metadata.len()) {
+            limitations.push(
+                "fallback source input exceeds the 512 MiB snapshot limit; remaining files were not acquired"
+                    .into(),
+            );
+            break;
         }
 
         let bytes =
@@ -742,7 +851,7 @@ mod tests {
 
     use super::{
         collect_reachable_module, inventory_from_metadata, module_path_from_relative, rust_name,
-        Metadata, Package, Target,
+        Metadata, Package, SourceBudget, Target,
     };
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -777,6 +886,7 @@ mod tests {
         let mut visited = BTreeSet::new();
         let mut sources = Vec::new();
         let mut limitations = Vec::new();
+        let mut budget = SourceBudget::default();
         collect_reachable_module(
             &root,
             "demo",
@@ -785,6 +895,7 @@ mod tests {
             true,
             None,
             &mut visited,
+            &mut budget,
             &mut sources,
             &mut limitations,
         )
@@ -813,6 +924,7 @@ mod tests {
         let mut visited = BTreeSet::new();
         let mut sources = Vec::new();
         let mut limitations = Vec::new();
+        let mut budget = SourceBudget::default();
         collect_reachable_module(
             &root,
             "demo",
@@ -821,6 +933,7 @@ mod tests {
             true,
             None,
             &mut visited,
+            &mut budget,
             &mut sources,
             &mut limitations,
         )
