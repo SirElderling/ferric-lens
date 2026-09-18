@@ -258,6 +258,19 @@ mod tests {
     }
 
     #[test]
+    fn profile_digest_prevents_cross_profile_reuse() {
+        let root = temp_root();
+        let cache = RawFactCache::new(&root);
+        let source = source("src/engine.rs");
+        cache.store(&source, "linux", &module("src/engine.rs"));
+
+        assert!(cache.load(&source, "macos").is_none());
+        assert!(cache.load(&source, "linux").is_some());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn corrupt_entry_is_a_cache_miss() {
         let root = temp_root();
         let cache = RawFactCache::new(&root);
