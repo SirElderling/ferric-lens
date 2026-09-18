@@ -18,6 +18,9 @@ Ferric Lens currently:
 - reports incomplete macro/cfg evidence as `inconclusive` rather than pretending the gate passed,
 - emits deterministic JSON,
 - emits one self-contained HTML/CSS report with no JavaScript,
+- reuses content-addressed raw syntax facts through a disposable 256 MiB repository cache,
+- enriches full `analyze` reports with bounded recent churn and co-change evidence,
+- keeps `check` on the fast core path without optional history enrichment,
 - supports fingerprinted, reasoned finding acceptances in a tool-managed repository file,
 - keeps accepted findings visible while excluding only exact accepted gate evidence from failure,
 - uses exit codes `0=pass`, `1=regression`, and `2=inconclusive/error`.
@@ -48,6 +51,8 @@ cargo run -- check /path/to/rust/repository --base origin/main --json ferric-len
 `--base` is optional. Without it, Ferric Lens tries the GitHub PR target, the local remote-default branch, then local `main`. It always compares against the unique merge base, not the moving target tip.
 
 The initial blocking rule requires a baseline crate population of at least 20 production modules with complete required evidence. Smaller crates still receive descriptive/advisory output.
+
+Full `analyze` mode samples at most 2,000 recent non-merge commits and 100,000 changed-path records for advisory history context. Commits touching more than 200 paths are excluded from co-change calculations and reported as such. History never changes the gate verdict.
 
 ## Accepting an intentional finding
 
