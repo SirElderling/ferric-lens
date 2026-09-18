@@ -16,19 +16,21 @@ enum Command {
     Analyze {
         #[arg(default_value = ".")]
         path: PathBuf,
+        /// Explicit target ref to compare against. The merge base is analyzed.
+        #[arg(long)]
+        base: Option<String>,
         #[arg(long, default_value = "ferric-lens.json")]
         json: PathBuf,
         #[arg(long, default_value = "ferric-lens-report.html")]
         html: PathBuf,
     },
     /// Run the CI-oriented analysis path.
-    ///
-    /// The foundation implementation returns exit code 2 because baseline
-    /// comparison is not implemented yet; current-snapshot analysis is still
-    /// emitted when requested.
     Check {
         #[arg(default_value = ".")]
         path: PathBuf,
+        /// Explicit target ref to compare against. The merge base is analyzed.
+        #[arg(long)]
+        base: Option<String>,
         #[arg(long)]
         json: Option<PathBuf>,
     },
@@ -46,16 +48,21 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<ExitCode, String> {
     match cli.command {
-        Command::Analyze { path, json, html } => {
-            let result = ferric_lens::analyze(&path)?;
+        Command::Analyze {
+            path,
+            base,
+            json,
+            html,
+        } => {
+            let result = ferric_lens::analyze_with_base(&path, base.as_deref())?;
             let json_text = report::json(&result)?;
             report::write(&json, &json_text)?;
             report::write(&html, &report::html(&result))?;
             print_summary(&result);
             Ok(exit_code(&result.verdict))
         }
-        Command::Check { path, json } => {
-            let result = ferric_lens::analyze(&path)?;
+        Command::Check { path, base, json } => {
+            let result = ferric_lens::analyze_with_base(&path, base.as_deref())?;
             if let Some(path) = json {
                 report::write(&path, &report::json(&result)?)?;
             }
@@ -68,9 +75,18 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
 fn print_summary(result: &ferric_lens::model::AnalysisResult) {
     println!("Ferric Lens: {:?}", result.verdict);
     println!("{}", result.verdict_reason);
+    if let Some(baseline) = &result.baseline {
+        println!(
+            "baseline {} -> merge base {}",
+            baseline.target_ref, baseline.merge_base
+        );
+    }
+    let gate_findings = result.findings.iter().filter(|finding| finding.gate).count();
     println!(
-        "{} source files, {} advisory findings",
+        "{} source files, {} applicable gate subjects, {} gate findings, {} total findings",
         result.snapshot.source_files,
+        result.applicable_gate_subjects,
+        gate_findings,
         result.findings.len()
     );
 }
