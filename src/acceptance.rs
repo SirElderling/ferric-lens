@@ -129,8 +129,8 @@ pub fn record(
             .collect(),
     };
 
-    let text =
-        toml::to_string_pretty(&file).map_err(|error| format!("cannot serialize acceptances: {error}"))?;
+    let text = toml::to_string_pretty(&file)
+        .map_err(|error| format!("cannot serialize acceptances: {error}"))?;
     atomic_write(&acceptance_path(root), text.as_bytes())
 }
 
@@ -203,9 +203,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::model::{
-        DeltaStatus, Evidence, EvidenceClass, Finding, Priority,
-    };
+    use crate::model::{DeltaStatus, Evidence, EvidenceClass, Finding, Priority};
 
     use super::fingerprint_findings;
 
