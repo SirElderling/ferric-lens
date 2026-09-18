@@ -111,7 +111,11 @@ fn load_metadata(root: &Path) -> Result<Metadata, String> {
 fn inventory_from_metadata(root: &Path, metadata: Metadata) -> Result<Vec<SourceFile>, String> {
     let metadata_root = PathBuf::from(&metadata.workspace_root);
     let target_directory = PathBuf::from(&metadata.target_directory);
-    let members: BTreeSet<&str> = metadata.workspace_members.iter().map(String::as_str).collect();
+    let members: BTreeSet<&str> = metadata
+        .workspace_members
+        .iter()
+        .map(String::as_str)
+        .collect();
     let mut crate_roots = BTreeMap::<PathBuf, String>::new();
 
     for package in metadata
@@ -120,9 +124,9 @@ fn inventory_from_metadata(root: &Path, metadata: Metadata) -> Result<Vec<Source
         .filter(|package| members.contains(package.id.as_str()))
     {
         let manifest = PathBuf::from(&package.manifest_path);
-        let package_root = manifest.parent().ok_or_else(|| {
-            format!("manifest has no parent directory: {}", manifest.display())
-        })?;
+        let package_root = manifest
+            .parent()
+            .ok_or_else(|| format!("manifest has no parent directory: {}", manifest.display()))?;
 
         if !package_root.starts_with(&metadata_root) || !package_root.starts_with(root) {
             continue;
