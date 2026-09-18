@@ -141,6 +141,54 @@ pub fn html(result: &AnalysisResult) -> String {
         html
     };
 
+    let imported_evidence = result.imported_evidence.as_ref().map_or_else(
+        || "<p>No external evidence imported.</p>".to_owned(),
+        |evidence| {
+            let mut html = format!(
+                "<p><strong>{}</strong> {}<br>{}<br><strong>{}</strong><br>target <code>{}</code>{}</p>",
+                escape(&evidence.producer),
+                escape(&evidence.producer_version),
+                if evidence.attached {
+                    "attached to current analysis"
+                } else {
+                    "unattached context only"
+                },
+                escape(&evidence.attachment_reason),
+                escape(&evidence.target),
+                if evidence.features.is_empty() {
+                    String::new()
+                } else {
+                    format!("<br>features: <code>{}</code>", escape(&evidence.features.join(",")))
+                }
+            );
+            if !evidence.observations.is_empty() {
+                html.push_str("<details><summary>");
+                html.push_str(&format!(
+                    "{} imported observation(s)</summary><ul>",
+                    evidence.observations.len()
+                ));
+                for observation in &evidence.observations {
+                    html.push_str("<li><code>");
+                    html.push_str(&escape(&observation.subject));
+                    html.push_str("</code> · ");
+                    html.push_str(&escape(&observation.metric));
+                    html.push_str(" = ");
+                    html.push_str(&escape(&format!(
+                        "{} {}",
+                        observation.value, observation.unit
+                    )));
+                    if let Some(note) = &observation.note {
+                        html.push_str(" — ");
+                        html.push_str(&escape(note));
+                    }
+                    html.push_str("</li>");
+                }
+                html.push_str("</ul></details>");
+            }
+            html
+        },
+    );
+
     let baseline = result.baseline.as_ref().map_or_else(
         || "<p>No comparable baseline was available.</p>".to_owned(),
         |baseline| {
@@ -182,6 +230,7 @@ code {{ overflow-wrap: anywhere; }}
 <div class="card"><h2>Baseline</h2>{baseline}</div>
 <div class="card"><h2>Architecture</h2>{architecture_summary}</div>
 <div class="card"><h2>History</h2>{history_summary}</div>
+<div class="card"><h2>External evidence</h2>{imported_evidence}</div>
 <div class="card"><h2>Coverage</h2><ul>{capabilities}</ul></div>
 </section>
 <section><h2>Gate findings</h2>{gate_html}</section>
