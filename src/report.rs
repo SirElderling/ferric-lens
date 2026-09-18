@@ -63,7 +63,7 @@ pub fn html(result: &AnalysisResult) -> String {
         }));
         modules.push_str("</code><span>");
         modules.push_str(&escape(&format!(
-            "{} decisions · {} local deps · {} public items · {} lines{}",
+            "{} decisions · {} repo deps · {} public items · {} lines{}",
             module.decision_sites,
             module.local_dependency_modules.len(),
             module.public_items,
@@ -117,6 +117,30 @@ pub fn html(result: &AnalysisResult) -> String {
         },
     );
 
+    let architecture_summary = if result.architecture.cycles.is_empty() {
+        format!(
+            "<p>{} modules<br>{} resolved explicit dependency edges<br>{} modules with incomplete graph evidence<br>No observed explicit-import cycles.</p>",
+            result.architecture.modules,
+            result.architecture.explicit_dependency_edges,
+            result.architecture.incomplete_modules
+        )
+    } else {
+        let mut html = format!(
+            "<p>{} modules<br>{} resolved explicit dependency edges<br>{} modules with incomplete graph evidence<br><strong>{} observed explicit-import cycle(s)</strong></p><ul>",
+            result.architecture.modules,
+            result.architecture.explicit_dependency_edges,
+            result.architecture.incomplete_modules,
+            result.architecture.cycles.len()
+        );
+        for cycle in &result.architecture.cycles {
+            html.push_str("<li>");
+            html.push_str(&escape(&cycle.modules.join(" → ")));
+            html.push_str("</li>");
+        }
+        html.push_str("</ul>");
+        html
+    };
+
     let baseline = result.baseline.as_ref().map_or_else(
         || "<p>No comparable baseline was available.</p>".to_owned(),
         |baseline| {
@@ -156,6 +180,7 @@ code {{ overflow-wrap: anywhere; }}
 <section class="grid">
 <div class="card"><h2>Snapshot</h2><p><strong>Digest</strong><br><code>{digest}</code></p><p>{source_files} source files<br>{applicable} applicable gate subjects</p></div>
 <div class="card"><h2>Baseline</h2>{baseline}</div>
+<div class="card"><h2>Architecture</h2>{architecture_summary}</div>
 <div class="card"><h2>History</h2>{history_summary}</div>
 <div class="card"><h2>Coverage</h2><ul>{capabilities}</ul></div>
 </section>
