@@ -244,10 +244,7 @@ fn inventory_from_metadata(
             let Some(target_crate) = package_library_crates.get(&dependency_root) else {
                 continue;
             };
-            let alias = dependency
-                .rename
-                .as_deref()
-                .unwrap_or(&dependency.name);
+            let alias = dependency.rename.as_deref().unwrap_or(&dependency.name);
             crate_aliases.insert(rust_name(alias), target_crate.clone());
         }
 
