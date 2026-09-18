@@ -24,6 +24,20 @@ enum Command {
         #[arg(long, default_value = "ferric-lens-report.html")]
         html: PathBuf,
     },
+    /// Record an explicit acceptance for one current finding.
+    Accept {
+        /// Exact finding fingerprint from the current analysis.
+        fingerprint: String,
+        /// Plain-English reason for accepting this exact finding.
+        #[arg(long)]
+        reason: String,
+        /// Repository to analyze.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// Explicit target ref to compare against. The merge base is analyzed.
+        #[arg(long)]
+        base: Option<String>,
+    },
     /// Run the CI-oriented analysis path.
     Check {
         #[arg(default_value = ".")]
@@ -61,6 +75,21 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             print_summary(&result);
             Ok(exit_code(&result.verdict))
         }
+        Command::Accept {
+            fingerprint,
+            reason,
+            path,
+            base,
+        } => {
+            ferric_lens::accept_finding_with_base(
+                &path,
+                base.as_deref(),
+                &fingerprint,
+                &reason,
+            )?;
+            println!("accepted finding {fingerprint}");
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Check { path, base, json } => {
             let result = ferric_lens::analyze_with_base(&path, base.as_deref())?;
             if let Some(path) = json {
@@ -84,13 +113,19 @@ fn print_summary(result: &ferric_lens::model::AnalysisResult) {
     let gate_findings = result
         .findings
         .iter()
-        .filter(|finding| finding.gate)
+        .filter(|finding| finding.gate && !finding.accepted)
+        .count();
+    let accepted = result
+        .findings
+        .iter()
+        .filter(|finding| finding.accepted)
         .count();
     println!(
-        "{} source files, {} applicable gate subjects, {} gate findings, {} total findings",
+        "{} source files, {} applicable gate subjects, {} unaccepted gate findings, {} accepted findings, {} total findings",
         result.snapshot.source_files,
         result.applicable_gate_subjects,
         gate_findings,
+        accepted,
         result.findings.len()
     );
 }
