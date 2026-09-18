@@ -5,6 +5,7 @@
 //! introducing a framework or cross-module trait hierarchy prematurely.
 
 pub mod acceptance;
+pub mod cache;
 pub mod compare;
 pub mod extract;
 pub mod git;
@@ -33,7 +34,7 @@ pub fn analyze(root: &Path) -> Result<AnalysisResult, String> {
 }
 
 pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResult, String> {
-    let current = analyze_snapshot(root)?;
+    let current = analyze_snapshot(root, root)?;
     let git_state = git::inspect(root);
     let snapshot = Snapshot {
         content_digest: current.content_digest.clone(),
@@ -94,7 +95,7 @@ pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResu
         }
     };
 
-    let baseline_snapshot = match analyze_snapshot(baseline_worktree.path()) {
+    let baseline_snapshot = match analyze_snapshot(baseline_worktree.path(), root) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             capabilities.push(Capability {
@@ -295,14 +296,23 @@ fn finalize_findings(root: &Path, findings: &mut [model::Finding]) -> Result<(),
     Ok(())
 }
 
-fn analyze_snapshot(root: &Path) -> Result<SnapshotAnalysis, String> {
+fn analyze_snapshot(root: &Path, cache_root: &Path) -> Result<SnapshotAnalysis, String> {
     let inventory = input::inventory(root)?;
+    let fact_cache = cache::RawFactCache::new(cache_root);
     let mut modules = Vec::with_capacity(inventory.sources.len());
     let mut parse_failures = 0usize;
 
     for source in &inventory.sources {
+        if let Some(module) = fact_cache.load(source) {
+            modules.push(module);
+            continue;
+        }
+
         match extract::extract(source) {
-            Ok(module) => modules.push(module),
+            Ok(module) => {
+                fact_cache.store(source, &module);
+                modules.push(module);
+            },
             Err(error) => {
                 parse_failures += 1;
                 modules.push(ModuleMetrics::unsupported(
