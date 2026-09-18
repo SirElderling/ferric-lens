@@ -312,7 +312,7 @@ fn analyze_snapshot(root: &Path, cache_root: &Path) -> Result<SnapshotAnalysis, 
             Ok(module) => {
                 fact_cache.store(source, &module);
                 modules.push(module);
-            },
+            }
             Err(error) => {
                 parse_failures += 1;
                 modules.push(ModuleMetrics::unsupported(
