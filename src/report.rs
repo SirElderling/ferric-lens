@@ -339,10 +339,7 @@ pub fn write(path: &Path, contents: &str) -> Result<(), String> {
         .ok_or_else(|| format!("output path has no file name: {}", path.display()))?
         .to_string_lossy();
     let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let temporary = parent.join(format!(
-        ".{file_name}.tmp-{}-{counter}",
-        std::process::id()
-    ));
+    let temporary = parent.join(format!(".{file_name}.tmp-{}-{counter}", std::process::id()));
 
     fs::write(&temporary, contents)
         .map_err(|error| format!("cannot write {}: {error}", temporary.display()))?;
