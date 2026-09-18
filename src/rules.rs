@@ -3,9 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     compare::Correspondence,
     git::ChangeSet,
-    model::{
-        DeltaStatus, Evidence, EvidenceClass, Finding, ModuleMetrics, Priority,
-    },
+    model::{DeltaStatus, Evidence, EvidenceClass, Finding, ModuleMetrics, Priority},
 };
 
 const MIN_POPULATION: usize = 20;
@@ -246,11 +244,7 @@ fn nearest_rank_p90(values: &[usize]) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        compare::match_modules,
-        git::ChangeSet,
-        model::ModuleMetrics,
-    };
+    use crate::{compare::match_modules, git::ChangeSet, model::ModuleMetrics};
 
     use super::{evaluate_regressions, nearest_rank_p90};
 
