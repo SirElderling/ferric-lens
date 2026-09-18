@@ -81,7 +81,11 @@ fn print_summary(result: &ferric_lens::model::AnalysisResult) {
             baseline.target_ref, baseline.merge_base
         );
     }
-    let gate_findings = result.findings.iter().filter(|finding| finding.gate).count();
+    let gate_findings = result
+        .findings
+        .iter()
+        .filter(|finding| finding.gate)
+        .count();
     println!(
         "{} source files, {} applicable gate subjects, {} gate findings, {} total findings",
         result.snapshot.source_files,
