@@ -279,14 +279,11 @@ pub fn resolve_workspace_dependencies(
         let aliases = workspace_aliases.get(&current_crate);
         let mut dependencies = BTreeSet::new();
         let mut unresolved_repository_import = false;
+        let mut glob_import = false;
 
         for import in &module.explicit_imports {
             if import.glob {
-                unresolved_repository_import = true;
-                append_limitation(
-                    module,
-                    "module contains a glob import whose gate dependency surface is ambiguous",
-                );
+                glob_import = true;
                 continue;
             }
 
@@ -308,6 +305,14 @@ pub fn resolve_workspace_dependencies(
                 }
                 ImportResolution::External => {}
             }
+        }
+
+        if glob_import {
+            module.gate_complete = false;
+            append_limitation(
+                module,
+                "module contains a glob import whose gate dependency surface is ambiguous",
+            );
         }
 
         if unresolved_repository_import {
