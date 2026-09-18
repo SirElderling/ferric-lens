@@ -127,6 +127,12 @@ pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResu
         &changes,
         &correspondence,
     );
+    rebind_advisory_identities(
+        &mut findings,
+        &current.modules,
+        &baseline_snapshot.modules,
+        &correspondence,
+    );
 
     if !current.metadata_complete && !current.modules.is_empty() {
         gate.incomplete_reasons
@@ -249,6 +255,37 @@ pub fn accept_finding_with_base(
     }
 
     acceptance::record(root, fingerprint, reason, &result.snapshot.content_digest)
+}
+
+fn rebind_advisory_identities(
+    findings: &mut [model::Finding],
+    head: &[ModuleMetrics],
+    baseline: &[ModuleMetrics],
+    correspondence: &compare::Correspondence,
+) {
+    for finding in findings
+        .iter_mut()
+        .filter(|finding| finding.rule == "structure.current_coupled_outlier")
+    {
+        let Some((head_index, _)) = head.iter().enumerate().find(|(_, module)| {
+            display_subject(&module.crate_name, &module.module_path) == finding.subject
+        }) else {
+            continue;
+        };
+        let Some(&baseline_index) = correspondence.head_to_baseline.get(&head_index) else {
+            continue;
+        };
+        let previous = &baseline[baseline_index];
+        finding.identity = display_subject(&previous.crate_name, &previous.module_path);
+    }
+}
+
+fn display_subject(crate_name: &str, module_path: &str) -> String {
+    if module_path.is_empty() {
+        crate_name.to_owned()
+    } else {
+        format!("{crate_name}::{module_path}")
+    }
 }
 
 fn finalize_findings(root: &Path, findings: &mut [model::Finding]) -> Result<(), String> {
