@@ -42,6 +42,19 @@ pub struct BaselineContext {
     pub content_digest: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct DependencyCycle {
+    pub modules: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ArchitectureSummary {
+    pub modules: usize,
+    pub explicit_dependency_edges: usize,
+    pub incomplete_modules: usize,
+    pub cycles: Vec<DependencyCycle>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImportPath {
     pub segments: Vec<String>,
@@ -179,6 +192,7 @@ pub struct AnalysisResult {
     pub verdict: GateVerdict,
     pub verdict_reason: String,
     pub applicable_gate_subjects: usize,
+    pub architecture: ArchitectureSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history: Option<HistorySummary>,
     pub capabilities: Vec<Capability>,
