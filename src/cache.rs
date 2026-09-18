@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{input::SourceFile, model::ModuleMetrics};
 
-const RAW_FACT_SCHEMA: u32 = 1;
+const RAW_FACT_SCHEMA: u32 = 2;
 const MAX_CACHE_BYTES: u64 = 256 * 1024 * 1024;
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -59,6 +59,7 @@ impl RawFactCache {
         module.module_path = source.module_path.clone();
         module.path = source.relative_path.clone();
         module.local_dependency_modules.clear();
+        module.history = None;
         Some(module)
     }
 
@@ -76,6 +77,7 @@ impl RawFactCache {
         raw.module_path.clear();
         raw.path.clear();
         raw.local_dependency_modules.clear();
+        raw.history = None;
 
         let payload = serde_json::to_vec(&raw)
             .map_err(|error| format!("cannot encode cached facts: {error}"))?;
@@ -210,6 +212,7 @@ mod tests {
             parse_complete: true,
             gate_complete: true,
             limitation: None,
+            history: None,
         }
     }
 
