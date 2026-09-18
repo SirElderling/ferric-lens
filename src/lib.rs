@@ -4,6 +4,7 @@
 //! modules mirror the boundaries described in ARCHITECTURE.md without
 //! introducing a framework or cross-module trait hierarchy prematurely.
 
+pub mod compare;
 pub mod extract;
 pub mod git;
 pub mod input;
@@ -13,18 +14,220 @@ pub mod rules;
 
 use std::path::Path;
 
-use model::{AnalysisResult, Capability, CapabilityStatus, GateVerdict};
+use model::{
+    AnalysisResult, BaselineContext, Capability, CapabilityStatus, GateVerdict, ModuleMetrics,
+    Snapshot,
+};
 
-/// Analyze the current working tree.
-///
-/// V1 baseline comparison is not implemented in this foundation slice yet, so
-/// the returned gate verdict is explicitly inconclusive. Current-snapshot facts
-/// and advisory findings are nevertheless complete for the files successfully
-/// inventoried and parsed.
+struct SnapshotAnalysis {
+    content_digest: String,
+    metadata_complete: bool,
+    metadata_detail: Option<String>,
+    modules: Vec<ModuleMetrics>,
+    parse_failures: usize,
+}
+
 pub fn analyze(root: &Path) -> Result<AnalysisResult, String> {
-    let inventory = input::inventory(root)?;
-    let git = git::inspect(root);
+    analyze_with_base(root, None)
+}
 
+pub fn analyze_with_base(root: &Path, base: Option<&str>) -> Result<AnalysisResult, String> {
+    let current = analyze_snapshot(root)?;
+    let git_state = git::inspect(root);
+    let snapshot = Snapshot {
+        content_digest: current.content_digest.clone(),
+        git_head: git_state.head,
+        dirty: git_state.dirty,
+        source_files: current.modules.len(),
+    };
+
+    let mut capabilities = snapshot_capabilities("head", &current);
+    let mut findings = rules::current_snapshot_findings(&current.modules);
+
+    let baseline_selection = match git::resolve_baseline(root, base) {
+        Ok(selection) => selection,
+        Err(error) => {
+            capabilities.push(Capability {
+                name: "baseline_comparison".into(),
+                status: CapabilityStatus::Unavailable,
+                detail: Some(error.clone()),
+            });
+            capabilities.sort_by(|a, b| a.name.cmp(&b.name));
+            return Ok(AnalysisResult {
+                schema_version: 1,
+                tool_version: env!("CARGO_PKG_VERSION").into(),
+                snapshot,
+                baseline: None,
+                verdict: GateVerdict::Inconclusive,
+                verdict_reason: format!("baseline comparison unavailable: {error}"),
+                applicable_gate_subjects: 0,
+                capabilities,
+                modules: current.modules,
+                findings,
+            });
+        }
+    };
+
+    let baseline_worktree = match git::materialize_worktree(root, &baseline_selection.merge_base) {
+        Ok(worktree) => worktree,
+        Err(error) => {
+            capabilities.push(Capability {
+                name: "baseline_comparison".into(),
+                status: CapabilityStatus::Unavailable,
+                detail: Some(error.clone()),
+            });
+            capabilities.sort_by(|a, b| a.name.cmp(&b.name));
+            return Ok(AnalysisResult {
+                schema_version: 1,
+                tool_version: env!("CARGO_PKG_VERSION").into(),
+                snapshot,
+                baseline: None,
+                verdict: GateVerdict::Inconclusive,
+                verdict_reason: format!("baseline materialization unavailable: {error}"),
+                applicable_gate_subjects: 0,
+                capabilities,
+                modules: current.modules,
+                findings,
+            });
+        }
+    };
+
+    let baseline_snapshot = match analyze_snapshot(baseline_worktree.path()) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            capabilities.push(Capability {
+                name: "baseline_comparison".into(),
+                status: CapabilityStatus::Unavailable,
+                detail: Some(error.clone()),
+            });
+            capabilities.sort_by(|a, b| a.name.cmp(&b.name));
+            return Ok(AnalysisResult {
+                schema_version: 1,
+                tool_version: env!("CARGO_PKG_VERSION").into(),
+                snapshot,
+                baseline: None,
+                verdict: GateVerdict::Inconclusive,
+                verdict_reason: format!("baseline analysis failed: {error}"),
+                applicable_gate_subjects: 0,
+                capabilities,
+                modules: current.modules,
+                findings,
+            });
+        }
+    };
+
+    let changes = git::changes_since(root, &baseline_selection.merge_base)?;
+    let correspondence =
+        compare::match_modules(&baseline_snapshot.modules, &current.modules, &changes);
+    let mut gate = rules::evaluate_regressions(
+        &baseline_snapshot.modules,
+        &current.modules,
+        &changes,
+        &correspondence,
+    );
+
+    if !current.metadata_complete && !current.modules.is_empty() {
+        gate.incomplete_reasons
+            .push("head Cargo/source inventory is incomplete".into());
+    }
+    if !baseline_snapshot.metadata_complete && !baseline_snapshot.modules.is_empty() {
+        gate.incomplete_reasons
+            .push("baseline Cargo/source inventory is incomplete".into());
+    }
+    if current.parse_failures > 0 {
+        gate.incomplete_reasons.push(format!(
+            "head has {} unparsed Rust source file(s)",
+            current.parse_failures
+        ));
+    }
+    if baseline_snapshot.parse_failures > 0 {
+        gate.incomplete_reasons.push(format!(
+            "baseline has {} unparsed Rust source file(s)",
+            baseline_snapshot.parse_failures
+        ));
+    }
+    gate.incomplete_reasons.sort();
+    gate.incomplete_reasons.dedup();
+
+    findings.extend(gate.findings);
+    findings.sort_by(|a, b| {
+        b.gate
+            .cmp(&a.gate)
+            .then_with(|| (&a.rule, &a.subject).cmp(&(&b.rule, &b.subject)))
+    });
+
+    let has_regression = findings.iter().any(|finding| finding.gate);
+    let (verdict, verdict_reason) = if has_regression {
+        (
+            GateVerdict::Regression,
+            "at least one unaccepted gate regression was established".to_owned(),
+        )
+    } else if !gate.incomplete_reasons.is_empty() {
+        (
+            GateVerdict::Inconclusive,
+            format!(
+                "required gate evidence is incomplete: {}",
+                gate.incomplete_reasons.join("; ")
+            ),
+        )
+    } else if gate.applicable_subjects == 0 {
+        (
+            GateVerdict::Pass,
+            "enabled gate checks completed; no gate subjects were applicable".to_owned(),
+        )
+    } else {
+        (
+            GateVerdict::Pass,
+            format!(
+                "enabled gate checks completed for {} applicable subject(s); no regression established",
+                gate.applicable_subjects
+            ),
+        )
+    };
+
+    capabilities.extend(snapshot_capabilities("baseline", &baseline_snapshot));
+    capabilities.push(Capability {
+        name: "baseline_comparison".into(),
+        status: if gate.incomplete_reasons.is_empty() {
+            CapabilityStatus::Complete
+        } else {
+            CapabilityStatus::Partial
+        },
+        detail: if gate.incomplete_reasons.is_empty() {
+            Some(format!(
+                "target {} at {}, merge base {}",
+                baseline_selection.target_ref,
+                short_oid(&baseline_selection.target_oid),
+                short_oid(&baseline_selection.merge_base)
+            ))
+        } else {
+            Some(gate.incomplete_reasons.join("; "))
+        },
+    });
+    capabilities.sort_by(|a, b| a.name.cmp(&b.name));
+
+    Ok(AnalysisResult {
+        schema_version: 1,
+        tool_version: env!("CARGO_PKG_VERSION").into(),
+        snapshot,
+        baseline: Some(BaselineContext {
+            target_ref: baseline_selection.target_ref,
+            target_oid: baseline_selection.target_oid,
+            merge_base: baseline_selection.merge_base,
+            source_files: baseline_snapshot.modules.len(),
+            content_digest: baseline_snapshot.content_digest,
+        }),
+        verdict,
+        verdict_reason,
+        applicable_gate_subjects: gate.applicable_subjects,
+        capabilities,
+        modules: current.modules,
+        findings,
+    })
+}
+
+fn analyze_snapshot(root: &Path) -> Result<SnapshotAnalysis, String> {
+    let inventory = input::inventory(root)?;
     let mut modules = Vec::with_capacity(inventory.sources.len());
     let mut parse_failures = 0usize;
 
@@ -33,7 +236,7 @@ pub fn analyze(root: &Path) -> Result<AnalysisResult, String> {
             Ok(module) => modules.push(module),
             Err(error) => {
                 parse_failures += 1;
-                modules.push(model::ModuleMetrics::unsupported(
+                modules.push(ModuleMetrics::unsupported(
                     source.crate_name.clone(),
                     source.module_path.clone(),
                     source.relative_path.clone(),
@@ -46,59 +249,47 @@ pub fn analyze(root: &Path) -> Result<AnalysisResult, String> {
     modules.sort_by(|a, b| {
         (&a.crate_name, &a.module_path, &a.path).cmp(&(&b.crate_name, &b.module_path, &b.path))
     });
-
     extract::resolve_local_dependencies(&mut modules);
-    let findings = rules::current_snapshot_findings(&modules);
 
-    let mut capabilities = vec![Capability {
-        name: "source_inventory".into(),
-        status: if inventory.metadata_complete {
-            CapabilityStatus::Complete
-        } else {
-            CapabilityStatus::Partial
-        },
-        detail: inventory.metadata_detail.clone(),
-    }];
-
-    capabilities.push(Capability {
-        name: "syntax_extraction".into(),
-        status: if parse_failures == 0 {
-            CapabilityStatus::Complete
-        } else {
-            CapabilityStatus::Partial
-        },
-        detail: if parse_failures == 0 {
-            None
-        } else {
-            Some(format!(
-                "{parse_failures} Rust source file(s) could not be parsed"
-            ))
-        },
-    });
-
-    capabilities.push(Capability {
-        name: "baseline_comparison".into(),
-        status: CapabilityStatus::Unavailable,
-        detail: Some("baseline comparison is not implemented in the foundation slice".into()),
-    });
-
-    capabilities.sort_by(|a, b| a.name.cmp(&b.name));
-
-    Ok(AnalysisResult {
-        schema_version: 1,
-        tool_version: env!("CARGO_PKG_VERSION").into(),
-        snapshot: model::Snapshot {
-            content_digest: inventory.content_digest,
-            git_head: git.head,
-            dirty: git.dirty,
-            source_files: modules.len(),
-        },
-        verdict: GateVerdict::Inconclusive,
-        verdict_reason:
-            "baseline comparison is not implemented yet; advisory current-snapshot analysis is available"
-                .into(),
-        capabilities,
+    Ok(SnapshotAnalysis {
+        content_digest: inventory.content_digest,
+        metadata_complete: inventory.metadata_complete,
+        metadata_detail: inventory.metadata_detail,
         modules,
-        findings,
+        parse_failures,
     })
+}
+
+fn snapshot_capabilities(side: &str, snapshot: &SnapshotAnalysis) -> Vec<Capability> {
+    vec![
+        Capability {
+            name: format!("{side}.source_inventory"),
+            status: if snapshot.metadata_complete {
+                CapabilityStatus::Complete
+            } else {
+                CapabilityStatus::Partial
+            },
+            detail: snapshot.metadata_detail.clone(),
+        },
+        Capability {
+            name: format!("{side}.syntax_extraction"),
+            status: if snapshot.parse_failures == 0 {
+                CapabilityStatus::Complete
+            } else {
+                CapabilityStatus::Partial
+            },
+            detail: if snapshot.parse_failures == 0 {
+                None
+            } else {
+                Some(format!(
+                    "{} Rust source file(s) could not be parsed",
+                    snapshot.parse_failures
+                ))
+            },
+        },
+    ]
+}
+
+fn short_oid(oid: &str) -> &str {
+    oid.get(..12).unwrap_or(oid)
 }
