@@ -688,7 +688,27 @@ fn module_path_from_relative(relative: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{module_path_from_relative, rust_name};
+    use std::{
+        collections::BTreeSet,
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    use super::{collect_reachable_module, module_path_from_relative, rust_name};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_root() -> PathBuf {
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "ferric-lens-input-test-{}-{counter}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("src")).unwrap();
+        root
+    }
 
     #[test]
     fn derives_module_paths_from_common_layouts() {
@@ -697,6 +717,74 @@ mod tests {
         assert_eq!(module_path_from_relative("src/foo/mod.rs"), "foo");
         assert_eq!(module_path_from_relative("src/foo/bar.rs"), "foo::bar");
         assert_eq!(module_path_from_relative("crates/a/src/x.rs"), "x");
+    }
+
+    #[test]
+    fn target_inventory_excludes_orphan_rust_files() {
+        let root = temp_root();
+        fs::write(root.join("src/lib.rs"), "mod used;").unwrap();
+        fs::write(root.join("src/used.rs"), "pub fn used() {}").unwrap();
+        fs::write(root.join("src/orphan.rs"), "pub fn orphan() {}").unwrap();
+
+        let mut visited = BTreeSet::new();
+        let mut sources = Vec::new();
+        let mut limitations = Vec::new();
+        collect_reachable_module(
+            &root,
+            "demo",
+            &root.join("src/lib.rs"),
+            "",
+            true,
+            None,
+            &mut visited,
+            &mut sources,
+            &mut limitations,
+        )
+        .unwrap();
+
+        sources.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        assert_eq!(
+            sources
+                .iter()
+                .map(|source| source.relative_path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src/lib.rs", "src/used.rs"]
+        );
+        assert!(limitations.is_empty());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn discovers_file_modules_nested_under_inline_modules() {
+        let root = temp_root();
+        fs::create_dir_all(root.join("src/outer")).unwrap();
+        fs::write(root.join("src/lib.rs"), "mod outer { mod child; }").unwrap();
+        fs::write(root.join("src/outer/child.rs"), "pub fn child() {}").unwrap();
+
+        let mut visited = BTreeSet::new();
+        let mut sources = Vec::new();
+        let mut limitations = Vec::new();
+        collect_reachable_module(
+            &root,
+            "demo",
+            &root.join("src/lib.rs"),
+            "",
+            true,
+            None,
+            &mut visited,
+            &mut sources,
+            &mut limitations,
+        )
+        .unwrap();
+
+        assert!(sources.iter().any(|source| {
+            source.relative_path == "src/outer/child.rs"
+                && source.module_path == "outer::child"
+        }));
+        assert!(limitations.is_empty());
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
