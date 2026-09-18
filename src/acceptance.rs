@@ -96,7 +96,6 @@ pub fn record(
     fingerprint: &str,
     reason: &str,
     expected_source_digest: &str,
-    profile: &ProfileContext,
 ) -> Result<(), String> {
     let fingerprint = fingerprint.trim();
     let reason = reason.trim();
