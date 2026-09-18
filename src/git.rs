@@ -14,12 +14,7 @@ pub fn inspect(root: &Path) -> GitState {
 
     let dirty = command(
         root,
-        &[
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--untracked-files=all",
-        ],
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
     )
     .ok()
     .map(|value| !value.is_empty());
