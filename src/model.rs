@@ -129,12 +129,17 @@ pub struct Evidence {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Finding {
+    pub fingerprint: String,
     pub rule: String,
     pub subject: String,
+    pub identity: String,
     pub evidence_class: EvidenceClass,
     pub priority: Priority,
     pub delta: DeltaStatus,
     pub gate: bool,
+    pub accepted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acceptance_reason: Option<String>,
     pub summary: String,
     pub direction: String,
     pub evidence: Vec<Evidence>,
