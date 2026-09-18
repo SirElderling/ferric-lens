@@ -8,7 +8,8 @@ The product contract is defined in [VISION.md](VISION.md), [PROJECT_SPEC.md](PRO
 
 Ferric Lens currently:
 
-- inventories production Rust sources from local Cargo metadata, with an explicit partial-coverage fallback,
+- inventories production Rust sources from Cargo library/binary target roots and follows reachable `mod` declarations, with an explicit partial-coverage fallback,
+- excludes orphan `.rs` files from Cargo-backed production analysis and keeps same-named library/binary targets distinct,
 - parses Rust syntax without compiling or executing the target project,
 - measures module decision sites, declared public items, explicit imports, and resolvable local dependency breadth,
 - identifies advisory current-snapshot structural outliers,
@@ -23,9 +24,11 @@ Ferric Lens currently:
 - reuses content-addressed raw syntax facts through a disposable 256 MiB repository cache,
 - enriches full `analyze` reports with bounded recent churn and co-change evidence,
 - keeps `check` on the fast core path without optional history or imported evidence,
+- reports resolved repository dependency edges and observed explicit-import cycles as architecture evidence,
 - accepts one validated, normalized local JSON evidence envelope for full-report enrichment,
 - supports fingerprinted, reasoned finding acceptances in a tool-managed repository file,
 - keeps accepted findings visible while excluding only exact accepted gate evidence from failure,
+- publishes JSON/HTML files through atomic replacement,
 - uses exit codes `0=pass`, `1=regression`, and `2=inconclusive/error`.
 
 Existing unchanged debt does not fail a branch.
@@ -137,4 +140,4 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 ```
 
-GitHub Actions runs verification on GitHub-hosted Linux and macOS runners with full Git history.
+GitHub Actions runs verification on GitHub-hosted Linux and macOS runners with full Git history. Each runner performs formatting, Clippy with warnings denied, all tests, a real Ferric Lens self-check against `origin/main`, and a release build.
