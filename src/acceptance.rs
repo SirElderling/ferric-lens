@@ -82,6 +82,8 @@ pub fn fingerprint_findings(findings: &mut [Finding]) {
 
 pub fn apply(findings: &mut [Finding], acceptances: &AcceptanceSet) {
     for finding in findings {
+        finding.accepted = false;
+        finding.acceptance_reason = None;
         if let Some(reason) = acceptances.by_fingerprint.get(&finding.fingerprint) {
             finding.accepted = true;
             finding.acceptance_reason = Some(reason.clone());
