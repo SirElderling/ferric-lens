@@ -194,7 +194,6 @@ fn inventory_from_metadata(
         .collect::<Vec<_>>();
 
     let mut package_roots = BTreeMap::<PathBuf, String>::new();
-    let mut package_library_crates = BTreeMap::<PathBuf, String>::new();
 
     for package in &packages {
         let manifest = PathBuf::from(&package.manifest_path);
@@ -206,21 +205,19 @@ fn inventory_from_metadata(
         if !package_root.starts_with(&metadata_root) || !package_root.starts_with(root) {
             continue;
         }
-
-        package_roots.insert(package_root.clone(), package.name.clone());
-        if let Some(target) = package.targets.iter().find(|target| {
-            target
-                .kind
-                .iter()
-                .any(|kind| kind == "lib" || kind == "rlib")
-        }) {
-            package_library_crates.insert(package_root, rust_name(&target.name));
-        }
+        package_roots.insert(package_root, package.name.clone());
     }
 
-    let mut target_roots = Vec::<(String, PathBuf, PathBuf)>::new();
-    let mut crate_package_roots = BTreeMap::<String, PathBuf>::new();
+    #[derive(Clone)]
+    struct TargetRoot {
+        id: String,
+        import_name: String,
+        kind: &'static str,
+        source: PathBuf,
+        package_root: PathBuf,
+    }
 
+    let mut raw_targets = Vec::<(String, &'static str, PathBuf, PathBuf)>::new();
     for package in &packages {
         let manifest = PathBuf::from(&package.manifest_path);
         let package_root = manifest
@@ -232,13 +229,17 @@ fn inventory_from_metadata(
         }
 
         for target in &package.targets {
-            if !target
+            let kind = if target
                 .kind
                 .iter()
-                .any(|kind| kind == "lib" || kind == "rlib" || kind == "bin")
+                .any(|kind| kind == "lib" || kind == "rlib")
             {
+                "lib"
+            } else if target.kind.iter().any(|kind| kind == "bin") {
+                "bin"
+            } else {
                 continue;
-            }
+            };
 
             let source = PathBuf::from(&target.src_path);
             if !source.starts_with(package_root)
@@ -248,20 +249,63 @@ fn inventory_from_metadata(
                 continue;
             }
 
-            let crate_name = rust_name(&target.name);
-            target_roots.push((crate_name.clone(), source, package_root.to_path_buf()));
-            crate_package_roots
-                .entry(crate_name)
-                .or_insert_with(|| package_root.to_path_buf());
+            raw_targets.push((
+                rust_name(&target.name),
+                kind,
+                source,
+                package_root.to_path_buf(),
+            ));
         }
     }
 
-    target_roots.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
+    let mut name_counts = BTreeMap::<(PathBuf, String), usize>::new();
+    for (import_name, _, _, package_root) in &raw_targets {
+        *name_counts
+            .entry((package_root.clone(), import_name.clone()))
+            .or_default() += 1;
+    }
+
+    let mut target_roots = raw_targets
+        .into_iter()
+        .map(|(import_name, kind, source, package_root)| {
+            let duplicate_name = name_counts
+                .get(&(package_root.clone(), import_name.clone()))
+                .copied()
+                .unwrap_or(0)
+                > 1;
+            let id = if duplicate_name {
+                format!("{import_name}[{kind}]")
+            } else {
+                import_name.clone()
+            };
+            TargetRoot {
+                id,
+                import_name,
+                kind,
+                source,
+                package_root,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    target_roots.sort_by(|left, right| {
+        (&left.id, &left.source).cmp(&(&right.id, &right.source))
+    });
+
+    let mut package_library_crates = BTreeMap::<PathBuf, (String, String)>::new();
+    for target in &target_roots {
+        if target.kind == "lib" {
+            package_library_crates.insert(
+                target.package_root.clone(),
+                (target.import_name.clone(), target.id.clone()),
+            );
+        }
+    }
 
     let mut aliases = WorkspaceAliases::new();
-    for (crate_name, package_root) in &crate_package_roots {
+    for target in &target_roots {
         let Some(package) = packages.iter().find(|package| {
-            Path::new(&package.manifest_path).parent() == Some(package_root.as_path())
+            Path::new(&package.manifest_path).parent() == Some(target.package_root.as_path())
         }) else {
             continue;
         };
@@ -272,31 +316,42 @@ fn inventory_from_metadata(
                 continue;
             };
             let dependency_root = PathBuf::from(path);
-            let Some(target_crate) = package_library_crates.get(&dependency_root) else {
+            let Some((_, target_id)) = package_library_crates.get(&dependency_root) else {
                 continue;
             };
             let alias = dependency.rename.as_deref().unwrap_or(&dependency.name);
-            crate_aliases.insert(rust_name(alias), target_crate.clone());
+            crate_aliases.insert(rust_name(alias), target_id.clone());
         }
 
-        if let Some(library_crate) = package_library_crates.get(package_root) {
-            if library_crate != crate_name {
-                crate_aliases.insert(library_crate.clone(), library_crate.clone());
+        if target.kind != "lib" {
+            if let Some((library_import_name, library_id)) =
+                package_library_crates.get(&target.package_root)
+            {
+                crate_aliases.insert(library_import_name.clone(), library_id.clone());
+                crate_aliases.insert(
+                    rust_name(
+                        package_roots
+                            .get(&target.package_root)
+                            .map(String::as_str)
+                            .unwrap_or(library_import_name),
+                    ),
+                    library_id.clone(),
+                );
             }
         }
 
-        aliases.insert(crate_name.clone(), crate_aliases);
+        aliases.insert(target.id.clone(), crate_aliases);
     }
 
     let mut sources = Vec::new();
     let mut limitations = Vec::new();
 
-    for (crate_name, source, _package_root) in target_roots {
+    for target in target_roots {
         let mut visited = BTreeSet::new();
         collect_reachable_module(
             root,
-            &crate_name,
-            &source,
+            &target.id,
+            &target.source,
             "",
             true,
             profile,
