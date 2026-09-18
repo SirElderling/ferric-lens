@@ -8,11 +8,12 @@ use syn::{
 };
 
 use crate::{
+    cfg::{HostCfg, Truth},
     input::{SourceFile, WorkspaceAliases},
     model::{ImportPath, ModuleMetrics},
 };
 
-pub fn extract(source: &SourceFile) -> Result<ModuleMetrics, String> {
+pub fn extract(source: &SourceFile, cfg: &HostCfg) -> Result<ModuleMetrics, String> {
     let text = std::str::from_utf8(&source.bytes)
         .map_err(|error| format!("source is not valid UTF-8: {error}"))?;
     let syntax: File =
@@ -22,7 +23,7 @@ pub fn extract(source: &SourceFile) -> Result<ModuleMetrics, String> {
         .to_hex()
         .to_string();
 
-    let mut visitor = MetricsVisitor::default();
+    let mut visitor = MetricsVisitor::new(cfg);
     visitor.visit_file(&syntax);
     visitor
         .imports
@@ -46,15 +47,25 @@ pub fn extract(source: &SourceFile) -> Result<ModuleMetrics, String> {
     })
 }
 
-#[derive(Default)]
-struct MetricsVisitor {
+struct MetricsVisitor<'cfg> {
+    cfg: &'cfg HostCfg,
     decision_sites: usize,
     public_items: usize,
     imports: Vec<ImportPath>,
     gate_limitation: Option<String>,
 }
 
-impl MetricsVisitor {
+impl<'cfg> MetricsVisitor<'cfg> {
+    fn new(cfg: &'cfg HostCfg) -> Self {
+        Self {
+            cfg,
+            decision_sites: 0,
+            public_items: 0,
+            imports: Vec::new(),
+            gate_limitation: None,
+        }
+    }
+
     fn limit_gate(&mut self, reason: &str) {
         if self.gate_limitation.is_none() {
             self.gate_limitation = Some(reason.to_owned());
@@ -62,15 +73,23 @@ impl MetricsVisitor {
     }
 }
 
-impl<'ast> Visit<'ast> for MetricsVisitor {
+impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
     fn visit_item(&mut self, item: &'ast Item) {
         let attrs = item_attributes(item);
-        if attrs.iter().any(is_exact_cfg_test) {
+        if attrs.iter().any(|attr| attr.path().is_ident("cfg_attr")) {
+            self.limit_gate("module contains cfg_attr syntax not yet modeled");
             return;
         }
-        if attrs.iter().any(|attr| attr.path().is_ident("cfg")) {
-            self.limit_gate("module contains cfg-dependent production syntax not yet selected");
+
+        match item_cfg_state(attrs, self.cfg) {
+            Truth::False => return,
+            Truth::Unknown => {
+                self.limit_gate("module contains unresolved production cfg syntax");
+                return;
+            }
+            Truth::True => {}
         }
+
         if is_public(item) {
             self.public_items += 1;
         }
@@ -152,11 +171,28 @@ fn item_attributes(item: &Item) -> &[Attribute] {
     }
 }
 
-fn is_exact_cfg_test(attr: &Attribute) -> bool {
-    attr.path().is_ident("cfg")
-        && attr
-            .parse_args::<syn::Path>()
-            .is_ok_and(|path| path.is_ident("test"))
+fn item_cfg_state(attrs: &[Attribute], cfg: &HostCfg) -> Truth {
+    let mut state = Truth::True;
+
+    for attr in attrs.iter().filter(|attr| attr.path().is_ident("cfg")) {
+        let Ok(meta) = attr.parse_args::<syn::Meta>() else {
+            return Truth::Unknown;
+        };
+        state = combine_and(state, cfg.evaluate(&meta));
+        if state == Truth::False {
+            return Truth::False;
+        }
+    }
+
+    state
+}
+
+fn combine_and(left: Truth, right: Truth) -> Truth {
+    match (left, right) {
+        (Truth::False, _) | (_, Truth::False) => Truth::False,
+        (Truth::Unknown, _) | (_, Truth::Unknown) => Truth::Unknown,
+        (Truth::True, Truth::True) => Truth::True,
+    }
 }
 
 fn is_public(item: &Item) -> bool {
@@ -406,9 +442,14 @@ mod tests {
 
     use super::{extract, resolve_workspace_dependencies};
     use crate::{
+        cfg::HostCfg,
         input::{SourceFile, WorkspaceAliases},
         model::ModuleMetrics,
     };
+
+    fn host() -> HostCfg {
+        HostCfg::test(&["unix", "target_family=\"unix\"", "target_os=\"linux\""])
+    }
 
     fn source(text: &str) -> SourceFile {
         SourceFile {
@@ -429,7 +470,7 @@ mod tests {
             }
             mod child { fn hidden() { if true {} } }
             "#,
-        ))
+        ), &host())
         .unwrap();
 
         assert_eq!(metrics.decision_sites, 4);
@@ -444,7 +485,7 @@ mod tests {
             #[cfg(test)]
             fn only_test() { if true {} }
             "#,
-        ))
+        ), &host())
         .unwrap();
 
         assert_eq!(metrics.decision_sites, 1);
@@ -454,23 +495,43 @@ mod tests {
     #[test]
     fn marks_unknown_cfg_and_macros_incomplete_for_gating() {
         let cfg_metrics =
-            extract(&source("#[cfg(target_os = \"linux\")] fn platform() {}")).unwrap();
+            extract(&source("#[cfg(my_custom_cfg)] fn platform() {}"), &host()).unwrap();
         assert!(!cfg_metrics.gate_complete);
 
-        let macro_metrics = extract(&source("fn f() { vec![1, 2, 3]; }")).unwrap();
+        let macro_metrics = extract(&source("fn f() { vec![1, 2, 3]; }"), &host()).unwrap();
         assert!(!macro_metrics.gate_complete);
     }
 
     #[test]
+    fn excludes_false_host_cfg_items_from_metrics() {
+        let metrics = extract(
+            &source(
+                r#"
+                #[cfg(target_os = "macos")]
+                fn mac_only() { if true {} }
+
+                #[cfg(target_os = "linux")]
+                fn linux_only() { if true {} }
+                "#,
+            ),
+            &host(),
+        )
+        .unwrap();
+
+        assert_eq!(metrics.decision_sites, 1);
+        assert!(metrics.gate_complete);
+    }
+
+    #[test]
     fn formatting_does_not_change_structure_digest() {
-        let left = extract(&source("fn f(){if true{}}")).unwrap();
-        let right = extract(&source("fn f() { if true { } }")).unwrap();
+        let left = extract(&source("fn f(){if true{}}"), &host()).unwrap();
+        let right = extract(&source("fn f() { if true { } }"), &host()).unwrap();
         assert_eq!(left.structure_digest, right.structure_digest);
     }
 
     #[test]
     fn flattens_grouped_imports_deterministically() {
-        let metrics = extract(&source("use crate::model::{Thing, nested::Other};")).unwrap();
+        let metrics = extract(&source("use crate::model::{Thing, nested::Other};"), &host()).unwrap();
         let paths = metrics
             .explicit_imports
             .iter()
@@ -540,6 +601,6 @@ mod tests {
             relative_path: relative_path.into(),
             bytes: text.as_bytes().to_vec(),
         };
-        extract(&source).unwrap()
+        extract(&source, &host()).unwrap()
     }
 }
