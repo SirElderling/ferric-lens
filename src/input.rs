@@ -742,7 +742,10 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use super::{collect_reachable_module, module_path_from_relative, rust_name};
+    use super::{
+        collect_reachable_module, inventory_from_metadata, module_path_from_relative, rust_name,
+        Metadata, Package, Target,
+    };
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -829,6 +832,53 @@ mod tests {
             source.relative_path == "src/outer/child.rs" && source.module_path == "outer::child"
         }));
         assert!(limitations.is_empty());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn library_and_binary_with_same_target_name_remain_distinct() {
+        let root = temp_root();
+        fs::write(root.join("Cargo.toml"), "[package]\nname='demo'\nversion='0.1.0'\n").unwrap();
+        fs::write(root.join("src/lib.rs"), "pub fn library() {}").unwrap();
+        fs::write(root.join("src/main.rs"), "use demo::library; fn main() { library(); }").unwrap();
+
+        let package_id = "path+file:///demo#0.1.0".to_owned();
+        let metadata = Metadata {
+            packages: vec![Package {
+                name: "demo".into(),
+                id: package_id.clone(),
+                manifest_path: root.join("Cargo.toml").to_string_lossy().into_owned(),
+                targets: vec![
+                    Target {
+                        name: "demo".into(),
+                        kind: vec!["lib".into()],
+                        src_path: root.join("src/lib.rs").to_string_lossy().into_owned(),
+                    },
+                    Target {
+                        name: "demo".into(),
+                        kind: vec!["bin".into()],
+                        src_path: root.join("src/main.rs").to_string_lossy().into_owned(),
+                    },
+                ],
+                dependencies: Vec::new(),
+            }],
+            workspace_members: vec![package_id],
+            workspace_root: root.to_string_lossy().into_owned(),
+        };
+
+        let (sources, aliases, limitations) =
+            inventory_from_metadata(&root, metadata, None).unwrap();
+
+        assert!(limitations.is_empty());
+        assert!(sources.iter().any(|source| source.crate_name == "demo[lib]"));
+        assert!(sources.iter().any(|source| source.crate_name == "demo[bin]"));
+        assert_eq!(
+            aliases
+                .get("demo[bin]")
+                .and_then(|aliases| aliases.get("demo")),
+            Some(&"demo[lib]".to_owned())
+        );
 
         fs::remove_dir_all(root).unwrap();
     }
