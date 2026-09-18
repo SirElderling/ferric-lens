@@ -96,9 +96,14 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
         visit::visit_item(self, item);
     }
 
-    fn visit_item_mod(&mut self, _item: &'ast ItemMod) {
-        // A child module is its own structural subject. visit_item already
-        // counted the declaration when public; do not descend into its body.
+    fn visit_item_mod(&mut self, item: &'ast ItemMod) {
+        // File-backed child modules are separate structural subjects discovered
+        // by input inventory. Inline modules have no independent file subject in
+        // V1, so retain their facts in the containing file rather than dropping
+        // executable code from analysis.
+        if item.content.is_some() {
+            visit::visit_item_mod(self, item);
+        }
     }
 
     fn visit_item_use(&mut self, item: &'ast ItemUse) {
