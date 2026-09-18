@@ -6,7 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Finding;
+use crate::{model::Finding, profile::ProfileContext};
 
 const ACCEPTANCE_VERSION: u32 = 1;
 
@@ -92,6 +92,7 @@ pub fn apply(findings: &mut [Finding], acceptances: &AcceptanceSet) {
 
 pub fn record(
     root: &Path,
+    profile: &ProfileContext,
     fingerprint: &str,
     reason: &str,
     expected_source_digest: &str,
@@ -105,7 +106,7 @@ pub fn record(
         return Err("acceptance reason must be non-empty".into());
     }
 
-    let actual_digest = crate::input::inventory(root)?.content_digest;
+    let actual_digest = crate::input::inventory_with_profile(root, profile)?.content_digest;
     if actual_digest != expected_source_digest {
         return Err(
             "repository source changed after analysis; rerun accept against the current result"
