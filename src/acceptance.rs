@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use crate::model::Finding;
 
 const ACCEPTANCE_VERSION: u32 = 1;
-const CONFIGURATION_ID: &str = "default";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Acceptance {
@@ -137,7 +136,7 @@ pub fn record(
 fn fingerprint(finding: &Finding) -> String {
     let mut hasher = blake3::Hasher::new();
     feed(&mut hasher, "ferric-lens-finding");
-    feed(&mut hasher, CONFIGURATION_ID);
+    feed(&mut hasher, &finding.configuration);
     feed(&mut hasher, &finding.rule);
     feed(&mut hasher, rule_revision(&finding.rule));
     feed(&mut hasher, &finding.identity);
@@ -213,6 +212,7 @@ mod tests {
             rule: "structure.coupled_complexity_growth".into(),
             subject: "demo::engine".into(),
             identity: "demo::engine".into(),
+            configuration: "target=host;features=default".into(),
             evidence_class: EvidenceClass::Strong,
             priority: Priority::ActFirst,
             delta: DeltaStatus::Worsened,
