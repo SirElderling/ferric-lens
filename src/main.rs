@@ -23,6 +23,9 @@ enum Command {
         json: PathBuf,
         #[arg(long, default_value = "ferric-lens-report.html")]
         html: PathBuf,
+        /// Optional normalized local evidence envelope for report enrichment.
+        #[arg(long)]
+        evidence: Option<PathBuf>,
     },
     /// Record an explicit acceptance for one current finding.
     Accept {
@@ -67,8 +70,13 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             base,
             json,
             html,
+            evidence,
         } => {
-            let result = ferric_lens::analyze_with_base(&path, base.as_deref())?;
+            let result = ferric_lens::analyze_with_base_and_evidence(
+                &path,
+                base.as_deref(),
+                evidence.as_deref(),
+            )?;
             let json_text = report::json(&result)?;
             report::write(&json, &json_text)?;
             report::write(&html, &report::html(&result))?;
