@@ -1701,7 +1701,7 @@ fn cargo_resolution_identity_covers_checkout_boundaries_dependencies_and_orderin
     )
     .unwrap();
 
-    let first = Package {
+    let first = || Package {
         name: "demo".into(),
         id: "demo-id".into(),
         manifest_path: root.join("Cargo.toml").to_string_lossy().into_owned(),
@@ -1735,7 +1735,7 @@ fn cargo_resolution_identity_covers_checkout_boundaries_dependencies_and_orderin
             },
         ],
     };
-    let second = Package {
+    let second = || Package {
         name: "second".into(),
         id: "second-id".into(),
         manifest_path: second_manifest.to_string_lossy().into_owned(),
@@ -1760,7 +1760,7 @@ fn cargo_resolution_identity_covers_checkout_boundaries_dependencies_and_orderin
     let first = packages.pop().unwrap();
     let second = packages.remove(0);
     let reordered = Metadata {
-        packages: vec![first, second],
+        packages: vec![first(), second()],
         workspace_members: vec!["second-id".into(), "demo-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
     };
