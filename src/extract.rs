@@ -209,8 +209,8 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
         let owner = self
             .impl_owner
             .last()
-            .cloned()
-            .unwrap_or_else(|| self.scoped_name("<impl>"));
+            .expect("impl method visited without an impl owner")
+            .clone();
         self.functions.push(FunctionFact {
             name: format!("{owner}::{}", item.sig.ident),
             kind: FunctionKind::Method,
@@ -235,8 +235,8 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
         let (owner, public_declared) = self
             .trait_owner
             .last()
-            .cloned()
-            .unwrap_or_else(|| (self.scoped_name("<trait>"), false));
+            .expect("trait method visited without a trait owner")
+            .clone();
         self.functions.push(FunctionFact {
             name: format!("{owner}::{}", item.sig.ident),
             kind: FunctionKind::TraitMethod,
