@@ -8,11 +8,25 @@ use crate::model::{AnalysisResult, Finding, GateVerdict};
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+pub fn result_digest(result: &AnalysisResult) -> Result<String, String> {
+    let bytes = serde_json::to_vec(result)
+        .map_err(|error| format!("cannot serialize result for digest: {error}"))?;
+    Ok(blake3::hash(&bytes).to_hex().to_string())
+}
+
 pub fn json(result: &AnalysisResult) -> Result<String, String> {
-    serde_json::to_string_pretty(result).map_err(|error| format!("cannot serialize JSON: {error}"))
+    let digest = result_digest(result)?;
+    let mut value = serde_json::to_value(result)
+        .map_err(|error| format!("cannot serialize JSON: {error}"))?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "analysis result did not serialize as a JSON object".to_owned())?;
+    object.insert("result_digest".into(), serde_json::Value::String(digest));
+    serde_json::to_string_pretty(&value).map_err(|error| format!("cannot serialize JSON: {error}"))
 }
 
 pub fn html(result: &AnalysisResult) -> String {
+    let result_digest = result_digest(result).unwrap_or_else(|_| "unavailable".into());
     let verdict = match result.verdict {
         GateVerdict::Pass => "PASS",
         GateVerdict::Regression => "REGRESSION",
@@ -247,7 +261,7 @@ code {{ overflow-wrap: anywhere; }}
 <body>
 <header><h1>Ferric Lens</h1><p class="verdict">{verdict}</p><p>{reason}</p></header>
 <section class="grid">
-<div class="card"><h2>Snapshot</h2><p><strong>Digest</strong><br><code>{digest}</code></p><p>{source_files} source files<br>{applicable} applicable gate subjects</p></div>
+<div class="card"><h2>Snapshot</h2><p><strong>Result digest</strong><br><code>{result_digest}</code></p><p><strong>Source digest</strong><br><code>{digest}</code></p><p>{source_files} source files<br>{applicable} applicable gate subjects</p></div>
 <div class="card"><h2>Baseline</h2>{baseline}</div>
 <div class="card"><h2>Profile</h2>{profile_summary}</div>
 <div class="card"><h2>Architecture</h2>{architecture_summary}</div>
@@ -260,6 +274,7 @@ code {{ overflow-wrap: anywhere; }}
 <section><h2>Codebase map</h2>{modules}</section>
 </body></html>"#,
         reason = escape(&result.verdict_reason),
+        result_digest = escape(&result_digest),
         digest = escape(&result.snapshot.content_digest),
         source_files = result.snapshot.source_files,
         applicable = result.applicable_gate_subjects,
@@ -369,10 +384,60 @@ fn escape(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::escape;
+    use crate::model::{
+        AnalysisProfile, AnalysisResult, ArchitectureSummary, GateVerdict, Snapshot,
+    };
+
+    use super::{escape, html, json, result_digest};
 
     #[test]
     fn escapes_html_metacharacters() {
         assert_eq!(escape("<a x='&'>\""), "&lt;a x=&#39;&amp;&#39;&gt;&quot;");
+    }
+
+    fn minimal_result() -> AnalysisResult {
+        AnalysisResult {
+            schema_version: 1,
+            tool_version: "test".into(),
+            snapshot: Snapshot {
+                content_digest: "source".into(),
+                git_head: None,
+                dirty: Some(false),
+                source_files: 0,
+            },
+            profile: AnalysisProfile {
+                id: "host".into(),
+                target: "host".into(),
+                resolved_target: "x86_64-unknown-linux-gnu".into(),
+                features: Vec::new(),
+                target_cfg: Vec::new(),
+            },
+            baseline: None,
+            verdict: GateVerdict::Pass,
+            verdict_reason: "complete".into(),
+            applicable_gate_subjects: 0,
+            architecture: ArchitectureSummary {
+                modules: 0,
+                explicit_dependency_edges: 0,
+                incomplete_modules: 0,
+                cycles: Vec::new(),
+            },
+            history: None,
+            imported_evidence: None,
+            capabilities: Vec::new(),
+            modules: Vec::new(),
+            findings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn json_and_html_embed_the_same_semantic_result_digest() {
+        let result = minimal_result();
+        let digest = result_digest(&result).unwrap();
+        let json = json(&result).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value["result_digest"], digest);
+        assert!(html(&result).contains(&digest));
     }
 }
