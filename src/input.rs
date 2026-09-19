@@ -759,6 +759,19 @@ fn fallback_inventory(root: &Path) -> Result<(Vec<SourceFile>, Vec<String>), Str
     Ok((sources, limitations))
 }
 
+fn collect_directory_entries<I>(
+    entries: I,
+    directory: &Path,
+) -> Result<Vec<fs::DirEntry>, String>
+where
+    I: IntoIterator<Item = std::io::Result<fs::DirEntry>>,
+{
+    entries
+        .into_iter()
+        .map(|entry| io_with_path(entry, "read directory entry", directory))
+        .collect()
+}
+
 fn collect_rust_files(
     repo_root: &Path,
     directory: &Path,
@@ -773,11 +786,7 @@ fn collect_rust_files(
     }
 
     let entries = io_with_path(fs::read_dir(directory), "read", directory)?;
-    let mut entries = io_with_path(
-        entries.collect::<Result<Vec<_>, _>>(),
-        "read directory entry",
-        directory,
-    )?;
+    let mut entries = collect_directory_entries(entries, directory)?;
     entries.sort_by_key(|entry| entry.file_name());
 
     for entry in entries {
