@@ -551,3 +551,58 @@ fn cfg_disabled_impl_members_do_not_contribute_item_or_clone_facts() {
         .iter()
         .any(|fact| fact.name.ends_with("enabled")));
 }
+
+
+#[test]
+fn member_cfg_gaps_skip_impl_trait_and_foreign_facts() {
+    let metrics = extract(
+        &source(
+            r#"
+            struct Item;
+            impl Item {
+                #[cfg_attr(unix, inline)]
+                fn impl_cfg_attr(&self) {}
+
+                #[cfg(my_custom_cfg)]
+                fn impl_unknown(&self) {}
+            }
+
+            trait Contract {
+                #[cfg(my_custom_cfg)]
+                fn trait_unknown(&self);
+            }
+
+            unsafe extern "C" {
+                #[cfg_attr(unix, allow(dead_code))]
+                fn foreign_cfg_attr();
+            }
+            "#,
+        ),
+        &host(),
+    )
+    .unwrap();
+
+    assert!(!metrics.gate_complete);
+    for name in [
+        "impl_cfg_attr",
+        "impl_unknown",
+        "trait_unknown",
+        "foreign_cfg_attr",
+    ] {
+        assert!(!metrics
+            .functions
+            .iter()
+            .any(|fact| fact.name.ends_with(name)));
+    }
+}
+
+#[test]
+fn non_clone_method_calls_do_not_increment_clone_syntax_count() {
+    let metrics = extract(
+        &source("fn f(value: Value) { value.observe(); }"),
+        &host(),
+    )
+    .unwrap();
+
+    assert_eq!(metrics.clone_calls, 0);
+}
