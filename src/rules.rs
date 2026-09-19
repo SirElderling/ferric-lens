@@ -33,8 +33,15 @@ pub fn refactor_candidates(findings: &[Finding]) -> Vec<Finding> {
         .iter()
         .filter(|finding| !finding.rule.starts_with("refactor."))
     {
-        if finding.evidence.iter().any(|item| refactor_signal(&item.metric).is_some()) {
-            by_subject.entry(&finding.subject).or_default().push(finding);
+        if finding
+            .evidence
+            .iter()
+            .any(|item| refactor_signal(&item.metric).is_some())
+        {
+            by_subject
+                .entry(&finding.subject)
+                .or_default()
+                .push(finding);
         }
     }
 
