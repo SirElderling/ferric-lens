@@ -1224,7 +1224,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(sources.len(), 1);
-        assert!(limitations.iter().any(|detail| detail.contains("is unavailable")));
+        assert!(limitations
+            .iter()
+            .any(|detail| detail.contains("is unavailable")));
         assert!(limitations
             .iter()
             .any(|detail| detail.contains("exceeds the 8 MiB source limit")));
@@ -1274,7 +1276,11 @@ mod tests {
     fn reachable_module_reports_non_utf8_and_invalid_rust_without_dropping_source_bytes() {
         for (name, bytes, expected) in [
             ("binary.rs", vec![0xff], "not UTF-8"),
-            ("broken.rs", b"fn {".to_vec(), "cannot discover child modules"),
+            (
+                "broken.rs",
+                b"fn {".to_vec(),
+                "cannot discover child modules",
+            ),
         ] {
             let root = temp_root();
             fs::write(root.join("src").join(name), bytes).unwrap();
@@ -1338,11 +1344,7 @@ mod tests {
 
     #[test]
     fn module_discovery_reports_cfg_path_missing_and_ambiguous_sources() {
-        use crate::{
-            cfg::HostCfg,
-            model::AnalysisProfile,
-            profile::ProfileContext,
-        };
+        use crate::{cfg::HostCfg, model::AnalysisProfile, profile::ProfileContext};
 
         let root = temp_root();
         fs::create_dir_all(root.join("src/ambiguous")).unwrap();
@@ -1363,11 +1365,7 @@ mod tests {
         )
         .unwrap();
         fs::write(root.join("src/ambiguous.rs"), "pub fn a() {}").unwrap();
-        fs::write(
-            root.join("src/ambiguous/mod.rs"),
-            "pub fn nested() {}",
-        )
-        .unwrap();
+        fs::write(root.join("src/ambiguous/mod.rs"), "pub fn nested() {}").unwrap();
 
         let profile = ProfileContext {
             public: AnalysisProfile {
@@ -1478,8 +1476,16 @@ mod tests {
         let crate_b = root.join("crates/b");
         fs::create_dir_all(crate_a.join("src")).unwrap();
         fs::create_dir_all(crate_b.join("src")).unwrap();
-        fs::write(crate_a.join("Cargo.toml"), "[package]\nname='a'\nversion='0.1.0'\n").unwrap();
-        fs::write(crate_b.join("Cargo.toml"), "[package]\nname='b'\nversion='0.1.0'\n").unwrap();
+        fs::write(
+            crate_a.join("Cargo.toml"),
+            "[package]\nname='a'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            crate_b.join("Cargo.toml"),
+            "[package]\nname='b'\nversion='0.1.0'\n",
+        )
+        .unwrap();
         fs::write(crate_a.join("src/lib.rs"), "pub fn a() {}").unwrap();
         fs::write(crate_b.join("src/lib.rs"), "pub fn b() {}").unwrap();
         fs::write(crate_a.join("src/ignored.rs"), "pub fn ignored() {}").unwrap();
@@ -1570,7 +1576,9 @@ mod tests {
         assert_eq!(module_path_from_relative("foo.rs"), "foo");
         assert_eq!(module_path_from_relative("main.rs"), "");
         assert_eq!(module_path_from_relative("a/b/mod.rs"), "a::b");
-        assert_eq!(super::slash_path(std::path::Path::new("a").join("b").as_path()), "a/b");
+        assert_eq!(
+            super::slash_path(std::path::Path::new("a").join("b").as_path()),
+            "a/b"
+        );
     }
-
 }
