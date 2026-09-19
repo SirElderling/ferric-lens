@@ -947,7 +947,11 @@ fn finalize_findings_propagates_acceptance_load_failure() {
 
 #[test]
 fn advisory_materiality_helpers_are_conservative_and_metric_aware() {
-    assert!(!super::advisory_growth_is_material("decision_sites", 10, 12));
+    assert!(!super::advisory_growth_is_material(
+        "decision_sites",
+        10,
+        12
+    ));
     assert!(super::advisory_growth_is_material("decision_sites", 10, 13));
     assert!(!super::advisory_growth_is_material(
         "local_dependency_modules",
@@ -988,12 +992,7 @@ fn advisory_materiality_helpers_are_conservative_and_metric_aware() {
     let baseline = vec![owner.clone(), caller_a, caller_b];
 
     assert_eq!(
-        super::advisory_baseline_metric_value(
-            "decision_sites",
-            &owner,
-            "demo::owner",
-            &baseline
-        ),
+        super::advisory_baseline_metric_value("decision_sites", &owner, "demo::owner", &baseline),
         Some(7)
     );
     assert_eq!(
