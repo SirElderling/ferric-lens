@@ -489,7 +489,7 @@ fn build_rebuild_exposure_candidates(modules: &[ModuleMetrics]) -> Vec<Finding> 
     for module in eligible {
         let module_subject = subject(&module.crate_name, &module.module_path);
         let dependents = reverse_dependents[&module_subject];
-        if dependents <= p90 {
+        if !materially_above_reference(dependents, p90) {
             continue;
         }
         findings.push(Finding {
@@ -724,6 +724,12 @@ fn dominant_unique_max(values: &[usize]) -> Option<(usize, usize, usize)> {
     }
 
     Some((max_index, max, runner_up))
+}
+
+fn materially_above_reference(value: usize, reference: usize) -> bool {
+    value > reference
+        && value >= reference.saturating_add(2)
+        && value >= reference.saturating_mul(2)
 }
 
 fn nearest_rank_p90(values: &[usize]) -> usize {
