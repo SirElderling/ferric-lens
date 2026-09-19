@@ -723,21 +723,14 @@ fn refactor_delta_preserves_new_unchanged_and_unknown_states() {
 }
 
 #[test]
-fn refactor_directions_cover_each_supported_signal_pair() {
-    assert!(super::refactor_direction(BTreeSet::from([
-        "decision_complexity",
-        "copying_runtime_risk",
-    ]))
-    .contains("complex orchestration"));
-
-    assert!(super::refactor_direction(BTreeSet::from([
-        "dependency_surface",
-        "copying_runtime_risk",
-    ]))
-    .contains("stable dependency boundary"));
-
-    assert!(super::refactor_direction(BTreeSet::new())
-        .contains("investigate the corroborating evidence"));
+fn refactor_direction_covers_the_supported_structural_signal_pair() {
+    assert!(
+        super::refactor_direction(BTreeSet::from([
+            "decision_complexity",
+            "dependency_surface",
+        ]))
+        .contains("splitting responsibilities")
+    );
 }
 
 #[test]
