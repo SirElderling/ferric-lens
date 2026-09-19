@@ -30,7 +30,6 @@ pub fn json(result: &AnalysisResult) -> String {
     serde_json::to_string_pretty(&value).expect("analysis result JSON value is serializable")
 }
 
-
 #[derive(Debug, Clone, Copy)]
 struct FindingGuidance {
     title: &'static str,
@@ -123,9 +122,7 @@ pub fn ai_json(result: &AnalysisResult) -> String {
         analysis_limits: result
             .capabilities
             .iter()
-            .filter(|capability| {
-                capability.status != crate::model::CapabilityStatus::Complete
-            })
+            .filter(|capability| capability.status != crate::model::CapabilityStatus::Complete)
             .map(|capability| AiLimit {
                 capability: &capability.name,
                 status: capability_status_label(&capability.status),
@@ -338,7 +335,6 @@ fn verdict_label(verdict: &GateVerdict) -> &'static str {
     }
 }
 
-
 pub fn html(result: &AnalysisResult) -> String {
     let result_digest = result_digest(result);
     let active_findings = ordered_findings(
@@ -494,7 +490,11 @@ fn render_repository_overview(result: &AnalysisResult) -> String {
 <div class="card"><h3>Structure</h3><p><strong>{modules} modules</strong><br>{edges} resolved repository dependency edges</p><p>{cycles}</p></div>
 <div class="card"><h3>Analysis confidence</h3><p>{quality}</p></div>
 </div>"#,
-        areas = count_phrase(subjects.len(), "area worth reviewing", "areas worth reviewing"),
+        areas = count_phrase(
+            subjects.len(),
+            "area worth reviewing",
+            "areas worth reviewing",
+        ),
         modules = result.architecture.modules,
         edges = result.architecture.explicit_dependency_edges,
         cycles = escape(&cycle_text),
@@ -563,7 +563,9 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
             if module_findings.len() != 1 {
                 html.push('s');
             }
-            html.push_str(" above. This explorer shows structural context for the affected area.</p><p>");
+            html.push_str(
+                " above. This explorer shows structural context for the affected area.</p><p>",
+            );
             for (index, finding) in module_findings.iter().enumerate() {
                 if index > 0 {
                     html.push_str(" · ");
@@ -610,7 +612,11 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
                 html.push_str("</code> · ");
                 html.push_str(&escape(&format!("{:?}", function.kind).to_lowercase()));
                 html.push_str(" · ");
-                html.push_str(if function.public_declared { "public" } else { "private" });
+                html.push_str(if function.public_declared {
+                    "public"
+                } else {
+                    "private"
+                });
                 html.push_str("</li>");
             }
             html.push_str("</ul></details>");
@@ -625,13 +631,19 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
                 html.push_str("</code> · ");
                 html.push_str(&escape(&format!("{:?}", item_type.kind).to_lowercase()));
                 html.push_str(" · ");
-                html.push_str(if item_type.public_declared { "public" } else { "private" });
+                html.push_str(if item_type.public_declared {
+                    "public"
+                } else {
+                    "private"
+                });
                 html.push_str("</li>");
             }
             html.push_str("</ul></details>");
         }
         if let Some(history) = &module.history {
-            html.push_str(r#"<details class="explorer-detail"><summary>History context</summary><p>"#);
+            html.push_str(
+                r#"<details class="explorer-detail"><summary>History context</summary><p>"#,
+            );
             html.push_str(&escape(&format!(
                 "Changed in {} of {} sampled non-merge commits.",
                 history.change_commits, history.sampled_commits
@@ -740,7 +752,6 @@ fn render_analysis_details(result: &AnalysisResult, digest: &str) -> String {
     )
 }
 
-
 fn render_triage_summary(result: &AnalysisResult) -> String {
     let summary = ai_summary(result);
     format!(
@@ -755,7 +766,6 @@ fn render_triage_summary(result: &AnalysisResult) -> String {
         count_phrase(summary.observe, "observe", "observe"),
     )
 }
-
 
 fn active_subjects(result: &AnalysisResult) -> std::collections::BTreeSet<&str> {
     result
@@ -777,7 +787,6 @@ fn best_priority_rank(findings: &[&Finding]) -> u8 {
 fn count_phrase(count: usize, singular: &str, plural: &str) -> String {
     format!("{count} {}", if count == 1 { singular } else { plural })
 }
-
 
 fn render_findings(
     findings: &[&Finding],
@@ -871,7 +880,9 @@ fn render_findings(
 
         let contexts = contexts_for_finding(finding, source_contexts);
         if !contexts.is_empty() {
-            html.push_str(r#"<details class="source-evidence"><summary>Relevant source evidence ("#);
+            html.push_str(
+                r#"<details class="source-evidence"><summary>Relevant source evidence ("#,
+            );
             html.push_str(&contexts.len().to_string());
             html.push_str(")</summary>");
             for context in contexts {
@@ -900,7 +911,9 @@ fn render_findings(
             html.push_str("</p>");
         }
 
-        html.push_str("<details><summary>Technical details</summary><p><strong>Rule:</strong> <code>");
+        html.push_str(
+            "<details><summary>Technical details</summary><p><strong>Rule:</strong> <code>",
+        );
         html.push_str(&escape(&finding.rule));
         html.push_str("</code><br><strong>Fingerprint:</strong> <code>");
         html.push_str(&escape(&finding.fingerprint));
