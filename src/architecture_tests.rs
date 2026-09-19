@@ -46,7 +46,6 @@ fn reports_incomplete_graph_coverage_without_inventing_cycles() {
     assert!(summary.cycles.is_empty());
 }
 
-
 #[test]
 fn ignores_dependencies_outside_the_observed_module_graph() {
     let summary = summarize(&[module("a", &["external::missing", "demo::a"])]);
