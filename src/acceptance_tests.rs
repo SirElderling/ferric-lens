@@ -248,7 +248,6 @@ fn atomic_write_reports_temporary_write_failure() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn record_propagates_inventory_and_existing_acceptance_errors() {
     let profile = ProfileContext::resolve(None, &[]).unwrap();
@@ -257,9 +256,11 @@ fn record_propagates_inventory_and_existing_acceptance_errors() {
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&missing);
-    assert!(record(&missing, &profile, "fingerprint", "reason", "digest")
-        .unwrap_err()
-        .contains("cannot resolve"));
+    assert!(
+        record(&missing, &profile, "fingerprint", "reason", "digest")
+            .unwrap_err()
+            .contains("cannot resolve")
+    );
 
     let root = temp_root();
     let digest = crate::input::inventory_with_profile(&root, &profile)
