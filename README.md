@@ -181,8 +181,11 @@ Pull-request CI also uploads the locked release executable from each Linux/macOS
 
 Ferric Lens has three intentionally different presentation surfaces built from the same canonical result:
 
-- **HTML for people** — starts with what deserves attention. Each finding explains what Ferric Lens noticed, why it matters, what could happen if the concern grows, what evidence supports it, what to investigate next, and where to look in source. Repository metrics without a finding are explicitly context, not warnings.
-- **Default CLI for people and CI logs** — concise verdict plus the highest-priority active findings, using the same plain-language titles and next steps as HTML.
-- **`--ai` for agents** — compact deterministic JSON with the actionable subset. Agents do not need the explanatory page layout or the full repository inventory, but they still receive evidence, source locations, rule identity, limitations, and the canonical result digest.
+- **HTML for people** — starts with what deserves attention. `Act first` and `Investigate` findings explain what Ferric Lens noticed, why it matters, what could happen if the concern grows, what evidence supports it, what to investigate next, and where to look in source. Lower-confidence `Observe` signals are kept in a separate secondary **Observations** section and do not count as areas needing attention. Repository metrics without a finding are explicitly context, not warnings.
+- **Default CLI for people and CI logs** — concise verdict plus the highest-priority actionable findings, using the same plain-language titles and next steps as HTML. Lower-confidence observations are summarized by count instead of consuming the main CLI output.
+- **`--ai` for agents** — compact deterministic JSON with actionable `findings` and a separate `observations` collection. Agents do not need the explanatory page layout or the full repository inventory, but they still receive evidence, source locations, rule identity, limitations, and the canonical result digest.
 
 The full canonical JSON remains the lossless interface when a consumer needs every module, capability, imported observation, or structural fact.
+
+
+Small-cohort descriptive rules deliberately avoid treating "the largest value" as meaningful by itself. A unique maximum must also have a material lead over the next-highest module: at least half of the runner-up value, with a minimum absolute gap of two. The evidence reference for these observations is the runner-up rather than the median. This keeps near-ties such as 128 vs 119 decision sites or 22 vs 21 clone sites from becoming alerts simply because one module must rank first.
