@@ -495,7 +495,38 @@ fn collect_reachable_module(
         return Ok(());
     }
 
-    let canonical = io_with_path(source_path.canonicalize(), "resolve", source_path)?;
+    collect_canonical_module(
+        repo_root,
+        crate_name,
+        source_path,
+        module_path,
+        is_crate_root,
+        profile,
+        metadata.len(),
+        source_path.canonicalize(),
+        visited,
+        budget,
+        out,
+        limitations,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_canonical_module(
+    repo_root: &Path,
+    crate_name: &str,
+    source_path: &Path,
+    module_path: &str,
+    is_crate_root: bool,
+    profile: Option<&ProfileContext>,
+    source_len: u64,
+    canonical_result: std::io::Result<PathBuf>,
+    visited: &mut BTreeSet<PathBuf>,
+    budget: &mut SourceBudget,
+    out: &mut Vec<SourceFile>,
+    limitations: &mut Vec<String>,
+) -> Result<(), String> {
+    let canonical = io_with_path(canonical_result, "resolve", source_path)?;
     if !canonical.starts_with(repo_root) {
         limitations.push(format!(
             "{crate_name}: module source {} resolves outside the repository",
@@ -508,7 +539,7 @@ fn collect_reachable_module(
         return Ok(());
     }
 
-    if !budget.reserve(metadata.len()) {
+    if !budget.reserve(source_len) {
         limitations.push(
             "aggregate production source input exceeds the 512 MiB snapshot limit; remaining modules were not acquired"
                 .into(),
@@ -796,7 +827,13 @@ fn collect_rust_files(
 
 fn read_directory_paths(directory: &Path) -> Result<Vec<PathBuf>, String> {
     let entries = io_with_path(fs::read_dir(directory), "read", directory)?;
-    let mut entries = collect_directory_entries(entries, directory)?;
+    directory_paths_from_entries(collect_directory_entries(entries, directory))
+}
+
+fn directory_paths_from_entries(
+    entries: Result<Vec<fs::DirEntry>, String>,
+) -> Result<Vec<PathBuf>, String> {
+    let mut entries = entries?;
     entries.sort_by_key(|entry| entry.file_name());
     Ok(entries.into_iter().map(|entry| entry.path()).collect())
 }
