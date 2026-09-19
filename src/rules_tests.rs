@@ -452,6 +452,7 @@ fn unique_max_helper_handles_empty_and_singleton_inputs_without_false_concentrat
     assert_eq!(super::dominant_unique_max(&[]), None);
     assert_eq!(super::dominant_unique_max(&[7]), None);
     assert_eq!(super::dominant_unique_max(&[1, 2]), None);
+    assert_eq!(super::dominant_unique_max(&[1, 2, 10, 3]), Some((2, 10, 3)));
 }
 
 fn advisory_finding(
