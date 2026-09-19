@@ -246,7 +246,7 @@ fn counts_every_v1_decision_syntax_family() {
     )
     .unwrap();
 
-    assert_eq!(metrics.decision_sites, 6);
+    assert_eq!(metrics.decision_sites, 5);
 }
 
 #[test]
@@ -947,5 +947,71 @@ fn source_context_span_capture_covers_every_decision_syntax_family() {
 
     assert_eq!(contexts.len(), 3);
     assert!(contexts.iter().all(|context| context.start_line > 0));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn exhaustive_declarative_match_counts_as_one_branch_construct() {
+    let metrics = extract(
+        &source(
+            r#"
+            fn label(value: u8) -> &'static str {
+                match value {
+                    0 => "zero",
+                    1 => "one",
+                    2 => "two",
+                    3 => "three",
+                    _ => "other",
+                }
+            }
+            "#,
+        ),
+        &host(),
+    )
+    .unwrap();
+
+    assert_eq!(metrics.decision_sites, 1);
+}
+
+#[test]
+fn clone_source_context_prefers_mutable_or_iterated_aggregate_copies() {
+    let root = context_root("clone-priority");
+    let text = concat!(
+        "fn run(world: World) {\n",
+        "    let a = world.name.clone();\n",
+        "    let b = world.name.clone();\n",
+        "    let c = world.name.clone();\n",
+        "    let mut selected = world.clone();\n",
+        "    for item in world.items.clone() { drop(item); }\n",
+        "    selected.items.clear();\n",
+        "}\n",
+    );
+    fs::write(root.join("src/engine.rs"), text).unwrap();
+    let module = context_module("engine", "src/engine.rs", text);
+    let digests = BTreeMap::from([("src/engine.rs".into(), source_digest(text.as_bytes()))]);
+
+    let contexts = super::source_contexts_for_findings(
+        &root,
+        std::slice::from_ref(&module),
+        &WorkspaceAliases::new(),
+        &digests,
+        &[context_finding("demo::engine", &["clone_call_syntax_sites"])],
+        &host(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    let clone_contexts = contexts
+        .iter()
+        .filter(|context| context.metric == "clone_call_syntax_sites")
+        .collect::<Vec<_>>();
+    assert_eq!(clone_contexts.len(), 3);
+    assert!(clone_contexts
+        .iter()
+        .any(|context| context.excerpt.contains("let mut selected = world.clone()")));
+    assert!(clone_contexts
+        .iter()
+        .any(|context| context.excerpt.contains("world.items.clone()")));
+
     fs::remove_dir_all(root).unwrap();
 }
