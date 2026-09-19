@@ -159,3 +159,5 @@ python3 tools/perf_acceptance.py \
 ```
 
 The workflow can also be dispatched with `source-10x` (1,000,000 production Rust lines) or `history-10x` (2,000 history commits after baseline). Browser DOM/open cost and private-project precision checks remain explicit release-acceptance observations rather than hidden dependencies of the tool.
+
+Pull-request CI also uploads the locked release executable from each Linux/macOS runner as a human-test artifact. See [HUMAN_TESTING.md](HUMAN_TESTING.md) for the Jeko/Kronicle validation protocol and finding scorecard.
