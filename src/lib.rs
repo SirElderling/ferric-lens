@@ -115,7 +115,25 @@ fn analyze_internal_with_ops(
     ops: &AnalysisOps,
 ) -> Result<AnalysisResult, String> {
     let profile = profile::ProfileContext::resolve(target, features)?;
-    let mut current = analyze_snapshot(root, root, &profile)?;
+    analyze_internal_with_profile_context(
+        root,
+        base,
+        include_history,
+        evidence_path,
+        &profile,
+        ops,
+    )
+}
+
+fn analyze_internal_with_profile_context(
+    root: &Path,
+    base: Option<&str>,
+    include_history: bool,
+    evidence_path: Option<&Path>,
+    profile: &profile::ProfileContext,
+    ops: &AnalysisOps,
+) -> Result<AnalysisResult, String> {
+    let mut current = analyze_snapshot(root, root, profile)?;
     let architecture = architecture::summarize(&current.modules);
     let git_state = git::inspect(root);
     let snapshot = Snapshot {
@@ -214,7 +232,7 @@ fn analyze_internal_with_ops(
         }
     };
 
-    let baseline_snapshot = match (ops.analyze_baseline)(baseline_worktree.path(), root, &profile) {
+    let baseline_snapshot = match (ops.analyze_baseline)(baseline_worktree.path(), root, profile) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             capabilities.push(Capability {
@@ -425,11 +443,13 @@ pub fn accept_finding_with_profile(
     reason: &str,
 ) -> Result<(), String> {
     let profile = profile::ProfileContext::resolve(target, features)?;
-    let result = check_with_profile(
+    let result = analyze_internal_with_profile_context(
         root,
         base,
-        Some(&profile.public.resolved_target),
-        &profile.public.features,
+        false,
+        None,
+        &profile,
+        &REAL_OPS,
     )?;
     if !result
         .findings
