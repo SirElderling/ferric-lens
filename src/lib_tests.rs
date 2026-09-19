@@ -91,12 +91,7 @@ fn advisory_identity_rebinds_only_with_matching_subject_and_correspondence() {
     assert_eq!(findings[2].identity, "demo::moved");
 
     let mut no_match = vec![finding("structure.current_coupled_outlier", "demo::moved")];
-    super::rebind_advisory_identities(
-        &mut no_match,
-        &head,
-        &baseline,
-        &Correspondence::default(),
-    );
+    super::rebind_advisory_identities(&mut no_match, &head, &baseline, &Correspondence::default());
     assert_eq!(no_match[0].identity, "demo::moved");
 }
 
