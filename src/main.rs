@@ -99,7 +99,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 &features,
                 evidence.as_deref(),
             )?;
-            let json_text = report::json(&result)?;
+            let json_text = report::json(&result);
             report::write(&json, &json_text)?;
             report::write(&html, &report::html(&result))?;
             print_summary(&result);
@@ -138,7 +138,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 &features,
             )?;
             if let Some(path) = json {
-                report::write(&path, &report::json(&result)?)?;
+                report::write(&path, &report::json(&result))?;
             }
             print_summary(&result);
             Ok(exit_code(&result.verdict))
