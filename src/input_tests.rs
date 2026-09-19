@@ -2291,7 +2291,10 @@ fn literal_module_path_rejects_ambiguous_empty_and_list_forms() {
         }
     }
 
-    assert_eq!(super::literal_module_path(&module("mod plain;")).unwrap(), None);
+    assert_eq!(
+        super::literal_module_path(&module("mod plain;")).unwrap(),
+        None
+    );
     assert_eq!(
         super::literal_module_path(&module("#[path = \"custom.rs\"] mod custom;")).unwrap(),
         Some(std::path::PathBuf::from("custom.rs"))
