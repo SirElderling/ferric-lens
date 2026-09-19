@@ -1842,3 +1842,67 @@ fn stability_verification_propagates_cargo_input_read_failure() {
     assert!(error.contains("cannot read Cargo input"));
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn inventory_assembly_propagates_resolution_and_fallback_errors() {
+    let root = temp_root();
+    fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
+    let digest = super::cargo_input_digest(&root).unwrap();
+
+    let missing_manifest = Metadata {
+        packages: vec![Package {
+            name: "missing".into(),
+            id: "missing-id".into(),
+            manifest_path: root
+                .join("missing/Cargo.toml")
+                .to_string_lossy()
+                .into_owned(),
+            targets: Vec::new(),
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec!["missing-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+    assert!(super::assemble_inventory(&root, Ok(missing_manifest), None, &digest)
+        .unwrap_err()
+        .contains("cannot read Cargo manifest"));
+
+    let not_directory = root.join("not-directory");
+    fs::write(&not_directory, "not a directory").unwrap();
+    assert!(super::assemble_inventory(
+        &not_directory,
+        Err("metadata unavailable".into()),
+        None,
+        &digest,
+    )
+    .is_err());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn verified_inventory_propagates_source_stability_failure() {
+    let root = temp_root();
+    fs::write(root.join("Cargo.toml"), "[package]\nname='demo'\nversion='0.1.0'\n").unwrap();
+    fs::write(root.join("src/lib.rs"), "pub fn current() {}\n").unwrap();
+    let digest = super::cargo_input_digest(&root).unwrap();
+    let source = SourceFile {
+        crate_name: "demo".into(),
+        module_path: String::new(),
+        relative_path: "src/lib.rs".into(),
+        bytes: b"pub fn previous() {}\n".to_vec(),
+    };
+
+    let error = super::finalize_verified_inventory(
+        &root,
+        (vec![source], WorkspaceAliases::new(), true, None),
+        &digest,
+        None,
+        super::AuxiliaryTargetSummary::default(),
+    )
+    .unwrap_err();
+
+    assert!(error.contains("changed during analysis"));
+    fs::remove_dir_all(root).unwrap();
+}
