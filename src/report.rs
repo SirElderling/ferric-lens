@@ -4,6 +4,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use serde::Serialize;
+
 use crate::model::{
     AnalysisResult, DeltaStatus, EvidenceClass, Finding, GateVerdict, ModuleMetrics, Priority,
     SourceContext,
@@ -26,6 +28,314 @@ pub fn json(result: &AnalysisResult) -> String {
         .expect("analysis result serializes as a JSON object");
     object.insert("result_digest".into(), serde_json::Value::String(digest));
     serde_json::to_string_pretty(&value).expect("analysis result JSON value is serializable")
+}
+
+
+#[derive(Debug, Clone, Copy)]
+struct FindingGuidance {
+    title: &'static str,
+    why_care: &'static str,
+    if_ignored: &'static str,
+}
+
+#[derive(Serialize)]
+struct AiSummary {
+    areas_worth_reviewing: usize,
+    act_first: usize,
+    investigate: usize,
+    observe: usize,
+    blocking_findings: usize,
+    accepted_findings: usize,
+}
+
+#[derive(Serialize)]
+struct AiLimit<'a> {
+    capability: &'a str,
+    status: &'static str,
+    detail: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct AiFinding<'a> {
+    priority: &'static str,
+    evidence_strength: &'static str,
+    delta: &'static str,
+    gate: bool,
+    title: &'static str,
+    subject: &'a str,
+    path: String,
+    why_care: &'static str,
+    next_step: &'a str,
+    rule: &'a str,
+    evidence: &'a [crate::model::Evidence],
+    source_contexts: Vec<&'a SourceContext>,
+}
+
+#[derive(Serialize)]
+struct AiOutput<'a> {
+    format: &'static str,
+    schema_version: u32,
+    result_digest: String,
+    verdict: &'static str,
+    verdict_reason: &'a str,
+    summary: AiSummary,
+    findings: Vec<AiFinding<'a>>,
+    analysis_limits: Vec<AiLimit<'a>>,
+}
+
+pub fn ai_json(result: &AnalysisResult) -> String {
+    let active = ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| !finding.accepted)
+            .collect(),
+    );
+    let findings = active
+        .iter()
+        .map(|finding| {
+            let guidance = finding_guidance(finding);
+            AiFinding {
+                priority: priority_label(&finding.priority),
+                evidence_strength: evidence_label(&finding.evidence_class),
+                delta: delta_label(&finding.delta),
+                gate: finding.gate,
+                title: guidance.title,
+                subject: &finding.subject,
+                path: finding_path(finding, &result.modules, &result.source_contexts),
+                why_care: guidance.why_care,
+                next_step: &finding.direction,
+                rule: &finding.rule,
+                evidence: &finding.evidence,
+                source_contexts: contexts_for_finding(finding, &result.source_contexts),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let output = AiOutput {
+        format: "ferric_lens_ai",
+        schema_version: 1,
+        result_digest: result_digest(result),
+        verdict: verdict_label(&result.verdict),
+        verdict_reason: &result.verdict_reason,
+        summary: ai_summary(result),
+        findings,
+        analysis_limits: result
+            .capabilities
+            .iter()
+            .filter(|capability| {
+                capability.status != crate::model::CapabilityStatus::Complete
+            })
+            .map(|capability| AiLimit {
+                capability: &capability.name,
+                status: capability_status_label(&capability.status),
+                detail: capability.detail.as_deref(),
+            })
+            .collect(),
+    };
+
+    serde_json::to_string_pretty(&output).expect("AI output is JSON-serializable")
+}
+
+pub fn cli_summary(result: &AnalysisResult) -> String {
+    let active = ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| !finding.accepted)
+            .collect(),
+    );
+    let summary = ai_summary(result);
+    let mut output = String::new();
+    output.push_str(&format!(
+        "Ferric Lens: {}\n{}\n",
+        verdict_label(&result.verdict),
+        result.verdict_reason
+    ));
+    if let Some(baseline) = &result.baseline {
+        output.push_str(&format!(
+            "Baseline: {} (merge base {})\n",
+            baseline.target_ref, baseline.merge_base
+        ));
+    }
+    output.push_str(&format!(
+        "{}\n",
+        count_phrase(
+            summary.areas_worth_reviewing,
+            "area worth reviewing",
+            "areas worth reviewing"
+        )
+    ));
+
+    if active.is_empty() {
+        output.push_str(
+            "No active finding currently has enough evidence to recommend investigation.\n",
+        );
+    } else {
+        for finding in active.iter().take(5) {
+            let guidance = finding_guidance(finding);
+            let path = finding_path(finding, &result.modules, &result.source_contexts);
+            output.push_str(&format!(
+                "\n[{}] {} — {}\nWhy it matters: {}\nNext: {}\n",
+                priority_label(&finding.priority),
+                guidance.title,
+                path,
+                guidance.why_care,
+                finding.direction
+            ));
+        }
+        if active.len() > 5 {
+            output.push_str(&format!(
+                "\n{} additional active finding(s) are available in the HTML/full JSON report.\n",
+                active.len() - 5
+            ));
+        }
+    }
+
+    let limits = result
+        .capabilities
+        .iter()
+        .filter(|capability| capability.status != crate::model::CapabilityStatus::Complete)
+        .count();
+    if limits > 0 {
+        output.push_str(&format!(
+            "\nAnalysis note: {limits} capability limitation(s) were recorded; see the HTML analysis details or canonical JSON for technical detail.\n"
+        ));
+    }
+    output
+}
+
+fn ai_summary(result: &AnalysisResult) -> AiSummary {
+    let active = result
+        .findings
+        .iter()
+        .filter(|finding| !finding.accepted)
+        .collect::<Vec<_>>();
+    AiSummary {
+        areas_worth_reviewing: active
+            .iter()
+            .map(|finding| finding.subject.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        act_first: active
+            .iter()
+            .filter(|finding| finding.priority == Priority::ActFirst)
+            .count(),
+        investigate: active
+            .iter()
+            .filter(|finding| finding.priority == Priority::Investigate)
+            .count(),
+        observe: active
+            .iter()
+            .filter(|finding| finding.priority == Priority::Observe)
+            .count(),
+        blocking_findings: active.iter().filter(|finding| finding.gate).count(),
+        accepted_findings: result
+            .findings
+            .iter()
+            .filter(|finding| finding.accepted)
+            .count(),
+    }
+}
+
+fn ordered_findings(mut findings: Vec<&Finding>) -> Vec<&Finding> {
+    findings.sort_by(|a, b| {
+        priority_rank(&a.priority)
+            .cmp(&priority_rank(&b.priority))
+            .then_with(|| delta_rank(&a.delta).cmp(&delta_rank(&b.delta)))
+            .then_with(|| a.subject.cmp(&b.subject))
+            .then_with(|| a.rule.cmp(&b.rule))
+    });
+    findings
+}
+
+fn finding_guidance(finding: &Finding) -> FindingGuidance {
+    match finding.rule.as_str() {
+        "structure.coupled_complexity_growth" | "structure.current_coupled_outlier" => {
+            FindingGuidance {
+                title: "This module may be harder to change safely",
+                why_care: "It combines unusually complex control flow with a broad repository dependency surface. Changes here can require understanding more execution paths and more neighboring modules at the same time.",
+                if_ignored: "If responsibilities continue to accumulate, routine changes can become slower to review and test and can carry a larger risk of unintended side effects.",
+            }
+        }
+        "structure.small_population_decision_concentration" => FindingGuidance {
+            title: "Complex logic is concentrated here",
+            why_care: "A disproportionate amount of branching is concentrated in this module relative to the small comparable population. That can make behavior harder to reason about even when the repository is too small for a stronger outlier claim.",
+            if_ignored: "Additional branching can make future behavior changes harder to understand and test, especially if unrelated responsibilities collect in the same area.",
+        },
+        "runtime.clone_syntax_outlier" => FindingGuidance {
+            title: "Repeated copying may be worth measuring",
+            why_care: "This module contains unusually many observed .clone() calls. Some clones are cheap and intentional; others copy owned data, so this is a prompt to inspect what is being copied and how often the code runs.",
+            if_ignored: "If the cloned values are large or this path executes frequently, unnecessary copying can consume memory bandwidth or allocation work. Ferric Lens has not established that this is happening.",
+        },
+        "build.rebuild_exposure_candidate" => FindingGuidance {
+            title: "Changes here may affect many parts of the repository",
+            why_care: "Many repository modules depend on this area. A frequently changing shared boundary can increase the amount of code that must be reconsidered or rebuilt after a change.",
+            if_ignored: "A broad, unstable dependency boundary can gradually increase change coordination and incremental-build cost. This finding is structural evidence, not a measured compile-time claim.",
+        },
+        "refactor.multi_signal_candidate" => FindingGuidance {
+            title: "Possible refactoring opportunity",
+            why_care: "Multiple independent signals point to the same module. Corroborating evidence makes it more useful to inspect than a module flagged by only one isolated metric.",
+            if_ignored: "If the signals reflect accumulating responsibilities, the module can become progressively harder to understand, change, and isolate. Ferric Lens does not prescribe a final architecture.",
+        },
+        _ => FindingGuidance {
+            title: "This area is worth reviewing",
+            why_care: "Ferric Lens found deterministic evidence that meets the rule's investigation threshold. Review the evidence in context before deciding whether a change is needed.",
+            if_ignored: "The practical impact depends on the code and workload. Treat this as a focused investigation prompt rather than proof that the design is wrong.",
+        },
+    }
+}
+
+fn finding_path(
+    finding: &Finding,
+    modules: &[ModuleMetrics],
+    source_contexts: &[SourceContext],
+) -> String {
+    modules
+        .iter()
+        .find(|module| module_subject(module) == finding.subject)
+        .map(|module| module.path.clone())
+        .or_else(|| {
+            source_contexts
+                .iter()
+                .find(|context| context.subject == finding.subject)
+                .map(|context| context.path.clone())
+        })
+        .unwrap_or_else(|| finding.subject.clone())
+}
+
+fn contexts_for_finding<'a>(
+    finding: &Finding,
+    source_contexts: &'a [SourceContext],
+) -> Vec<&'a SourceContext> {
+    let evidence_metrics = finding
+        .evidence
+        .iter()
+        .map(|evidence| evidence.metric.as_str())
+        .collect::<Vec<_>>();
+    source_contexts
+        .iter()
+        .filter(|context| {
+            context.subject == finding.subject
+                && evidence_metrics.contains(&context.metric.as_str())
+        })
+        .collect()
+}
+
+fn capability_status_label(status: &crate::model::CapabilityStatus) -> &'static str {
+    match status {
+        crate::model::CapabilityStatus::Complete => "complete",
+        crate::model::CapabilityStatus::Partial => "partial",
+        crate::model::CapabilityStatus::Unavailable => "unavailable",
+    }
+}
+
+fn verdict_label(verdict: &GateVerdict) -> &'static str {
+    match verdict {
+        GateVerdict::Pass => "PASS",
+        GateVerdict::Regression => "REGRESSION",
+        GateVerdict::Inconclusive => "INCONCLUSIVE",
+    }
 }
 
 pub fn html(result: &AnalysisResult) -> String {
