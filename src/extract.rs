@@ -489,7 +489,7 @@ impl SourceMetric {
             "decision_sites" => Some(Self::Decisions),
             "local_dependency_modules" => Some(Self::Dependencies),
             "clone_call_syntax_sites" => Some(Self::Clones),
-            SourceMetric::ReverseDependents => Some(Self::ReverseDependents),
+            "reverse_repository_dependents" => Some(Self::ReverseDependents),
             _ => None,
         }
     }
@@ -499,7 +499,7 @@ impl SourceMetric {
             Self::Decisions => "decision_sites",
             Self::Dependencies => "local_dependency_modules",
             Self::Clones => "clone_call_syntax_sites",
-            Self::ReverseDependents => SourceMetric::ReverseDependents,
+            Self::ReverseDependents => "reverse_repository_dependents",
         }
     }
 }
@@ -632,15 +632,16 @@ pub fn source_contexts_for_findings(
                 }
                 SourceMetric::ReverseDependents => {
                     for module in modules.iter().filter(|module| {
-                        module
-                            .local_dependency_modules
-                            .iter()
-                            .any(|dependency| dependency == &subject)
+                        module.parse_complete
+                            && module
+                                .local_dependency_modules
+                                .iter()
+                                .any(|dependency| dependency == &subject)
                     }) {
                         let dependent = qualify(&module.crate_name, &module.module_path);
-                        let Some(facts) = facts.get(&dependent) else {
-                            continue;
-                        };
+                        let facts = facts
+                            .get(&dependent)
+                            .expect("reverse dependent source facts were preloaded");
                         let aliases = workspace_aliases.get(&module.crate_name);
                         let spans = facts
                             .use_observations
