@@ -204,6 +204,26 @@ impl HostCfg {
     }
 }
 
+
+fn run_rustc_cfg(command: &mut Command) -> Result<std::process::Output, String> {
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(error) => return Err(format!("could not execute rustc --print cfg: {error}")),
+    };
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    Ok(output)
+}
+
+fn parse_rustc_cfg(bytes: &[u8]) -> Result<HostCfg, String> {
+    let text = match std::str::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(error) => return Err(format!("rustc cfg output is not UTF-8: {error}")),
+    };
+    HostCfg::from_lines(text.lines())
+}
+
 fn all(values: impl IntoIterator<Item = Truth>) -> Truth {
     let mut saw_unknown = false;
     for value in values {
