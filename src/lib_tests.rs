@@ -120,6 +120,8 @@ fn snapshot_capabilities_reflect_complete_and_partial_syntax_and_inventory() {
         metadata_detail: None,
         cargo_input_digest: "cargo-input".into(),
         cargo_resolution_digest: Some("cargo-resolution".into()),
+        workspace_aliases: Default::default(),
+        source_digests: Default::default(),
         auxiliary_targets: crate::input::AuxiliaryTargetSummary {
             tests: 1,
             benches: 2,
@@ -159,6 +161,8 @@ fn snapshot_capabilities_reflect_complete_and_partial_syntax_and_inventory() {
         metadata_detail: Some("metadata unavailable".into()),
         cargo_input_digest: "fallback-cargo-input".into(),
         cargo_resolution_digest: None,
+        workspace_aliases: Default::default(),
+        source_digests: Default::default(),
         auxiliary_targets: crate::input::AuxiliaryTargetSummary::default(),
         modules: Vec::new(),
         parse_failures: 2,
