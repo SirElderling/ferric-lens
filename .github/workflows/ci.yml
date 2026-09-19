@@ -69,8 +69,30 @@ jobs:
           cargo llvm-cov report --show-missing-lines
           python3 .github/scripts/check_source_coverage.py target/coverage.json .
 
+      - name: Self-analyze Ferric Lens
+        if: runner.os == 'Linux'
+        run: |
+          set +e
+          cargo run --locked -- analyze . --base origin/main --json target/ferric-lens-self-analysis.json --html target/ferric-lens-self-analysis.html
+          status=$?
+          echo "$status" > target/ferric-lens-self-analysis.exit
+          echo "Ferric Lens self-analysis exit code: $status"
+          exit 0
+
       - name: End-to-end check
         run: cargo run --locked -- check . --base origin/main --json target/ferric-lens-self-check.json
+
+      - name: Upload self-analysis
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferric-lens-self-analysis
+          path: |
+            target/ferric-lens-self-analysis.json
+            target/ferric-lens-self-analysis.html
+            target/ferric-lens-self-analysis.exit
+            target/ferric-lens-self-check.json
+          if-no-files-found: warn
 
       - name: Release build
         run: cargo build --release --locked
