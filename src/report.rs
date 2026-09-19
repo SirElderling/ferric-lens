@@ -26,8 +26,7 @@ pub fn json(result: &AnalysisResult) -> String {
 }
 
 pub fn html(result: &AnalysisResult) -> String {
-    let result_digest =
-        result_digest(result);
+    let result_digest = result_digest(result);
     let verdict = match result.verdict {
         GateVerdict::Pass => "PASS",
         GateVerdict::Regression => "REGRESSION",
