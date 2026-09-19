@@ -47,6 +47,15 @@ pub struct SourceFile {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuxiliaryTargetSummary {
+    pub tests: usize,
+    pub benches: usize,
+    pub examples: usize,
+    pub build_scripts: usize,
+    pub proc_macros: usize,
+}
+
 #[derive(Debug)]
 pub struct Inventory {
     pub sources: Vec<SourceFile>,
@@ -54,6 +63,9 @@ pub struct Inventory {
     pub content_digest: String,
     pub metadata_complete: bool,
     pub metadata_detail: Option<String>,
+    pub cargo_resolution_digest: Option<String>,
+    pub cargo_input_digest: String,
+    pub auxiliary_targets: AuxiliaryTargetSummary,
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,8 +122,31 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
         .canonicalize()
         .map_err(|error| format!("cannot resolve {}: {error}", root.display()))?;
 
-    let acquired = acquire_inventory(&root, load_metadata(&root, profile), profile)?;
-    Ok(finalize_inventory(acquired))
+    let metadata = load_metadata(&root, profile);
+    let cargo_input_digest = cargo_input_digest(&root)?;
+    let auxiliary_targets = metadata
+        .as_ref()
+        .map(|metadata| auxiliary_target_summary(metadata))
+        .unwrap_or_default();
+    let cargo_resolution_digest = metadata
+        .as_ref()
+        .ok()
+        .map(|metadata| cargo_resolution_identity(&root, metadata))
+        .transpose()?;
+
+    let acquired = acquire_inventory(&root, metadata, profile)?;
+    let mut inventory = finalize_inventory(acquired);
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(inventory.content_digest.as_bytes());
+    hasher.update(cargo_input_digest.as_bytes());
+    if let Some(resolution) = &cargo_resolution_digest {
+        hasher.update(resolution.as_bytes());
+    }
+    inventory.content_digest = hasher.finalize().to_hex().to_string();
+    inventory.cargo_resolution_digest = cargo_resolution_digest;
+    inventory.cargo_input_digest = cargo_input_digest;
+    inventory.auxiliary_targets = auxiliary_targets;
+    Ok(inventory)
 }
 
 type AcquiredInventory = (Vec<SourceFile>, WorkspaceAliases, bool, Option<String>);
@@ -201,7 +236,184 @@ fn finalize_inventory(acquired: AcquiredInventory) -> Inventory {
         content_digest: hasher.finalize().to_hex().to_string(),
         metadata_complete: complete,
         metadata_detail: detail,
+        cargo_resolution_digest: None,
+        cargo_input_digest: String::new(),
+        auxiliary_targets: AuxiliaryTargetSummary::default(),
     }
+}
+
+
+fn auxiliary_target_summary(metadata: &Metadata) -> AuxiliaryTargetSummary {
+    let members = metadata
+        .workspace_members
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let mut summary = AuxiliaryTargetSummary::default();
+
+    for package in metadata
+        .packages
+        .iter()
+        .filter(|package| members.contains(package.id.as_str()))
+    {
+        for target in &package.targets {
+            if target.kind.iter().any(|kind| kind == "test") {
+                summary.tests += 1;
+            }
+            if target.kind.iter().any(|kind| kind == "bench") {
+                summary.benches += 1;
+            }
+            if target.kind.iter().any(|kind| kind == "example") {
+                summary.examples += 1;
+            }
+            if target.kind.iter().any(|kind| kind == "custom-build") {
+                summary.build_scripts += 1;
+            }
+            if target.kind.iter().any(|kind| kind == "proc-macro") {
+                summary.proc_macros += 1;
+            }
+        }
+    }
+
+    summary
+}
+
+fn cargo_input_digest(root: &Path) -> Result<String, String> {
+    let mut hasher = blake3::Hasher::new();
+    for name in ["Cargo.toml", "Cargo.lock"] {
+        let path = root.join(name);
+        hasher.update(name.as_bytes());
+        match fs::read(&path) {
+            Ok(bytes) => {
+                hasher.update(&[1]);
+                hasher.update(&bytes);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                hasher.update(&[0]);
+            }
+            Err(error) => {
+                return Err(format!("cannot read Cargo input {}: {error}", path.display()));
+            }
+        }
+    }
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn cargo_resolution_identity(root: &Path, metadata: &Metadata) -> Result<String, String> {
+    let members = metadata
+        .workspace_members
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let mut records = Vec::new();
+
+    for package in metadata
+        .packages
+        .iter()
+        .filter(|package| members.contains(package.id.as_str()))
+    {
+        let manifest = PathBuf::from(&package.manifest_path);
+        let Ok(relative_manifest) = manifest.strip_prefix(root) else {
+            continue;
+        };
+        let manifest_bytes = fs::read(&manifest)
+            .map_err(|error| format!("cannot read Cargo manifest {}: {error}", manifest.display()))?;
+        let mut targets = package
+            .targets
+            .iter()
+            .filter_map(|target| {
+                let source = PathBuf::from(&target.src_path);
+                let relative = source.strip_prefix(root).ok()?;
+                let mut kinds = target.kind.clone();
+                kinds.sort();
+                Some(format!(
+                    "{}|{}|{}",
+                    target.name,
+                    kinds.join(","),
+                    slash_path(relative)
+                ))
+            })
+            .collect::<Vec<_>>();
+        targets.sort();
+
+        let mut dependencies = package
+            .dependencies
+            .iter()
+            .map(|dependency| {
+                let path = dependency.path.as_deref().map_or("", |path| {
+                    Path::new(path)
+                        .strip_prefix(root)
+                        .ok()
+                        .and_then(Path::to_str)
+                        .unwrap_or("<outside-repository>")
+                });
+                format!(
+                    "{}|{}|{}",
+                    dependency.name,
+                    dependency.rename.as_deref().unwrap_or(""),
+                    path
+                )
+            })
+            .collect::<Vec<_>>();
+        dependencies.sort();
+
+        records.push((
+            package.name.clone(),
+            slash_path(relative_manifest),
+            manifest_bytes,
+            targets,
+            dependencies,
+        ));
+    }
+    records.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
+
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(cargo_input_digest(root)?.as_bytes());
+    for (name, manifest, bytes, targets, dependencies) in records {
+        hasher.update(name.as_bytes());
+        hasher.update(&[0]);
+        hasher.update(manifest.as_bytes());
+        hasher.update(&[0]);
+        hasher.update(&bytes);
+        hasher.update(&[0]);
+        for target in targets {
+            hasher.update(target.as_bytes());
+            hasher.update(&[0xfe]);
+        }
+        for dependency in dependencies {
+            hasher.update(dependency.as_bytes());
+            hasher.update(&[0xfd]);
+        }
+    }
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+pub(crate) fn verify_stable_inputs(
+    root: &Path,
+    sources: &[SourceFile],
+    expected_cargo_digest: &str,
+) -> Result<(), String> {
+    for source in sources {
+        let path = root.join(&source.relative_path);
+        let bytes = fs::read(&path).map_err(|_| {
+            format!(
+                "repository source {} changed during analysis",
+                source.relative_path
+            )
+        })?;
+        if bytes != source.bytes {
+            return Err(format!(
+                "repository source {} changed during analysis",
+                source.relative_path
+            ));
+        }
+    }
+
+    if cargo_input_digest(root)? != expected_cargo_digest {
+        return Err("Cargo inputs changed during analysis".into());
+    }
+
+    Ok(())
 }
 
 fn load_metadata(root: &Path, profile: Option<&ProfileContext>) -> Result<Metadata, String> {
