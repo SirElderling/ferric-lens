@@ -445,7 +445,6 @@ pub fn accept_finding_with_profile(
     )
 }
 
-
 fn sort_findings(findings: &mut [model::Finding]) {
     findings.sort_by(|a, b| {
         let gate_order = b.gate.cmp(&a.gate);
