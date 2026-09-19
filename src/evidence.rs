@@ -411,5 +411,4 @@ mod tests {
             .contains("invalid evidence import JSON"));
         fs::remove_file(malformed).unwrap();
     }
-
 }
