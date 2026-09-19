@@ -213,4 +213,36 @@ fn atomic_write_reports_invalid_parent_and_replace_errors() {
         .contains("cannot replace"));
 
     fs::remove_dir_all(root).unwrap();
+}\n
+#[test]
+fn atomic_write_reports_parent_creation_failure() {
+    let root = temp_root();
+    let blocker = root.join("blocker");
+    fs::write(&blocker, "file").unwrap();
+
+    let error = super::atomic_write(&blocker.join("acceptances.toml"), b"x").unwrap_err();
+
+    assert!(error.contains("cannot create"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_write_reports_temporary_write_failure() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_root();
+    let locked = root.join("locked");
+    fs::create_dir_all(&locked).unwrap();
+    let mut permissions = fs::metadata(&locked).unwrap().permissions();
+    permissions.set_mode(0o555);
+    fs::set_permissions(&locked, permissions).unwrap();
+
+    let result = super::atomic_write(&locked.join("acceptances.toml"), b"x");
+
+    let mut permissions = fs::metadata(&locked).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&locked, permissions).unwrap();
+    assert!(result.unwrap_err().contains("cannot write"));
+    fs::remove_dir_all(root).unwrap();
 }
