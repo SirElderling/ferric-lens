@@ -256,3 +256,65 @@ fn public_analysis_surfaces_multi_signal_refactor_candidates() {
     assert!(candidate.summary.contains("dependency surface"));
     assert!(report::json(&result).contains("refactor.multi_signal_candidate"));
 }
+
+
+#[test]
+fn findings_expose_exact_source_lines_and_bounded_excerpts() {
+    let repo = Repo::new("finding-source-context");
+    let declarations = (0..20)
+        .map(|index| format!("mod m{index};"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    repo.write("src/lib.rs", &declarations);
+
+    for index in 0..20 {
+        let (decisions, dependencies) = if index == 0 { (20, 8) } else { (10, 3) };
+        repo.write(
+            &format!("src/m{index}.rs"),
+            &refactor_fixture_module(index, decisions, dependencies),
+        );
+    }
+    repo.commit("baseline");
+
+    let result = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
+    let decision = result
+        .source_contexts
+        .iter()
+        .find(|context| {
+            context.subject == "fixture::m0"
+                && context.metric == "decision_sites"
+                && context.start_line == 10
+        })
+        .expect("decision-site source context");
+    assert_eq!(decision.path, "src/m0.rs");
+    assert_eq!(decision.end_line, 10);
+    assert_eq!(decision.excerpt, "    if value {}");
+
+    let dependency = result
+        .source_contexts
+        .iter()
+        .find(|context| {
+            context.subject == "fixture::m0"
+                && context.metric == "local_dependency_modules"
+                && context.start_line == 1
+        })
+        .expect("dependency source context");
+    assert_eq!(dependency.end_line, 1);
+    assert_eq!(dependency.excerpt, "use crate::m1;");
+
+    assert!(
+        result
+            .source_contexts
+            .iter()
+            .filter(|context| {
+                context.subject == "fixture::m0" && context.metric == "decision_sites"
+            })
+            .count()
+            <= 3
+    );
+
+    let rendered = report::html(&result);
+    assert!(rendered.contains("src/m0.rs:10"));
+    assert!(rendered.contains("<pre><code>    if value {}</code></pre>"));
+    assert!(report::json(&result).contains("\"source_contexts\""));
+}
