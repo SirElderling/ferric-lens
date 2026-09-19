@@ -710,7 +710,7 @@ fn render_analysis_details(result: &AnalysisResult, digest: &str) -> String {
     let external = result.imported_evidence.as_ref().map_or_else(
         || "<p>No external evidence imported.</p>".to_owned(),
         |evidence| {
-            format!(
+            let mut html = format!(
                 "<p><strong>{}</strong> {}<br>{}<br>{}</p>",
                 escape(&evidence.producer),
                 escape(&evidence.producer_version),
@@ -720,7 +720,32 @@ fn render_analysis_details(result: &AnalysisResult, digest: &str) -> String {
                     "unattached context only"
                 },
                 escape(&evidence.attachment_reason)
-            )
+            );
+            if !evidence.observations.is_empty() {
+                html.push_str("<details><summary>");
+                html.push_str(&format!(
+                    "{} imported observation(s)</summary><ul>",
+                    evidence.observations.len()
+                ));
+                for observation in &evidence.observations {
+                    html.push_str("<li><code>");
+                    html.push_str(&escape(&observation.subject));
+                    html.push_str("</code> · ");
+                    html.push_str(&escape(&observation.metric));
+                    html.push_str(" = ");
+                    html.push_str(&escape(&format!(
+                        "{} {}",
+                        observation.value, observation.unit
+                    )));
+                    if let Some(note) = &observation.note {
+                        html.push_str(" — ");
+                        html.push_str(&escape(note));
+                    }
+                    html.push_str("</li>");
+                }
+                html.push_str("</ul></details>");
+            }
+            html
         },
     );
 
@@ -1260,11 +1285,11 @@ mod tests {
 
         let rendered = html(&result);
         assert!(rendered.contains("REGRESSION"));
-        assert!(rendered.contains("observed explicit-import cycle"));
+        assert!(rendered.contains("explicit-import dependency cycle"));
         assert!(rendered.contains("Sample truncated"));
         assert!(rendered.contains("unattached context only"));
         assert!(rendered.contains("&lt;accepted&gt;"));
-        assert!(rendered.contains("co-change"));
+        assert!(rendered.contains("Often changed with"));
 
         let path = std::env::temp_dir().join(format!(
             "ferric-lens-report-test-{}-nested/report.txt",
@@ -1596,7 +1621,9 @@ mod tests {
         assert!(rendered.contains("INCONCLUSIVE"));
         assert!(rendered.contains("attached to current analysis"));
         assert!(!rendered.contains("Sample truncated"));
-        assert!(rendered.matches("<details><summary><strong>").count() >= 2);
+        assert!(rendered.contains("Repository explorer"));
+        assert!(rendered.contains("a/src/lib.rs"));
+        assert!(rendered.contains("b/src/lib.rs"));
     }
 
     #[test]
@@ -1659,10 +1686,11 @@ mod tests {
 
         let rendered = html(&result);
 
-        assert!(rendered.contains("<h2>Refactoring candidates</h2>"));
-        assert!(rendered.contains("<h2>Structural advisories</h2>"));
-        assert!(rendered.contains("<h2>Runtime-risk candidates</h2>"));
-        assert!(rendered.contains("<h2>Build-efficiency candidates</h2>"));
+        assert!(rendered.contains("Possible refactoring opportunity"));
+        assert!(rendered.contains("This module may be harder to change safely"));
+        assert!(rendered.contains("Repeated copying may be worth measuring"));
+        assert!(rendered.contains("Changes here may affect many parts of the repository"));
+        assert!(rendered.contains("<h2>What needs attention</h2>"));
     }
 
     #[test]
@@ -1787,16 +1815,17 @@ mod tests {
 
         let rendered = html(&result);
 
-        assert!(rendered.contains("<h2>Triage</h2>"));
+        assert!(rendered.contains("<h2>What needs attention</h2>"));
+        assert!(rendered.contains("1 area worth reviewing"));
         assert!(rendered.contains("1 investigate"));
         assert!(rendered.contains("1 observe"));
-        assert!(rendered.contains("1 refactoring candidate"));
-        assert!(rendered.contains("1 new/worsened finding"));
+        assert!(rendered.contains("Possible refactoring opportunity"));
+        assert!(rendered.contains("Repeated copying may be worth measuring"));
         assert!(rendered.contains("Priority 2 — investigate"));
         assert!(rendered.contains("strong evidence"));
         assert!(rendered.contains("worsened"));
         assert!(rendered.contains("src/engine.rs"));
-        assert!(rendered.contains(">View module</a>"));
+        assert!(rendered.contains(">View in repository explorer</a>"));
         assert!(rendered.contains("id=\"module-"));
         assert!(rendered.contains("href=\"#module-"));
     }
