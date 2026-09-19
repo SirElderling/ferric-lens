@@ -81,10 +81,21 @@ struct Target {
 }
 
 #[derive(Debug, Deserialize)]
+#[derive(Debug, Clone)]
 struct Dependency {
     name: String,
     rename: Option<String>,
     path: Option<String>,
+}
+
+#[derive(Clone)]
+struct TargetRoot {
+    id: String,
+    import_name: String,
+    kind: &'static str,
+    source: PathBuf,
+    package_root: PathBuf,
+    dependencies: Vec<Dependency>,
 }
 
 pub fn inventory(root: &Path) -> Result<Inventory, String> {
@@ -100,17 +111,33 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
         .canonicalize()
         .map_err(|error| format!("cannot resolve {}: {error}", root.display()))?;
 
-    let metadata = load_metadata(&root, profile);
-    let (mut sources, workspace_aliases, complete, detail) = match metadata {
-        Ok(metadata) => match inventory_from_metadata(&root, metadata, profile) {
-            Ok((sources, aliases, limitations)) => {
-                let complete = limitations.is_empty();
-                let detail = summarize_limitations(&limitations);
-                (sources, aliases, complete, detail)
-            }
+    let acquired = acquire_inventory(&root, load_metadata(&root, profile), profile)?;
+    Ok(finalize_inventory(acquired))
+}
+
+type AcquiredInventory = (
+    Vec<SourceFile>,
+    WorkspaceAliases,
+    bool,
+    Option<String>,
+);
+
+fn acquire_inventory(
+    root: &Path,
+    metadata: Result<Metadata, String>,
+    profile: Option<&ProfileContext>,
+) -> Result<AcquiredInventory, String> {
+    match metadata {
+        Ok(metadata) => match inventory_from_metadata(root, metadata, profile) {
+            Ok((sources, aliases, limitations)) => Ok((
+                sources,
+                aliases,
+                limitations.is_empty(),
+                summarize_limitations(&limitations),
+            )),
             Err(error) => {
-                let (sources, limitations) = fallback_inventory(&root)?;
-                (
+                let (sources, limitations) = fallback_inventory(root)?;
+                Ok((
                     sources,
                     WorkspaceAliases::new(),
                     false,
@@ -118,12 +145,12 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
                         &format!("Cargo metadata inventory failed: {error}"),
                         &limitations,
                     ),
-                )
+                ))
             }
         },
         Err(error) => {
-            let (sources, limitations) = fallback_inventory(&root)?;
-            (
+            let (sources, limitations) = fallback_inventory(root)?;
+            Ok((
                 sources,
                 WorkspaceAliases::new(),
                 false,
@@ -131,10 +158,15 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
                     &format!("Cargo metadata unavailable: {error}"),
                     &limitations,
                 ),
-            )
+            ))
         }
-    };
+    }
+}
 
+fn finalize_inventory(
+    acquired: AcquiredInventory,
+) -> Inventory {
+    let (mut sources, workspace_aliases, complete, detail) = acquired;
     sources.sort_by(|a, b| {
         (&a.crate_name, &a.module_path, &a.relative_path).cmp(&(
             &b.crate_name,
@@ -171,13 +203,13 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
         }
     }
 
-    Ok(Inventory {
+    Inventory {
         sources,
         workspace_aliases,
         content_digest: hasher.finalize().to_hex().to_string(),
         metadata_complete: complete,
         metadata_detail: detail,
-    })
+    }
 }
 
 fn load_metadata(root: &Path, profile: Option<&ProfileContext>) -> Result<Metadata, String> {
@@ -247,16 +279,7 @@ fn inventory_from_metadata(
         package_roots.insert(package_root, package.name.clone());
     }
 
-    #[derive(Clone)]
-    struct TargetRoot {
-        id: String,
-        import_name: String,
-        kind: &'static str,
-        source: PathBuf,
-        package_root: PathBuf,
-    }
-
-    let mut raw_targets = Vec::<(String, &'static str, PathBuf, PathBuf)>::new();
+    let mut raw_targets = Vec::<(String, &'static str, PathBuf, PathBuf, Vec<Dependency>)>::new();
     for package in &packages {
         let manifest = PathBuf::from(&package.manifest_path);
         let package_root = manifest
@@ -293,12 +316,13 @@ fn inventory_from_metadata(
                 kind,
                 source,
                 package_root.to_path_buf(),
+                package.dependencies.clone(),
             ));
         }
     }
 
     let mut name_counts = BTreeMap::<(PathBuf, String), usize>::new();
-    for (import_name, _, _, package_root) in &raw_targets {
+    for (import_name, _, _, package_root, _) in &raw_targets {
         *name_counts
             .entry((package_root.clone(), import_name.clone()))
             .or_default() += 1;
@@ -306,7 +330,7 @@ fn inventory_from_metadata(
 
     let mut target_roots = raw_targets
         .into_iter()
-        .map(|(import_name, kind, source, package_root)| {
+        .map(|(import_name, kind, source, package_root, dependencies)| {
             let duplicate_name = name_counts
                 .get(&(package_root.clone(), import_name.clone()))
                 .copied()
@@ -323,6 +347,7 @@ fn inventory_from_metadata(
                 kind,
                 source,
                 package_root,
+                dependencies,
             }
         })
         .collect::<Vec<_>>();
@@ -341,14 +366,8 @@ fn inventory_from_metadata(
 
     let mut aliases = WorkspaceAliases::new();
     for target in &target_roots {
-        let Some(package) = packages.iter().find(|package| {
-            Path::new(&package.manifest_path).parent() == Some(target.package_root.as_path())
-        }) else {
-            continue;
-        };
-
         let mut crate_aliases = BTreeMap::new();
-        for dependency in &package.dependencies {
+        for dependency in &target.dependencies {
             let Some(path) = &dependency.path else {
                 continue;
             };
@@ -383,7 +402,28 @@ fn inventory_from_metadata(
     let mut sources = Vec::new();
     let mut limitations = Vec::new();
     let mut budget = SourceBudget::default();
+    collect_target_roots(
+        root,
+        target_roots,
+        profile,
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )?;
 
+    limitations.sort();
+    limitations.dedup();
+    Ok((sources, aliases, limitations))
+}
+
+fn collect_target_roots(
+    root: &Path,
+    target_roots: Vec<TargetRoot>,
+    profile: Option<&ProfileContext>,
+    budget: &mut SourceBudget,
+    sources: &mut Vec<SourceFile>,
+    limitations: &mut Vec<String>,
+) -> Result<(), String> {
     for target in target_roots {
         if budget.exhausted {
             break;
@@ -397,15 +437,12 @@ fn inventory_from_metadata(
             true,
             profile,
             &mut visited,
-            &mut budget,
-            &mut sources,
-            &mut limitations,
+            budget,
+            sources,
+            limitations,
         )?;
     }
-
-    limitations.sort();
-    limitations.dedup();
-    Ok((sources, aliases, limitations))
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
