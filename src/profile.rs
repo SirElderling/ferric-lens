@@ -10,9 +10,20 @@ pub struct ProfileContext {
 
 impl ProfileContext {
     pub fn resolve(target: Option<&str>, features: &[String]) -> Result<Self, String> {
+        Self::resolve_with_host(target, features, rustc_host)
+    }
+
+    fn resolve_with_host<F>(
+        target: Option<&str>,
+        features: &[String],
+        host: F,
+    ) -> Result<Self, String>
+    where
+        F: FnOnce() -> Result<String, String>,
+    {
         let resolved_target = match target {
             Some(target) if !target.trim().is_empty() => target.trim().to_owned(),
-            _ => rustc_host()?,
+            _ => host()?,
         };
 
         let mut normalized_features = features
