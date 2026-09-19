@@ -459,3 +459,161 @@ fn public_acceptance_wrappers_record_an_exact_current_finding() {
         Some("intentional unit boundary via profile")
     );
 }
+
+
+fn baseline_then_break_git(
+    baseline_root: &Path,
+    repo_root: &Path,
+    profile: &crate::profile::ProfileContext,
+) -> Result<super::SnapshotAnalysis, String> {
+    let snapshot = super::analyze_snapshot(baseline_root, repo_root, profile)?;
+    fs::rename(repo_root.join(".git"), repo_root.join(".git-disabled"))
+        .map_err(|error| error.to_string())?;
+    Ok(snapshot)
+}
+
+fn baseline_then_corrupt_acceptance(
+    baseline_root: &Path,
+    repo_root: &Path,
+    profile: &crate::profile::ProfileContext,
+) -> Result<super::SnapshotAnalysis, String> {
+    let snapshot = super::analyze_snapshot(baseline_root, repo_root, profile)?;
+    let directory = repo_root.join(".ferric-lens");
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    fs::write(directory.join("acceptances.toml"), "not = [valid")
+        .map_err(|error| error.to_string())?;
+    Ok(snapshot)
+}
+
+#[test]
+fn analysis_propagates_profile_evidence_and_initial_acceptance_errors() {
+    let repo = Repo::new("analysis-propagation");
+
+    assert!(super::analyze_internal_with_ops(
+        &repo.root,
+        Some("HEAD"),
+        false,
+        None,
+        Some("ferric-lens-invalid-target"),
+        &[],
+        &super::REAL_OPS,
+    )
+    .is_err());
+
+    let evidence = repo.root.join("bad-evidence.json");
+    fs::write(&evidence, "{").unwrap();
+    assert!(super::analyze_internal_with_ops(
+        &repo.root,
+        Some("HEAD"),
+        false,
+        Some(&evidence),
+        None,
+        &[],
+        &super::REAL_OPS,
+    )
+    .is_err());
+
+    fs::create_dir_all(repo.root.join(".ferric-lens")).unwrap();
+    fs::write(
+        repo.root.join(".ferric-lens/acceptances.toml"),
+        "not = [valid",
+    )
+    .unwrap();
+    assert!(super::analyze_internal_with_ops(
+        &repo.root,
+        Some("HEAD"),
+        false,
+        None,
+        None,
+        &[],
+        &super::REAL_OPS,
+    )
+    .is_err());
+}
+
+#[test]
+fn analysis_propagates_change_collection_failure_after_baseline_analysis() {
+    let repo = Repo::new("changes-failure");
+    repo.write("src/lib.rs", "pub fn stable() -> usize { 2 }\n");
+
+    let ops = super::AnalysisOps {
+        materialize_baseline: crate::git::materialize_worktree,
+        analyze_baseline: baseline_then_break_git,
+        sample_history: crate::git::sample_history,
+    };
+
+    assert!(super::analyze_internal_with_ops(
+        &repo.root,
+        Some("HEAD"),
+        false,
+        None,
+        None,
+        &[],
+        &ops,
+    )
+    .is_err());
+}
+
+#[test]
+fn analysis_propagates_acceptance_corruption_between_baseline_and_finalization() {
+    let repo = Repo::new("late-acceptance-corruption");
+    repo.write("src/lib.rs", "pub fn stable() -> usize { 2 }\n");
+
+    let ops = super::AnalysisOps {
+        materialize_baseline: crate::git::materialize_worktree,
+        analyze_baseline: baseline_then_corrupt_acceptance,
+        sample_history: crate::git::sample_history,
+    };
+
+    assert!(super::analyze_internal_with_ops(
+        &repo.root,
+        Some("HEAD"),
+        false,
+        None,
+        None,
+        &[],
+        &ops,
+    )
+    .is_err());
+}
+
+#[test]
+fn acceptance_propagates_profile_and_analysis_failures_before_lookup() {
+    let repo = Repo::new("accept-propagation");
+
+    assert!(super::accept_finding_with_profile(
+        &repo.root,
+        Some("HEAD"),
+        Some("ferric-lens-invalid-target"),
+        &[],
+        "missing",
+        "reason",
+    )
+    .is_err());
+
+    let profile = crate::profile::ProfileContext::resolve(None, &[]).unwrap();
+    let missing = repo.root.join("missing-root");
+    assert!(super::accept_finding_with_profile(
+        &missing,
+        Some("HEAD"),
+        Some(&profile.public.resolved_target),
+        &[],
+        "missing",
+        "reason",
+    )
+    .is_err());
+}
+
+#[test]
+fn finalize_findings_propagates_acceptance_load_failure() {
+    let repo = Repo::new("finalize-acceptance-error");
+    fs::create_dir_all(repo.root.join(".ferric-lens")).unwrap();
+    fs::write(
+        repo.root.join(".ferric-lens/acceptances.toml"),
+        "not = [valid",
+    )
+    .unwrap();
+    let mut findings = vec![finding("rule", "demo")];
+
+    assert!(super::finalize_findings(&repo.root, "profile", &mut findings).is_err());
+}
