@@ -79,6 +79,9 @@ jobs:
           set +e
           cargo run --locked -- analyze . --base origin/main --json target/ferric-lens-self-analysis.json --html target/ferric-lens-self-analysis.html
           status=$?
+          cargo run --locked -- analyze . --base HEAD --ai > target/ferric-lens-self-ai.json
+          ai_status=$?
+          echo "Ferric Lens same-head AI analysis exit code: $ai_status"
           echo "$status" > target/ferric-lens-self-analysis.exit
           echo "Ferric Lens self-analysis exit code: $status"
           git status --porcelain=v1 --untracked-files=all > target/ferric-lens-post-analysis-status.txt
@@ -96,6 +99,7 @@ jobs:
             target/ferric-lens-self-analysis.json
             target/ferric-lens-self-analysis.html
             target/ferric-lens-self-analysis.exit
+            target/ferric-lens-self-ai.json
             target/ferric-lens-self-check.json
             target/ferric-lens-pre-analysis-status.txt
             target/ferric-lens-post-analysis-status.txt
