@@ -92,40 +92,6 @@ pub enum TypeKind {
     Struct,
     Enum,
     Union,
-    Trait,
-    TraitAlias,
-    TypeAlias,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TypeFact {
-    pub name: String,
-    pub kind: TypeKind,
-    pub public_declared: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "snake_case")]
-pub enum FunctionKind {
-    Function,
-    Method,
-    TraitMethod,
-    ForeignFunction,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-pub struct FunctionFact {
-    pub name: String,
-    pub kind: FunctionKind,
-    pub public_declared: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "snake_case")]
-pub enum TypeKind {
-    Struct,
-    Enum,
-    Union,
     TypeAlias,
     Trait,
     TraitAlias,
