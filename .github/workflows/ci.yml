@@ -103,3 +103,14 @@ jobs:
 
       - name: Release build
         run: cargo build --release --locked
+
+      - name: Smoke-test release binary
+        run: target/release/ferric-lens --version
+
+      - name: Upload human-test binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferric-lens-${{ runner.os }}-${{ runner.arch }}
+          path: target/release/ferric-lens
+          if-no-files-found: error
+          compression-level: 0
