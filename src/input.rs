@@ -589,13 +589,9 @@ pub(crate) fn verify_stable_inputs(
 
 fn load_metadata(root: &Path, profile: Option<&ProfileContext>) -> Result<Metadata, String> {
     let mut command = Command::new("cargo");
-    command.current_dir(root).args([
-        "metadata",
-        "--format-version",
-        "1",
-        "--offline",
-        "--locked",
-    ]);
+    command
+        .current_dir(root)
+        .args(["metadata", "--format-version", "1", "--offline", "--locked"]);
 
     if let Some(profile) = profile {
         command
@@ -699,8 +695,14 @@ fn inventory_from_metadata(
         package_root_by_id.insert(package.id.clone(), package_root);
     }
 
-    let mut raw_targets =
-        Vec::<(String, &'static str, PathBuf, PathBuf, Vec<Dependency>, Vec<String>)>::new();
+    let mut raw_targets = Vec::<(
+        String,
+        &'static str,
+        PathBuf,
+        PathBuf,
+        Vec<Dependency>,
+        Vec<String>,
+    )>::new();
     for package in &packages {
         let Some(package_root) = package_root_by_id.get(&package.id).cloned() else {
             continue;
@@ -752,26 +754,26 @@ fn inventory_from_metadata(
         .into_iter()
         .map(
             |(import_name, kind, source, package_root, dependencies, resolved_features)| {
-            let duplicate_name = name_counts
-                .get(&(package_root.clone(), import_name.clone()))
-                .copied()
-                .unwrap_or(0)
-                > 1;
-            let id = if duplicate_name {
-                format!("{import_name}[{kind}]")
-            } else {
-                import_name.clone()
-            };
-            TargetRoot {
-                id,
-                import_name,
-                kind,
-                source,
-                package_root,
-                dependencies,
-                resolved_features,
-            }
-        },
+                let duplicate_name = name_counts
+                    .get(&(package_root.clone(), import_name.clone()))
+                    .copied()
+                    .unwrap_or(0)
+                    > 1;
+                let id = if duplicate_name {
+                    format!("{import_name}[{kind}]")
+                } else {
+                    import_name.clone()
+                };
+                TargetRoot {
+                    id,
+                    import_name,
+                    kind,
+                    source,
+                    package_root,
+                    dependencies,
+                    resolved_features,
+                }
+            },
         )
         .collect::<Vec<_>>();
 
@@ -857,7 +859,8 @@ fn collect_target_roots(
             break;
         }
         let mut visited = BTreeSet::new();
-        let target_cfg = profile.map(|profile| profile.cfg.with_features(&target.resolved_features));
+        let target_cfg =
+            profile.map(|profile| profile.cfg.with_features(&target.resolved_features));
         collect_reachable_module(
             root,
             &target.id,
