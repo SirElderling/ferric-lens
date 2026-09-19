@@ -218,6 +218,12 @@ type AcquiredInventory = (
     bool,
     Option<String>,
 );
+type MetadataInventory = (
+    Vec<SourceFile>,
+    WorkspaceAliases,
+    BTreeMap<String, Vec<String>>,
+    Vec<String>,
+);
 
 fn acquire_inventory(
     root: &Path,
@@ -409,6 +415,7 @@ fn cargo_input_snapshot(
     })
 }
 
+#[cfg(test)]
 fn cargo_input_digest(root: &Path) -> Result<String, String> {
     Ok(cargo_input_snapshot(root, None)?.digest)
 }
@@ -435,6 +442,7 @@ fn verify_cargo_inputs(expected: &CargoInputSnapshot) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
 fn cargo_resolution_identity(root: &Path, metadata: &Metadata) -> Result<String, String> {
     let cargo_inputs = cargo_input_snapshot(root, Some(metadata))?;
     cargo_resolution_identity_with_digest(root, metadata, &cargo_inputs.digest)
@@ -568,6 +576,7 @@ fn verify_stable_inputs_snapshot(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn verify_stable_inputs(
     root: &Path,
     sources: &[SourceFile],
@@ -666,15 +675,7 @@ fn inventory_from_metadata(
     root: &Path,
     metadata: Metadata,
     profile: Option<&ProfileContext>,
-) -> Result<
-    (
-        Vec<SourceFile>,
-        WorkspaceAliases,
-        BTreeMap<String, Vec<String>>,
-        Vec<String>,
-    ),
-    String,
-> {
+) -> Result<MetadataInventory, String> {
     let metadata_root = PathBuf::from(&metadata.workspace_root);
     let members: BTreeSet<&str> = metadata
         .workspace_members
