@@ -294,3 +294,71 @@ fn finding_sort_orders_gates_first_then_rule_and_subject() {
         ]
     );
 }
+
+
+#[test]
+fn runtime_clone_syntax_outlier_is_candidate_only() {
+    let mut modules = (0..20)
+        .map(|index| module(index, 0, 0))
+        .collect::<Vec<_>>();
+    for module in &mut modules {
+        module.clone_calls = 1;
+    }
+    modules[0].clone_calls = 7;
+
+    let findings = current_snapshot_findings(&modules);
+    let finding = findings
+        .iter()
+        .find(|finding| finding.rule == "runtime.clone_syntax_outlier")
+        .expect("runtime candidate");
+
+    assert_eq!(finding.subject, "demo::m0");
+    assert_eq!(finding.evidence_class, EvidenceClass::Candidate);
+    assert_eq!(finding.priority, Priority::Observe);
+    assert!(!finding.gate);
+    assert!(finding.summary.contains(".clone()"));
+    assert!(finding.summary.contains("does not establish allocation"));
+}
+
+#[test]
+fn build_reverse_dependency_outlier_is_candidate_only() {
+    let mut modules = (0..20)
+        .map(|index| module(index, 0, 0))
+        .collect::<Vec<_>>();
+    for module in modules.iter_mut().skip(1) {
+        module.local_dependency_modules = vec!["demo::m0".into()];
+    }
+
+    let findings = current_snapshot_findings(&modules);
+    let finding = findings
+        .iter()
+        .find(|finding| finding.rule == "build.rebuild_exposure_candidate")
+        .expect("build candidate");
+
+    assert_eq!(finding.subject, "demo::m0");
+    assert_eq!(finding.evidence_class, EvidenceClass::Candidate);
+    assert_eq!(finding.priority, Priority::Observe);
+    assert!(!finding.gate);
+    assert!(finding.summary.contains("potential rebuild exposure"));
+    assert!(finding.summary.contains("not measured compile cost"));
+}
+
+#[test]
+fn runtime_and_build_advisories_require_a_meaningful_population() {
+    let mut modules = (0..19)
+        .map(|index| module(index, 0, 0))
+        .collect::<Vec<_>>();
+    modules[0].clone_calls = 99;
+    for module in modules.iter_mut().skip(1) {
+        module.local_dependency_modules = vec!["demo::m0".into()];
+    }
+
+    let findings = current_snapshot_findings(&modules);
+
+    assert!(!findings
+        .iter()
+        .any(|finding| finding.rule.starts_with("runtime.")));
+    assert!(!findings
+        .iter()
+        .any(|finding| finding.rule.starts_with("build.")));
+}
