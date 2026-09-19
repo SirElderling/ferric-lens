@@ -409,7 +409,6 @@ fn command_error() {
         .any(|finding| finding.rule == "correctness.lossy_git_path_decoding"));
 }
 
-
 #[test]
 fn ordinary_printing_without_compact_mode_does_not_trigger_stdout_side_effect_risk() {
     let sources = vec![source(
