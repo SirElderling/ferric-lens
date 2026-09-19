@@ -134,15 +134,19 @@ Use like-for-like populations (same item kind, source class, and concrete config
 
 Each finding must have a stable identity and explicit evidence.
 
-A finding must include enough information to answer:
+A finding must include enough information to answer, without assuming that the reader is a Rust or architecture expert:
 
 - what was detected,
 - where it was detected,
-- why it matters,
+- why the reader should care,
+- what practical engineering consequence may follow if the concern grows,
 - what evidence triggered it,
+- what the reader should investigate next,
 - whether it is new, worsened, resolved, accepted, or unchanged,
 - how confident Ferric Lens is,
 - which analysis configuration observed it.
+
+Human-facing text must distinguish evidence from conclusions. It must not present a large metric value as inherently bad, assume the user knows an internal metric/rule identifier, or prescribe a final architecture that the evidence cannot establish. Internal rule IDs, fingerprints, configuration IDs, and raw capability metadata are secondary technical detail.
 
 ### 7.1 Evidence classes
 
@@ -493,43 +497,31 @@ JavaScript is permitted only where equivalent behavior cannot reasonably be achi
 
 Browser code only explores the immutable result. It performs no analysis.
 
-V1 uses a linked hierarchy, summary tables, and native `details` disclosure. Avoid a force-directed graph engine and rendering every dependency edge into the DOM. Summarize repeated evidence, retain all findings, and link findings to compact source excerpts rather than embedding every source file. Escape all repository/imported strings as untrusted content. The report must remain useful with JavaScript disabled.
+V1 uses a human-first hierarchy and native `details` disclosure. The primary flow is **What needs attention → why it matters → evidence → next investigation step → source context**. Avoid a force-directed graph engine and rendering every dependency edge into the DOM. Summarize repeated evidence, retain all findings, and link findings to compact source excerpts rather than embedding every source file. Escape all repository/imported strings as untrusted content. The report must remain useful with JavaScript disabled.
+
+Baseline/configuration provenance, history mechanics, imported observations, hashes, and complete capability diagnostics remain accessible but are collapsed under **Analysis details** rather than competing with actionable findings on the main screen. Long technical values must wrap or otherwise remain contained within their layout.
 
 For source-locatable V1 evidence, the canonical model records the finding subject, evidence metric, repository-relative source path, exact 1-based start/end line, escaped excerpt text, and whether the excerpt was truncated. These contexts are representative evidence, not a complete listing of every occurrence. V1 retains at most three contexts per subject/evidence signal; each excerpt is limited to three source lines and 600 Unicode characters. The initial exact-span families are decision sites, clone-call syntax, resolved repository dependency imports, and reverse-dependency imports. Relationship evidence may therefore point to a dependent module where the dependency edge is observed. If no truthful syntax span exists for an evidence family, Ferric Lens keeps module/file-level navigation and must not invent a line. Source spans/excerpts are presentation evidence and are excluded from finding fingerprints and acceptance identity.
 
-### 19.2 Integrated codebase map
+### 19.2 Repository explorer
 
-The report should revolve around the repository structure:
+Repository structure is a secondary drill-down surface, not the report's primary answer.
 
-```text
-workspace
-  └─ crate
-      └─ module
-          └─ function/type
-```
+The explorer exists to answer: **"A finding pointed me here; what is this area connected to and what does it contain?"** It should therefore rank modules with active findings first and label every module explicitly as either worth investigating or currently without an identified concern.
 
-Evidence is overlaid on this model.
+For each module, compact structural metrics may be shown for context, but the UI must state that metrics are not problems by themselves. Dependencies, functions, types, and history context should remain collapsed until the user asks for them. A module with no active finding must not visually imply that a high raw count is a defect.
 
-The report should make it possible to understand:
+Findings and explorer entries must cross-link where possible so users can move from consequence/evidence to structural context and back.
 
-- priority,
-- architecture/dependency relationships,
-- refactor evidence,
-- performance risks,
-- build-cost evidence,
-- change relevance,
-- test-strength context,
-- analysis completeness.
+### 19.3 Machine and AI output
 
-Specialized graph or matrix views may support the codebase map but should not become disconnected products.
+Canonical JSON is the complete machine interface. It must represent the same canonical findings as the HTML report and CI decision and carries the bounded source-context table used by HTML so machine and human outputs refer to the same source evidence.
 
-### 19.3 JSON
+Ferric Lens may additionally expose a compact deterministic AI/agent view derived only from the canonical result. V1 exposes it with `--ai` on `analyze` and `check`. That view is intentionally selective: verdict/reason, canonical result digest, active findings, priority/evidence/delta, plain-language meaning, core evidence, exact source contexts where available, recommended next investigation step, rule identity, and non-complete analysis limitations. It omits raw module/function/type inventory, accepted findings from the active action list, and capabilities that are fully complete. It must not recompute semantics independently or change the command exit code.
 
-JSON is a first-class machine interface.
+`--ai` changes stdout presentation only. When normal JSON/HTML paths are requested, those artifacts retain their standard full/canonical behavior.
 
-It must represent the same canonical findings as the HTML report and CI decision. Canonical JSON also carries the bounded source-context table used by HTML so machine and human outputs refer to the same source evidence.
-
-Publish a schema version independently of the tool version. Use explicit unavailable/null states, deterministic ordering, stable string identifiers, exact integer metrics, and documented units. Runtime timings and cache statistics belong in separate diagnostic output, not canonical artifacts.
+Publish schema versions independently where needed. Use explicit unavailable/null states, deterministic ordering, stable string identifiers, exact integer metrics, and documented units. Runtime timings and cache statistics belong in separate diagnostic output, not canonical artifacts.
 
 ## 20. Reproducibility
 
