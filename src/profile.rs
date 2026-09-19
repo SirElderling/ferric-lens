@@ -56,12 +56,52 @@ fn rustc_host() -> Result<String, String> {
         .arg("-vV")
         .output()
         .map_err(|error| format!("could not execute rustc -vV: {error}"))?;
+    parse_rustc_host_output(&output)
+}
+
+fn parse_rustc_host_output(output: &std::process::Output) -> Result<String, String> {
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(if stderr.is_empty() {
+            format!("rustc -vV failed with status {}", output.status)
+        } else {
+            stderr
+        });
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     stdout
         .lines()
         .find_map(|line| line.strip_prefix("host: ").map(str::to_owned))
         .ok_or_else(|| "rustc -vV did not report a host target".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use super::{parse_rustc_host_output, ProfileContext};
+
+    #[test]
+    fn normalizes_explicit_profile_inputs() {
+        let features = vec![" z ".into(), "a".into(), "a".into(), " ".into()];
+        let profile = ProfileContext::resolve(Some(" x86_64-unknown-linux-gnu "), &features).unwrap();
+
+        assert_eq!(profile.public.target, "x86_64-unknown-linux-gnu");
+        assert_eq!(profile.public.features, ["a", "z"]);
+        assert!(profile.public.id.contains("default+a,z"));
+    }
+
+    #[test]
+    fn rustc_host_parser_reports_command_failure_and_missing_host() {
+        let failed = Command::new("rustc")
+            .arg("--definitely-invalid-ferric-lens-option")
+            .output()
+            .unwrap();
+        assert!(parse_rustc_host_output(&failed).is_err());
+
+        let version_only = Command::new("rustc").arg("--version").output().unwrap();
+        assert!(parse_rustc_host_output(&version_only)
+            .unwrap_err()
+            .contains("did not report a host target"));
+    }
 }
