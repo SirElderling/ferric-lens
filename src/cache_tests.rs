@@ -317,3 +317,45 @@ fn cache_metadata_and_remove_failures_are_non_fatal() {
     assert_eq!(remaining, 6);
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[cfg(unix)]
+#[test]
+fn cache_candidate_ignores_a_dangling_symlink_deterministically() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_root();
+    let cache = RawFactCache::new(&root);
+    fs::create_dir_all(&cache.directory).unwrap();
+    let link = cache.directory.join("dangling.json");
+    symlink(cache.directory.join("missing"), &link).unwrap();
+    let entry = fs::read_dir(&cache.directory).unwrap().next().unwrap().unwrap();
+
+    assert!(super::cache_entry_candidate(entry).is_none());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_removal_failure_preserves_remaining_size() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_root();
+    let directory = root.join("locked");
+    fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("entry");
+    fs::write(&path, "x").unwrap();
+    let mut permissions = fs::metadata(&directory).unwrap().permissions();
+    permissions.set_mode(0o555);
+    fs::set_permissions(&directory, permissions).unwrap();
+
+    let mut remaining = 10;
+    super::remove_cache_entry(&path, 4, &mut remaining);
+
+    let mut permissions = fs::metadata(&directory).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&directory, permissions).unwrap();
+    assert_eq!(remaining, 10);
+    fs::remove_dir_all(root).unwrap();
+}
