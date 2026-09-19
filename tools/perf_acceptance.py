@@ -112,6 +112,11 @@ def directory_size(root: Path) -> int:
     return total
 
 
+def _usage_max_rss_kib(usage: Any) -> int:
+    value = max(0, int(usage.ru_maxrss))
+    return value // 1024 if sys.platform == "darwin" else value
+
+
 def _wait4_measurement(
     process: subprocess.Popen[Any],
     *,
@@ -131,6 +136,7 @@ def _wait4_measurement(
                 exit_code = os.waitstatus_to_exitcode(status)
                 process.returncode = exit_code
                 child_cpu_seconds = float(usage.ru_utime + usage.ru_stime)
+                peak_rss_kib = max(peak_rss_kib, _usage_max_rss_kib(usage))
                 break
             time.sleep(sample_interval)
         return exit_code, child_cpu_seconds, peak_rss_kib
