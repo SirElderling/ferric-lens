@@ -130,6 +130,8 @@ fn snapshot_capabilities_reflect_complete_and_partial_syntax_and_inventory() {
             proc_macros: 5,
         },
         modules: Vec::new(),
+        correctness_findings: Vec::new(),
+        correctness_contexts: Vec::new(),
         parse_failures: 0,
     };
     let complete_caps = super::snapshot_capabilities("head", &complete);
@@ -165,6 +167,8 @@ fn snapshot_capabilities_reflect_complete_and_partial_syntax_and_inventory() {
         source_digests: Default::default(),
         auxiliary_targets: crate::input::AuxiliaryTargetSummary::default(),
         modules: Vec::new(),
+        correctness_findings: Vec::new(),
+        correctness_contexts: Vec::new(),
         parse_failures: 2,
     };
     let partial_caps = super::snapshot_capabilities("baseline", &partial);
