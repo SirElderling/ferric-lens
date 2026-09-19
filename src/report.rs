@@ -146,7 +146,7 @@ pub fn cli_summary(result: &AnalysisResult) -> String {
     let mut output = String::new();
     output.push_str(&format!(
         "Ferric Lens: {}\n{}\n",
-        verdict_label(&result.verdict),
+        cli_verdict_label(&result.verdict),
         result.verdict_reason
     ));
     if let Some(baseline) = &result.baseline {
@@ -332,6 +332,14 @@ fn verdict_label(verdict: &GateVerdict) -> &'static str {
         GateVerdict::Pass => "PASS",
         GateVerdict::Regression => "REGRESSION",
         GateVerdict::Inconclusive => "INCONCLUSIVE",
+    }
+}
+
+fn cli_verdict_label(verdict: &GateVerdict) -> &'static str {
+    match verdict {
+        GateVerdict::Pass => "Pass",
+        GateVerdict::Regression => "Regression",
+        GateVerdict::Inconclusive => "Inconclusive",
     }
 }
 
