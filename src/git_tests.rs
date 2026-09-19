@@ -667,6 +667,8 @@ fn git_text_os_propagates_command_failures() {
 #[test]
 fn materialize_worktree_reports_stale_non_directory_path() {
     let repo = Repo::new("worktree-path-error");
+    repo.write("tracked.txt", "one");
+    repo.commit("baseline");
     let counter = 900_000 + TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
     super::WORKTREE_COUNTER.store(counter, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
