@@ -3,10 +3,10 @@ use std::collections::BTreeSet;
 use crate::{
     compare::{match_modules, Correspondence},
     git::ChangeSet,
-    model::{DeltaStatus, ModuleMetrics},
+    model::{DeltaStatus, EvidenceClass, Finding, ModuleMetrics, Priority},
 };
 
-use super::{current_snapshot_findings, evaluate_regressions, nearest_rank_p90};
+use super::{current_snapshot_findings, evaluate_regressions, nearest_rank_p90, sort_findings};
 
 fn module(index: usize, decisions: usize, dependencies: usize) -> ModuleMetrics {
     ModuleMetrics {
@@ -245,4 +245,43 @@ fn root_subject_and_sorting_are_deterministic() {
 
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].subject, "demo");
+}
+
+#[test]
+fn finding_sort_orders_gates_first_then_rule_and_subject() {
+    fn finding(gate: bool, rule: &str, subject: &str) -> Finding {
+        Finding {
+            fingerprint: String::new(),
+            rule: rule.into(),
+            subject: subject.into(),
+            identity: subject.into(),
+            configuration: String::new(),
+            evidence_class: EvidenceClass::Candidate,
+            priority: Priority::Observe,
+            delta: DeltaStatus::Current,
+            gate,
+            accepted: false,
+            acceptance_reason: None,
+            summary: String::new(),
+            direction: String::new(),
+            evidence: Vec::new(),
+        }
+    }
+
+    let mut findings = vec![
+        finding(false, "b", "z"),
+        finding(true, "b", "b"),
+        finding(true, "a", "z"),
+        finding(true, "a", "a"),
+    ];
+
+    sort_findings(&mut findings);
+
+    assert_eq!(
+        findings
+            .iter()
+            .map(|finding| (finding.gate, finding.rule.as_str(), finding.subject.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(true, "a", "a"), (true, "a", "z"), (true, "b", "b"), (false, "b", "z")]
+    );
 }
