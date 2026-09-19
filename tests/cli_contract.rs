@@ -182,7 +182,6 @@ fn regression_uses_exit_code_one_and_accept_can_succeed() {
     assert!(String::from_utf8_lossy(&accepted.stdout).contains("accepted finding"));
 }
 
-
 fn gate_fixture(name: &str) -> (Repo, String) {
     let repo = Repo::new(name);
     let declarations = (0..20)
