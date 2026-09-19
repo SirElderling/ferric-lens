@@ -342,7 +342,6 @@ fn finding_sort_is_gate_first_then_rule_and_subject() {
     );
 }
 
-
 #[test]
 fn public_analysis_wrappers_delegate_with_consistent_semantics() {
     let repo = Repo::new("public-wrappers");
@@ -363,14 +362,11 @@ fn public_analysis_wrappers_delegate_with_consistent_semantics() {
         .iter()
         .all(|result| result.verdict == crate::model::GateVerdict::Pass));
 
-    assert!(super::accept_finding_with_base(
-        &repo.root,
-        Some("HEAD"),
-        "missing",
-        "not present"
-    )
-    .unwrap_err()
-    .contains("is not present"));
+    assert!(
+        super::accept_finding_with_base(&repo.root, Some("HEAD"), "missing", "not present")
+            .unwrap_err()
+            .contains("is not present")
+    );
     assert!(super::accept_finding_with_profile(
         &repo.root,
         Some("HEAD"),
