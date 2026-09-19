@@ -734,7 +734,6 @@ fn path_helpers_handle_non_src_and_nested_paths() {
     );
 }
 
-
 #[test]
 fn metadata_inventory_failure_falls_back_without_losing_source_visibility() {
     let root = temp_root();
@@ -789,12 +788,8 @@ fn final_inventory_deduplicates_source_identity_and_hashes_workspace_aliases() {
         std::collections::BTreeMap::from([("shared".into(), "shared_crate".into())]),
     )]);
 
-    let first = super::finalize_inventory(
-        vec![source.clone(), source],
-        aliases.clone(),
-        true,
-        None,
-    );
+    let first =
+        super::finalize_inventory(vec![source.clone(), source], aliases.clone(), true, None);
     let second = super::finalize_inventory(
         first.sources.clone(),
         super::WorkspaceAliases::new(),
@@ -814,7 +809,11 @@ fn metadata_inventory_skips_outside_packages_invalid_targets_and_non_workspace_d
     let root = temp_root();
     let inside = root.join("crates/inside");
     fs::create_dir_all(inside.join("src")).unwrap();
-    fs::write(inside.join("Cargo.toml"), "[package]\nname='inside'\nversion='0.1.0'\n").unwrap();
+    fs::write(
+        inside.join("Cargo.toml"),
+        "[package]\nname='inside'\nversion='0.1.0'\n",
+    )
+    .unwrap();
     fs::write(inside.join("src/lib.rs"), "pub fn inside() {}").unwrap();
     fs::write(inside.join("src/not-rust.txt"), "not rust").unwrap();
 
@@ -824,7 +823,11 @@ fn metadata_inventory_skips_outside_packages_invalid_targets_and_non_workspace_d
         TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
     fs::create_dir_all(outside.join("src")).unwrap();
-    fs::write(outside.join("Cargo.toml"), "[package]\nname='outside'\nversion='0.1.0'\n").unwrap();
+    fs::write(
+        outside.join("Cargo.toml"),
+        "[package]\nname='outside'\nversion='0.1.0'\n",
+    )
+    .unwrap();
     fs::write(outside.join("src/lib.rs"), "pub fn outside() {}").unwrap();
 
     let inside_id = "inside-id".to_owned();
@@ -844,7 +847,10 @@ fn metadata_inventory_skips_outside_packages_invalid_targets_and_non_workspace_d
                     Target {
                         name: "invalid".into(),
                         kind: vec!["bin".into()],
-                        src_path: inside.join("src/not-rust.txt").to_string_lossy().into_owned(),
+                        src_path: inside
+                            .join("src/not-rust.txt")
+                            .to_string_lossy()
+                            .into_owned(),
                     },
                 ],
                 dependencies: vec![
@@ -876,8 +882,7 @@ fn metadata_inventory_skips_outside_packages_invalid_targets_and_non_workspace_d
         workspace_root: root.to_string_lossy().into_owned(),
     };
 
-    let (sources, aliases, limitations) =
-        inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert!(limitations.is_empty());
     assert_eq!(sources.len(), 1);
