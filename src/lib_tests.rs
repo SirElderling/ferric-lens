@@ -249,16 +249,9 @@ fn baseline_analysis_failure_is_reported_as_inconclusive() {
         analyze_baseline: baseline_failure,
         sample_history: crate::git::sample_history,
     };
-    let result = super::analyze_internal_with_ops(
-        &repo.root,
-        Some("HEAD"),
-        false,
-        None,
-        None,
-        &[],
-        &ops,
-    )
-    .unwrap();
+    let result =
+        super::analyze_internal_with_ops(&repo.root, Some("HEAD"), false, None, None, &[], &ops)
+            .unwrap();
 
     assert_eq!(result.verdict, crate::model::GateVerdict::Inconclusive);
     assert!(result.verdict_reason.contains("baseline analysis failed"));
@@ -274,16 +267,9 @@ fn unavailable_history_degrades_capability_without_changing_gate_semantics() {
         analyze_baseline: super::analyze_snapshot,
         sample_history: history_failure,
     };
-    let result = super::analyze_internal_with_ops(
-        &repo.root,
-        Some("HEAD"),
-        true,
-        None,
-        None,
-        &[],
-        &ops,
-    )
-    .unwrap();
+    let result =
+        super::analyze_internal_with_ops(&repo.root, Some("HEAD"), true, None, None, &[], &ops)
+            .unwrap();
 
     assert!(result.history.is_none());
     let capability = result
