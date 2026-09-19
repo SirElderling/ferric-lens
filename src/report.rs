@@ -2096,7 +2096,7 @@ mod tests {
         assert!(rendered.contains("<h2>What needs attention</h2>"));
         assert!(rendered.contains("1 area worth reviewing"));
         assert!(rendered.contains("1 investigate"));
-        assert!(rendered.contains("1 observe"));
+        assert!(rendered.contains("1 observation"));
         assert!(rendered.contains("Possible refactoring opportunity"));
         assert!(rendered.contains("Repeated copying may be worth measuring"));
         assert!(rendered.contains("Priority 2 — investigate"));
