@@ -97,7 +97,6 @@ fn accept_rejects_unknown_fingerprint_through_cli() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("not present in the current analysis"));
 }
 
-
 #[test]
 fn analyze_accepts_explicit_profile_and_evidence_options() {
     let repo = Repo::baseline("analyze-options");
