@@ -1843,7 +1843,6 @@ fn stability_verification_propagates_cargo_input_read_failure() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn inventory_assembly_propagates_resolution_and_fallback_errors() {
     let root = temp_root();
@@ -1864,9 +1863,11 @@ fn inventory_assembly_propagates_resolution_and_fallback_errors() {
         workspace_members: vec!["missing-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
     };
-    assert!(super::assemble_inventory(&root, Ok(missing_manifest), None, &digest)
-        .unwrap_err()
-        .contains("cannot read Cargo manifest"));
+    assert!(
+        super::assemble_inventory(&root, Ok(missing_manifest), None, &digest)
+            .unwrap_err()
+            .contains("cannot read Cargo manifest")
+    );
 
     let not_directory = root.join("not-directory");
     fs::write(&not_directory, "not a directory").unwrap();
@@ -1884,7 +1885,11 @@ fn inventory_assembly_propagates_resolution_and_fallback_errors() {
 #[test]
 fn verified_inventory_propagates_source_stability_failure() {
     let root = temp_root();
-    fs::write(root.join("Cargo.toml"), "[package]\nname='demo'\nversion='0.1.0'\n").unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .unwrap();
     fs::write(root.join("src/lib.rs"), "pub fn current() {}\n").unwrap();
     let digest = super::cargo_input_digest(&root).unwrap();
     let source = SourceFile {
