@@ -32,16 +32,8 @@ impl HostCfg {
         if let Some(target) = target {
             command.args(["--target", target]);
         }
-        let output = command
-            .output()
-            .map_err(|error| format!("could not execute rustc --print cfg: {error}"))?;
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-        }
-
-        let text = std::str::from_utf8(&output.stdout)
-            .map_err(|error| format!("rustc cfg output is not UTF-8: {error}"))?;
-        let mut cfg = Self::from_lines(text.lines())?;
+        let output = run_rustc_cfg(&mut command)?;
+        let mut cfg = parse_rustc_cfg(&output.stdout)?;
         cfg.explicit_features = features
             .iter()
             .map(|feature| feature.trim().to_owned())
