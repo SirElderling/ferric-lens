@@ -75,3 +75,11 @@ fn rustc_host_parse_wrapper_propagates_spawn_errors() {
         .unwrap_err()
         .contains("could not execute rustc"));
 }
+
+
+#[test]
+fn profile_resolution_propagates_host_lookup_failures() {
+    let error = ProfileContext::resolve_with_host(None, &[], || Err("host unavailable".into()))
+        .unwrap_err();
+    assert_eq!(error, "host unavailable");
+}
