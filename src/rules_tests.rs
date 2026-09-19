@@ -609,13 +609,12 @@ fn refactor_candidate_combines_support_deterministically_and_keeps_change_releva
             .map(|item| item.metric.as_str())
             .collect::<Vec<_>>(),
         vec![
-            "clone_call_syntax_sites",
             "decision_sites",
             "local_dependency_modules",
             "reverse_repository_dependents",
         ]
     );
-    assert!(first[0].summary.contains("3 independent signals"));
+    assert!(first[0].summary.contains("2 independent signals"));
 }
 
 #[test]
@@ -658,10 +657,10 @@ fn refactor_candidate_preserves_only_unambiguous_prior_identity() {
     assert_eq!(candidate.identity, "demo::original");
 
     let mut conflicting = advisory_finding(
-        "runtime.clone_syntax_outlier",
+        "build.rebuild_exposure_candidate",
         "demo::renamed",
         DeltaStatus::Current,
-        vec![evidence("clone_call_syntax_sites", 12)],
+        vec![evidence("reverse_repository_dependents", 12)],
     );
     conflicting.identity = "demo::other".into();
 
