@@ -60,6 +60,7 @@ Record one row per finding using this scorecard:
 | Finding fingerprint | Exact fingerprint from report |
 | Project | Jeko / Kronicle / other |
 | Correct evidence? | yes / no / uncertain |
+| Source context accurate? | yes / no / not available |
 | Useful to investigate? | yes / no |
 | Priority appropriate? | yes / too high / too low |
 | Direction useful? | yes / no / partly |
@@ -68,6 +69,8 @@ Record one row per finding using this scorecard:
 | Notes | Plain-English reason |
 
 For a refactoring candidate, explicitly check that the independent signals really support the same concern. The suggested direction should help investigation without pretending Ferric Lens knows the final architecture.
+
+For every displayed source context, verify that the repository-relative path and exact line span actually contain evidence for the named signal and that the bounded excerpt provides enough context to investigate. Missing source context is acceptable only when the finding's evidence cannot be truthfully tied to one syntax span; Ferric Lens must not fabricate a line.
 
 ## 5. Check for missed issues
 
@@ -98,7 +101,7 @@ After reviewing a project, answer these separately from finding correctness:
 
 - Could the first screen tell you what deserves attention?
 - Were priority and evidence strength understandable?
-- Could you navigate from a finding to the affected module quickly?
+- Could you move from a finding to the exact evidence line/excerpt quickly, while still reaching the affected module when needed?
 - Was the distinction between gate, refactor, structural, runtime-risk, and build findings clear?
 - Was anything important buried or repeated?
 - Did the report make any claim stronger than its evidence justified?
