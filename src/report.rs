@@ -1012,9 +1012,7 @@ mod tests {
         assert!(rendered.contains("If ignored"));
         assert!(rendered.contains("What to investigate next"));
         assert!(rendered.contains("Repository explorer"));
-        assert!(rendered.contains(
-            "Use this after a finding points you to an area"
-        ));
+        assert!(rendered.contains("Use this after a finding points you to an area"));
         assert!(rendered.contains("Worth investigating"));
         assert!(rendered.contains("No issue currently identified"));
         assert!(rendered.find("demo::engine").unwrap() < rendered.find("demo::quiet").unwrap());
@@ -1111,10 +1109,7 @@ mod tests {
             "Repeated copying may be worth measuring"
         );
         assert_eq!(value["findings"][0]["path"], "src/engine.rs");
-        assert_eq!(
-            value["findings"][0]["source_contexts"][0]["start_line"],
-            12
-        );
+        assert_eq!(value["findings"][0]["source_contexts"][0]["start_line"], 12);
         assert!(value["findings"][0]["why_care"]
             .as_str()
             .unwrap()
