@@ -140,7 +140,6 @@ fn snapshot_capabilities_reflect_complete_and_partial_syntax_and_inventory() {
             == Some("2 Rust source file(s) could not be parsed")));
 }
 
-
 static REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 struct Repo {
@@ -228,7 +227,11 @@ fn truncated_history(_: &Path) -> Result<HistorySample, String> {
 #[test]
 fn baseline_materialization_failure_is_reported_as_inconclusive() {
     let repo = Repo::new("materialize-failure");
-    fs::write(repo.root.join(".git/worktrees"), "blocks worktree directory").unwrap();
+    fs::write(
+        repo.root.join(".git/worktrees"),
+        "blocks worktree directory",
+    )
+    .unwrap();
 
     let result = super::analyze_with_base(&repo.root, Some("HEAD")).unwrap();
 
@@ -282,7 +285,10 @@ fn unavailable_history_degrades_capability_without_changing_gate_semantics() {
         .find(|capability| capability.name == "history_enrichment")
         .unwrap();
     assert_eq!(capability.status, CapabilityStatus::Unavailable);
-    assert_eq!(capability.detail.as_deref(), Some("fixture history failure"));
+    assert_eq!(
+        capability.detail.as_deref(),
+        Some("fixture history failure")
+    );
 }
 
 #[test]
