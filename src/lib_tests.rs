@@ -430,6 +430,20 @@ fn public_acceptance_wrappers_record_an_exact_current_finding() {
         .fingerprint
         .clone();
 
+    let repeated = super::check_with_base(&repo.root, Some(&baseline)).unwrap();
+    assert!(
+        repeated
+            .findings
+            .iter()
+            .any(|finding| finding.fingerprint == fingerprint),
+        "repeated analysis lost fingerprint {fingerprint}; findings: {:?}",
+        repeated
+            .findings
+            .iter()
+            .map(|finding| (&finding.subject, &finding.fingerprint, finding.gate))
+            .collect::<Vec<_>>()
+    );
+
     super::accept_finding_with_base(
         &repo.root,
         Some(&baseline),
