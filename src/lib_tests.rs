@@ -9,7 +9,10 @@ use std::{
 use crate::{
     compare::Correspondence,
     git::{ChangeSet, HistoryCommit, HistorySample},
-    model::{CapabilityStatus, DeltaStatus, EvidenceClass, Finding, ModuleMetrics, Priority},
+    model::{
+        CapabilityStatus, DeltaStatus, Evidence, EvidenceClass, Finding, ModuleMetrics, Priority,
+        SourceContext,
+    },
 };
 
 fn module(crate_name: &str, module_path: &str, path: &str) -> ModuleMetrics {
@@ -417,6 +420,95 @@ fn analysis_propagates_source_context_failures_from_all_result_paths() {
     )
     .unwrap_err()
     .contains("fixture source context failure"));
+}
+
+#[test]
+fn finding_source_contexts_merges_only_requested_correctness_contexts() {
+    let repo = Repo::new("correctness-context-merge");
+    let profile = crate::profile::ProfileContext::resolve(None, &[]).unwrap();
+    let mut wanted = finding("correctness.test", "repository");
+    wanted.evidence = vec![Evidence {
+        metric: "wanted".into(),
+        value: 1,
+        reference: 0,
+        population: 1,
+        baseline: None,
+        material_delta: None,
+    }];
+    let snapshot = super::SnapshotAnalysis {
+        content_digest: "digest".into(),
+        metadata_complete: true,
+        metadata_detail: None,
+        cargo_input_digest: "cargo".into(),
+        cargo_resolution_digest: Some("resolution".into()),
+        auxiliary_targets: Default::default(),
+        workspace_aliases: Default::default(),
+        source_digests: Default::default(),
+        modules: Vec::new(),
+        correctness_findings: Vec::new(),
+        correctness_contexts: vec![
+            SourceContext {
+                subject: "repository".into(),
+                metric: "wanted".into(),
+                path: "src/a.rs".into(),
+                start_line: 1,
+                end_line: 1,
+                excerpt: "wanted".into(),
+                excerpt_truncated: false,
+            },
+            SourceContext {
+                subject: "repository".into(),
+                metric: "other".into(),
+                path: "src/b.rs".into(),
+                start_line: 1,
+                end_line: 1,
+                excerpt: "other".into(),
+                excerpt_truncated: false,
+            },
+        ],
+        parse_failures: 0,
+    };
+
+    let contexts =
+        super::finding_source_contexts(&repo.root, &snapshot, &[wanted], &profile).unwrap();
+
+    assert_eq!(contexts.len(), 1);
+    assert_eq!(contexts[0].metric, "wanted");
+}
+
+#[test]
+fn finding_source_contexts_propagates_standard_context_read_errors() {
+    let repo = Repo::new("standard-context-read-error");
+    let profile = crate::profile::ProfileContext::resolve(None, &[]).unwrap();
+    let mut wanted = finding("structure.test", "demo::missing");
+    wanted.evidence = vec![Evidence {
+        metric: "decision_sites".into(),
+        value: 1,
+        reference: 0,
+        population: 1,
+        baseline: None,
+        material_delta: None,
+    }];
+    let missing = module("demo", "missing", "src/missing.rs");
+    let snapshot = super::SnapshotAnalysis {
+        content_digest: "digest".into(),
+        metadata_complete: true,
+        metadata_detail: None,
+        cargo_input_digest: "cargo".into(),
+        cargo_resolution_digest: Some("resolution".into()),
+        auxiliary_targets: Default::default(),
+        workspace_aliases: Default::default(),
+        source_digests: BTreeMap::from([("src/missing.rs".into(), "digest".into())]),
+        modules: vec![missing],
+        correctness_findings: Vec::new(),
+        correctness_contexts: Vec::new(),
+        parse_failures: 0,
+    };
+
+    let error =
+        super::finding_source_contexts(&repo.root, &snapshot, &[wanted], &profile).unwrap_err();
+
+    assert!(error.contains("cannot read"));
 }
 
 #[test]
