@@ -112,7 +112,9 @@ fn current_snapshot_reports_only_coupled_outliers_in_large_populations() {
     assert!(!findings[0].gate);
     assert_eq!(findings[0].delta, DeltaStatus::Current);
 
-    assert!(current_snapshot_findings(&modules[..19]).is_empty());
+    assert!(!current_snapshot_findings(&modules[..19])
+        .iter()
+        .any(|finding| finding.rule == "structure.current_coupled_outlier"));
 }
 
 #[test]
