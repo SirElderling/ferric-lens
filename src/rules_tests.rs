@@ -402,6 +402,52 @@ fn descriptive_small_population_candidates_require_four_subjects_and_a_unique_ma
 }
 
 #[test]
+fn small_population_near_maxima_do_not_create_false_concentration_alerts() {
+    let mut modules = (0..15)
+        .map(|index| module(index, 20, 0))
+        .collect::<Vec<_>>();
+
+    modules[0].decision_sites = 128;
+    modules[1].decision_sites = 119;
+    modules[2].decision_sites = 95;
+
+    modules[0].clone_calls = 22;
+    modules[1].clone_calls = 21;
+    modules[2].clone_calls = 19;
+
+    let findings = current_snapshot_findings(&modules);
+
+    assert!(!findings.iter().any(|finding| {
+        finding.rule == "structure.small_population_decision_concentration"
+            || finding.rule == "runtime.small_population_clone_concentration"
+    }));
+}
+
+#[test]
+fn small_population_clear_dependency_hub_remains_an_observation() {
+    let mut modules = (0..16)
+        .map(|index| module(index, 10, 0))
+        .collect::<Vec<_>>();
+
+    for index in 1..13 {
+        modules[index].local_dependency_modules = vec!["demo::m0".into()];
+    }
+    for index in 13..16 {
+        modules[index].local_dependency_modules = vec!["demo::m1".into()];
+    }
+
+    let finding = current_snapshot_findings(&modules)
+        .into_iter()
+        .find(|finding| finding.rule == "build.small_population_rebuild_concentration")
+        .expect("clear dependency hub should remain visible");
+
+    assert_eq!(finding.subject, "demo::m0");
+    assert_eq!(finding.priority, Priority::Observe);
+    assert_eq!(finding.evidence[0].value, 12);
+    assert_eq!(finding.evidence[0].reference, 3);
+}
+
+#[test]
 fn unique_max_helper_handles_empty_and_singleton_inputs_without_false_concentration() {
     assert_eq!(super::unique_max_above_median(&[]), None);
     assert_eq!(super::unique_max_above_median(&[7]), None);
