@@ -198,3 +198,18 @@ fn recognizes_every_builtin_cfg_family() {
     }
     assert!(!super::is_known_value_cfg("custom"));
 }
+
+
+#[test]
+fn missing_known_value_cfg_is_false_while_missing_custom_value_is_unknown() {
+    let cfg = HostCfg::test(&["unix"]);
+
+    assert_eq!(
+        cfg.evaluate(&parse_quote!(target_arch = "x86_64")),
+        Truth::False
+    );
+    assert_eq!(
+        cfg.evaluate(&parse_quote!(custom_value = "x")),
+        Truth::Unknown
+    );
+}
