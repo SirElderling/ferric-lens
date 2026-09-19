@@ -40,6 +40,10 @@ jobs:
       - name: Test
         run: cargo test --all-targets --all-features
 
+      - name: Test coverage gate
+        if: runner.os == 'Linux'
+        run: python3 -m unittest .github/scripts/test_check_source_coverage.py
+
       - name: Install coverage tooling
         if: runner.os == 'Linux'
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -61,7 +65,9 @@ jobs:
 
       - name: Enforce 100% coverage
         if: runner.os == 'Linux'
-        run: cargo llvm-cov report --show-missing-lines --fail-under-lines 100 --fail-under-regions 100 --fail-under-functions 100
+        run: |
+          cargo llvm-cov report --show-missing-lines
+          python3 .github/scripts/check_source_coverage.py target/coverage.json .
 
       - name: End-to-end check
         run: cargo run --locked -- check . --base origin/main --json target/ferric-lens-self-check.json
