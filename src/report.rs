@@ -615,4 +615,76 @@ mod tests {
         assert_eq!(value["result_digest"], digest);
         assert!(html(&result).contains(&digest));
     }
+
+    #[test]
+    fn renders_inconclusive_attached_evidence_multiple_crates_and_complete_history() {
+        use crate::model::{
+            HistoryEvidence, HistorySummary, ImportedEvidence, ModuleMetrics,
+        };
+
+        let mut result = minimal_result();
+        result.verdict = GateVerdict::Inconclusive;
+        result.verdict_reason = "incomplete".into();
+        result.history = Some(HistorySummary {
+            sampled_commits: 1,
+            changed_path_records: 1,
+            broad_commits_excluded_from_cochange: 0,
+            truncated: false,
+        });
+        result.imported_evidence = Some(ImportedEvidence {
+            producer: "fixture".into(),
+            producer_version: "1".into(),
+            source_content_digest: Some("source".into()),
+            source_git_commit: None,
+            target: "host".into(),
+            features: Vec::new(),
+            attached: true,
+            attachment_reason: "match".into(),
+            observations: Vec::new(),
+        });
+        result.modules = vec![
+            ModuleMetrics {
+                crate_name: "a".into(),
+                module_path: String::new(),
+                path: "a/src/lib.rs".into(),
+                lines: 1,
+                decision_sites: 0,
+                public_items: 0,
+                explicit_imports: Vec::new(),
+                local_dependency_modules: Vec::new(),
+                structure_digest: "a".into(),
+                parse_complete: true,
+                gate_complete: true,
+                limitation: None,
+                history: Some(HistoryEvidence {
+                    change_commits: 1,
+                    sampled_commits: 1,
+                    cochange: Vec::new(),
+                }),
+            },
+            ModuleMetrics {
+                crate_name: "b".into(),
+                module_path: String::new(),
+                path: "b/src/lib.rs".into(),
+                lines: 1,
+                decision_sites: 0,
+                public_items: 0,
+                explicit_imports: Vec::new(),
+                local_dependency_modules: Vec::new(),
+                structure_digest: "b".into(),
+                parse_complete: true,
+                gate_complete: true,
+                limitation: None,
+                history: None,
+            },
+        ];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("INCONCLUSIVE"));
+        assert!(rendered.contains("attached to current analysis"));
+        assert!(!rendered.contains("Sample truncated"));
+        assert!(rendered.matches("<details><summary><strong>").count() >= 2);
+    }
+
 }
