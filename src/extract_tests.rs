@@ -995,7 +995,10 @@ fn clone_source_context_prefers_mutable_or_iterated_aggregate_copies() {
         std::slice::from_ref(&module),
         &WorkspaceAliases::new(),
         &digests,
-        &[context_finding("demo::engine", &["clone_call_syntax_sites"])],
+        &[context_finding(
+            "demo::engine",
+            &["clone_call_syntax_sites"],
+        )],
         &host(),
         &BTreeMap::new(),
     )
