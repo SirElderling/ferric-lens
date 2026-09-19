@@ -331,6 +331,14 @@ fn function_regions(sources: &[SourceFile]) -> Vec<FunctionRegion> {
             let Item::Fn(function) = item else {
                 continue;
             };
+            if function.attrs.iter().any(|attr| {
+                attr.path().is_ident("cfg")
+                    && attr
+                        .parse_args::<syn::Path>()
+                        .is_ok_and(|path| path.is_ident("test"))
+            }) {
+                continue;
+            }
             let start = function.span().start().line.max(1);
             let end = function.span().end().line.max(start);
             let lines = source_lines
