@@ -672,7 +672,12 @@ fn source_contexts_cover_decisions_clones_local_and_reverse_dependencies() {
         "    if flag {}\n",
         "}\n",
     );
-    let caller = "use crate::engine;\nfn caller() {}\n";
+    let caller = concat!(
+        "use crate::engine;\n",
+        "use crate::target::*;\n",
+        "use serde::Serialize;\n",
+        "fn caller() {}\n",
+    );
     let target = "pub fn target() {}\n";
     fs::write(root.join("src/engine.rs"), engine).unwrap();
     fs::write(root.join("src/caller.rs"), caller).unwrap();
