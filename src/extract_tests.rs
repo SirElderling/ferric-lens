@@ -552,7 +552,6 @@ fn cfg_disabled_impl_members_do_not_contribute_item_or_clone_facts() {
         .any(|fact| fact.name.ends_with("enabled")));
 }
 
-
 #[test]
 fn member_cfg_gaps_skip_impl_trait_and_foreign_facts() {
     let metrics = extract(
@@ -598,11 +597,7 @@ fn member_cfg_gaps_skip_impl_trait_and_foreign_facts() {
 
 #[test]
 fn non_clone_method_calls_do_not_increment_clone_syntax_count() {
-    let metrics = extract(
-        &source("fn f(value: Value) { value.observe(); }"),
-        &host(),
-    )
-    .unwrap();
+    let metrics = extract(&source("fn f(value: Value) { value.observe(); }"), &host()).unwrap();
 
     assert_eq!(metrics.clone_calls, 0);
 }
