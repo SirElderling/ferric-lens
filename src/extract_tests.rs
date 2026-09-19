@@ -1,10 +1,16 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use super::{extract, resolve_workspace_dependencies};
 use crate::{
     cfg::HostCfg,
     input::{SourceFile, WorkspaceAliases},
-    model::ModuleMetrics,
+    model::{
+        DeltaStatus, Evidence, EvidenceClass, Finding, ModuleMetrics, Priority, SourceContext,
+    },
 };
 
 fn host() -> HostCfg {
@@ -600,4 +606,340 @@ fn non_clone_method_calls_do_not_increment_clone_syntax_count() {
     let metrics = extract(&source("fn f(value: Value) { value.observe(); }"), &host()).unwrap();
 
     assert_eq!(metrics.clone_calls, 0);
+}
+
+
+static CONTEXT_TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn context_root(name: &str) -> std::path::PathBuf {
+    let counter = CONTEXT_TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!(
+        "ferric-lens-source-context-{name}-{}-{counter}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("src")).unwrap();
+    root
+}
+
+fn context_module(module_path: &str, path: &str, text: &str) -> ModuleMetrics {
+    let mut module = extracted("demo", module_path, path, text);
+    module.local_dependency_modules.clear();
+    module
+}
+
+fn context_finding(subject: &str, metrics: &[&str]) -> Finding {
+    Finding {
+        fingerprint: "context".into(),
+        rule: "test.context".into(),
+        subject: subject.into(),
+        identity: subject.into(),
+        configuration: "host".into(),
+        evidence_class: EvidenceClass::Candidate,
+        priority: Priority::Observe,
+        delta: DeltaStatus::Current,
+        gate: false,
+        accepted: false,
+        acceptance_reason: None,
+        summary: "context".into(),
+        direction: "inspect".into(),
+        evidence: metrics
+            .iter()
+            .map(|metric| Evidence {
+                metric: (*metric).into(),
+                value: 1,
+                reference: 0,
+                population: 1,
+                baseline: None,
+                material_delta: None,
+            })
+            .collect(),
+    }
+}
+
+fn source_digest(text: &[u8]) -> String {
+    blake3::hash(text).to_hex().to_string()
+}
+
+#[test]
+fn source_contexts_cover_decisions_clones_local_and_reverse_dependencies() {
+    let root = context_root("signals");
+    let engine = concat!(
+        "use crate::target;\n",
+        "fn run(value: String, flag: bool) {\n",
+        "    if flag { let _ = value.clone(); }\n",
+        "    if flag {}\n",
+        "    if flag {}\n",
+        "    if flag {}\n",
+        "}\n",
+    );
+    let caller = "use crate::engine;\nfn caller() {}\n";
+    let target = "pub fn target() {}\n";
+    fs::write(root.join("src/engine.rs"), engine).unwrap();
+    fs::write(root.join("src/caller.rs"), caller).unwrap();
+    fs::write(root.join("src/target.rs"), target).unwrap();
+
+    let mut modules = vec![
+        context_module("engine", "src/engine.rs", engine),
+        context_module("caller", "src/caller.rs", caller),
+        context_module("target", "src/target.rs", target),
+    ];
+    resolve_workspace_dependencies(&mut modules, &WorkspaceAliases::new());
+
+    let digests = BTreeMap::from([
+        ("src/engine.rs".into(), source_digest(engine.as_bytes())),
+        ("src/caller.rs".into(), source_digest(caller.as_bytes())),
+        ("src/target.rs".into(), source_digest(target.as_bytes())),
+    ]);
+    let findings = vec![
+        context_finding(
+            "demo::engine",
+            &[
+                "decision_sites",
+                "clone_call_syntax_sites",
+                "local_dependency_modules",
+            ],
+        ),
+        context_finding("demo::engine", &["reverse_repository_dependents"]),
+        context_finding("demo::engine", &["public_items"]),
+    ];
+
+    let contexts = super::source_contexts_for_findings(
+        &root,
+        &modules,
+        &WorkspaceAliases::new(),
+        &digests,
+        &findings,
+        &host(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        contexts
+            .iter()
+            .filter(|context| {
+                context.subject == "demo::engine" && context.metric == "decision_sites"
+            })
+            .count(),
+        3
+    );
+    assert!(contexts.iter().any(|context| {
+        context.subject == "demo::engine"
+            && context.metric == "clone_call_syntax_sites"
+            && context.path == "src/engine.rs"
+            && context.start_line == 3
+    }));
+    assert!(contexts.iter().any(|context| {
+        context.subject == "demo::engine"
+            && context.metric == "local_dependency_modules"
+            && context.path == "src/engine.rs"
+            && context.start_line == 1
+    }));
+    assert!(contexts.iter().any(|context| {
+        context.subject == "demo::engine"
+            && context.metric == "reverse_repository_dependents"
+            && context.path == "src/caller.rs"
+            && context.start_line == 1
+    }));
+    assert!(!contexts.iter().any(|context| context.metric == "public_items"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn source_contexts_ignore_globs_external_imports_and_missing_subjects() {
+    let root = context_root("ignored-imports");
+    let text = "use crate::target::*;\nuse serde::Serialize;\nfn run() {}\n";
+    fs::write(root.join("src/engine.rs"), text).unwrap();
+
+    let mut engine = context_module("engine", "src/engine.rs", text);
+    engine.local_dependency_modules = vec!["demo::target".into()];
+    let target = context_module("target", "src/target.rs", "");
+    let modules = vec![engine, target];
+    let digests = BTreeMap::from([(
+        "src/engine.rs".into(),
+        source_digest(text.as_bytes()),
+    )]);
+    let findings = vec![
+        context_finding("demo::engine", &["local_dependency_modules"]),
+        context_finding("demo::missing", &["decision_sites"]),
+    ];
+
+    let contexts = super::source_contexts_for_findings(
+        &root,
+        &modules,
+        &WorkspaceAliases::new(),
+        &digests,
+        &findings,
+        &host(),
+    )
+    .unwrap();
+
+    assert!(contexts.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn source_contexts_return_empty_when_no_supported_evidence_is_requested() {
+    let root = context_root("no-supported-metrics");
+    let contexts = super::source_contexts_for_findings(
+        &root,
+        &[],
+        &WorkspaceAliases::new(),
+        &BTreeMap::new(),
+        &[context_finding("demo::engine", &["public_items"])],
+        &host(),
+    )
+    .unwrap();
+
+    assert!(contexts.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn source_contexts_detect_missing_digest_changed_missing_invalid_and_malformed_sources() {
+    let root = context_root("source-errors");
+    let module = context_module("engine", "src/engine.rs", "fn run() { if true {} }\n");
+    let finding = context_finding("demo::engine", &["decision_sites"]);
+
+    fs::write(root.join("src/engine.rs"), "fn run() { if true {} }\n").unwrap();
+    let error = super::source_contexts_for_findings(
+        &root,
+        std::slice::from_ref(&module),
+        &WorkspaceAliases::new(),
+        &BTreeMap::new(),
+        std::slice::from_ref(&finding),
+        &host(),
+    )
+    .unwrap_err();
+    assert!(error.contains("missing source digest"));
+
+    let digests = BTreeMap::from([("src/engine.rs".into(), "wrong".into())]);
+    let error = super::source_contexts_for_findings(
+        &root,
+        std::slice::from_ref(&module),
+        &WorkspaceAliases::new(),
+        &digests,
+        std::slice::from_ref(&finding),
+        &host(),
+    )
+    .unwrap_err();
+    assert!(error.contains("source changed"));
+
+    fs::remove_file(root.join("src/engine.rs")).unwrap();
+    let digests = BTreeMap::from([("src/engine.rs".into(), "irrelevant".into())]);
+    let error = super::source_contexts_for_findings(
+        &root,
+        std::slice::from_ref(&module),
+        &WorkspaceAliases::new(),
+        &digests,
+        std::slice::from_ref(&finding),
+        &host(),
+    )
+    .unwrap_err();
+    assert!(error.contains("cannot read"));
+
+    fs::write(root.join("src/engine.rs"), [0xff]).unwrap();
+    let digests = BTreeMap::from([(
+        "src/engine.rs".into(),
+        source_digest(&[0xff]),
+    )]);
+    let error = super::source_contexts_for_findings(
+        &root,
+        std::slice::from_ref(&module),
+        &WorkspaceAliases::new(),
+        &digests,
+        std::slice::from_ref(&finding),
+        &host(),
+    )
+    .unwrap_err();
+    assert!(error.contains("not valid UTF-8"));
+
+    let malformed = b"fn {";
+    fs::write(root.join("src/engine.rs"), malformed).unwrap();
+    let digests = BTreeMap::from([(
+        "src/engine.rs".into(),
+        source_digest(malformed),
+    )]);
+    let error = super::source_contexts_for_findings(
+        &root,
+        &[module],
+        &WorkspaceAliases::new(),
+        &digests,
+        &[finding],
+        &host(),
+    )
+    .unwrap_err();
+    assert!(error.contains("Rust parse failed"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn source_context_excerpt_bounds_lines_characters_and_deduplicates_spans() {
+    let long = "x".repeat(700);
+    let text = format!("first\n{long}\nthird\nfourth\nfifth\n");
+    let mut contexts = Vec::<SourceContext>::new();
+    super::push_span_contexts(
+        &mut contexts,
+        "demo::engine",
+        "decision_sites",
+        "src/engine.rs",
+        &[
+            super::LineSpan { start: 1, end: 5 },
+            super::LineSpan { start: 1, end: 5 },
+        ],
+        &text,
+    );
+
+    assert_eq!(contexts.len(), 1);
+    let context = &contexts[0];
+    assert_eq!(context.start_line, 1);
+    assert_eq!(context.end_line, 5);
+    assert!(context.excerpt_truncated);
+    assert!(context.excerpt.ends_with('…'));
+    assert!(context.excerpt.chars().count() <= 600);
+
+    let (short, truncated) = super::truncate_excerpt("short");
+    assert_eq!(short, "short");
+    assert!(!truncated);
+}
+
+#[test]
+fn source_context_span_capture_covers_every_decision_syntax_family() {
+    let root = context_root("decision-spans");
+    let text = concat!(
+        "fn run(values: &[bool]) {\n",
+        "    for value in values {\n",
+        "        while *value { break; }\n",
+        "    }\n",
+        "    loop { break; }\n",
+        "    match true {\n",
+        "        value if value => (),\n",
+        "        false => (),\n",
+        "        _ => (),\n",
+        "    }\n",
+        "    let _ = true && false || true;\n",
+        "}\n",
+    );
+    fs::write(root.join("src/engine.rs"), text).unwrap();
+    let module = context_module("engine", "src/engine.rs", text);
+    let digests = BTreeMap::from([(
+        "src/engine.rs".into(),
+        source_digest(text.as_bytes()),
+    )]);
+
+    let contexts = super::source_contexts_for_findings(
+        &root,
+        &[module],
+        &WorkspaceAliases::new(),
+        &digests,
+        &[context_finding("demo::engine", &["decision_sites"])],
+        &host(),
+    )
+    .unwrap();
+
+    assert_eq!(contexts.len(), 3);
+    assert!(contexts.iter().all(|context| context.start_line > 0));
+    fs::remove_dir_all(root).unwrap();
 }
