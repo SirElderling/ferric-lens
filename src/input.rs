@@ -708,7 +708,7 @@ fn inventory_from_metadata(
         PathBuf,
         PathBuf,
         Vec<Dependency>,
-        Vec<String>,
+        Option<Vec<String>>,
     )>::new();
     for package in &packages {
         let Some(package_root) = package_root_by_id.get(&package.id).cloned() else {
