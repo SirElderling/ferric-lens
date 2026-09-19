@@ -242,3 +242,23 @@ fn cfg_construction_propagates_parser_errors() {
 
     assert!(error.contains("not UTF-8"));
 }
+
+#[test]
+fn resolved_features_make_absence_definitively_false_and_change_cfg_identity() {
+    let base = HostCfg::test(&["unix", "target_os=\"linux\""]);
+    let resolved = base.with_resolved_features(&["fast".to_owned()]);
+
+    assert_eq!(
+        resolved.evaluate(&parse_quote!(feature = "fast")),
+        Truth::True
+    );
+    assert_eq!(
+        resolved.evaluate(&parse_quote!(feature = "other")),
+        Truth::False
+    );
+    assert_eq!(
+        base.evaluate(&parse_quote!(feature = "other")),
+        Truth::Unknown
+    );
+    assert_ne!(base.digest(), resolved.digest());
+}
