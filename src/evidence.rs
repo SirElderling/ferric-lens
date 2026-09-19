@@ -100,7 +100,7 @@ pub fn load(
                 .zip(snapshot.git_head.as_deref())
                 .is_some_and(|(expected, actual)| expected == actual));
 
-    let configuration_matches = envelope.configuration.target == profile.target
+    let configuration_matches = envelope.configuration.target == profile.resolved_target
         && envelope.configuration.features == profile.features;
 
     let (attached, attachment_reason) = match (source_matches, configuration_matches) {
