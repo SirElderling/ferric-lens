@@ -101,6 +101,7 @@ fn advisory_baseline_attribution_distinguishes_unchanged_worsened_new_and_unknow
         finding("build.rebuild_exposure_candidate", "demo::ambiguous"),
         finding("build.rebuild_exposure_candidate", "demo::unmatched"),
         finding("correctness.example", "demo::moved"),
+        finding("refactor.example", "demo::moved"),
         finding("other", "missing"),
     ];
     let baseline_findings = vec![finding(
@@ -140,6 +141,7 @@ fn advisory_baseline_attribution_distinguishes_unchanged_worsened_new_and_unknow
 
     assert_eq!(findings[5].delta, DeltaStatus::Current);
     assert_eq!(findings[6].delta, DeltaStatus::Current);
+    assert_eq!(findings[7].delta, DeltaStatus::Current);
 }
 
 #[test]
