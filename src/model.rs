@@ -235,6 +235,17 @@ pub struct Finding {
     pub evidence: Vec<Evidence>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SourceContext {
+    pub subject: String,
+    pub metric: String,
+    pub path: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub excerpt: String,
+    pub excerpt_truncated: bool,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ImportedObservation {
     pub subject: String,
@@ -276,5 +287,6 @@ pub struct AnalysisResult {
     pub imported_evidence: Option<ImportedEvidence>,
     pub capabilities: Vec<Capability>,
     pub modules: Vec<ModuleMetrics>,
+    pub source_contexts: Vec<SourceContext>,
     pub findings: Vec<Finding>,
 }
