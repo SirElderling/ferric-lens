@@ -49,7 +49,8 @@ impl RawFactCache {
             return None;
         }
 
-        let payload = serde_json::to_vec(&entry.module).ok()?;
+        let payload = serde_json::to_vec(&entry.module)
+            .expect("cached module schema contains only JSON-serializable values");
         if blake3::hash(&payload).to_hex().as_str() != entry.payload_digest {
             return None;
         }
