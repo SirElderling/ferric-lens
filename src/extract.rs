@@ -729,7 +729,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(metrics.public_items, 11);
+        assert_eq!(metrics.public_items, 12);
         assert!(!metrics.gate_complete);
     }
 
