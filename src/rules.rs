@@ -509,5 +509,4 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].subject, "demo");
     }
-
 }
