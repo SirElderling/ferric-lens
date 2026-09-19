@@ -22,7 +22,7 @@ fn temp_file(contents: &str) -> PathBuf {
 
 fn profile() -> AnalysisProfile {
     AnalysisProfile {
-        id: "target=host;features=default".into(),
+        id: "target=x86_64-unknown-linux-gnu;features=default".into(),
         target: "host".into(),
         resolved_target: "x86_64-unknown-linux-gnu".into(),
         features: Vec::new(),
@@ -46,7 +46,7 @@ fn attaches_matching_host_default_evidence() {
           "schema_version": 1,
           "producer": {"name": "bench", "version": "1"},
           "source": {"content_digest": "digest"},
-          "configuration": {"target": "host", "features": []},
+          "configuration": {"target": "x86_64-unknown-linux-gnu", "features": []},
           "observations": [
             {"subject": "src/lib.rs", "metric": "instructions", "value": 42, "unit": "count"}
           ]
@@ -66,7 +66,7 @@ fn retains_mismatched_source_as_unattached_context() {
           "schema_version": 1,
           "producer": {"name": "bench", "version": "1"},
           "source": {"content_digest": "other"},
-          "configuration": {"target": "host", "features": []},
+          "configuration": {"target": "x86_64-unknown-linux-gnu", "features": []},
           "observations": []
         }"#,
     );
@@ -83,7 +83,7 @@ fn rejects_subjects_that_escape_repository_scope() {
           "schema_version": 1,
           "producer": {"name": "bench", "version": "1"},
           "source": {"content_digest": "digest"},
-          "configuration": {"target": "host", "features": []},
+          "configuration": {"target": "x86_64-unknown-linux-gnu", "features": []},
           "observations": [
             {"subject": "../outside", "metric": "x", "value": 1, "unit": "count"}
           ]
@@ -101,7 +101,7 @@ fn attaches_clean_git_commit_identity_and_normalizes_features_and_observations()
           "schema_version": 1,
           "producer": {"name": "bench", "version": "1"},
           "source": {"git_commit": "abc123"},
-          "configuration": {"target": "host", "features": ["z", "a", "a"]},
+          "configuration": {"target": "x86_64-unknown-linux-gnu", "features": ["z", "a", "a"]},
           "observations": [
             {"subject": "src/z.rs", "metric": "m", "value": 2, "unit": "count"},
             {"subject": "src/a.rs", "metric": "m", "value": 1, "unit": "count", "note": "n"}
