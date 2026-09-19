@@ -507,7 +507,8 @@ fn final_history_commit_is_finished_through_the_shared_helper() {
 
     assert_eq!(commits.len(), 2);
     assert_eq!(broad, 1);
-}\n
+}
+
 #[test]
 fn worktree_path_preparation_reports_non_directory_removal_errors() {
     let root = std::env::temp_dir().join(format!(
