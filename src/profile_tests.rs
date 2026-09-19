@@ -83,3 +83,12 @@ fn profile_resolution_propagates_host_lookup_failures() {
         .unwrap_err();
     assert_eq!(error, "host unavailable");
 }
+
+
+#[test]
+fn profile_resolution_propagates_host_lookup_failure_without_an_explicit_target() {
+    let error = ProfileContext::resolve_with_host(None, &[], || Err("fixture host failure".into()))
+        .unwrap_err();
+
+    assert_eq!(error, "fixture host failure");
+}
