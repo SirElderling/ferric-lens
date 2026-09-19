@@ -33,7 +33,11 @@ impl HostCfg {
             command.args(["--target", target]);
         }
         let output = run_rustc_cfg(&mut command)?;
-        let mut cfg = parse_rustc_cfg(&output.stdout)?;
+        Self::from_rustc_output(&output.stdout, features)
+    }
+
+    fn from_rustc_output(output: &[u8], features: &[String]) -> Result<Self, String> {
+        let mut cfg = parse_rustc_cfg(output)?;
         cfg.explicit_features = features
             .iter()
             .map(|feature| feature.trim().to_owned())
