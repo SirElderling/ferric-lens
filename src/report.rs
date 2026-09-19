@@ -1216,14 +1216,23 @@ mod tests {
     fn human_report_labels_cover_all_model_states() {
         use crate::model::{DeltaStatus, EvidenceClass, Priority};
 
-        assert_eq!(super::priority_label(&Priority::ActFirst), "Priority 1 — act first");
+        assert_eq!(
+            super::priority_label(&Priority::ActFirst),
+            "Priority 1 — act first"
+        );
         assert_eq!(
             super::priority_label(&Priority::Investigate),
             "Priority 2 — investigate"
         );
         assert_eq!(super::priority_label(&Priority::Observe), "Observe");
-        assert_eq!(super::evidence_label(&EvidenceClass::Proven), "proven evidence");
-        assert_eq!(super::evidence_label(&EvidenceClass::Strong), "strong evidence");
+        assert_eq!(
+            super::evidence_label(&EvidenceClass::Proven),
+            "proven evidence"
+        );
+        assert_eq!(
+            super::evidence_label(&EvidenceClass::Strong),
+            "strong evidence"
+        );
         assert_eq!(
             super::evidence_label(&EvidenceClass::Candidate),
             "candidate evidence"
