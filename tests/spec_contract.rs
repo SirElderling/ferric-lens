@@ -249,10 +249,7 @@ fn public_analysis_surfaces_multi_signal_refactor_candidates() {
 
     assert!(!candidate.gate);
     assert_eq!(candidate.priority, ferric_lens::model::Priority::Observe);
-    assert_eq!(
-        candidate.delta,
-        ferric_lens::model::DeltaStatus::Unchanged
-    );
+    assert_eq!(candidate.delta, ferric_lens::model::DeltaStatus::Unchanged);
     assert!(candidate.summary.contains("decision complexity"));
     assert!(candidate.summary.contains("dependency surface"));
     assert!(report::json(&result).contains("refactor.multi_signal_candidate"));
