@@ -715,6 +715,7 @@ fn source_contexts_cover_decisions_clones_local_and_reverse_dependencies() {
         &digests,
         &findings,
         &host(),
+        &BTreeMap::new(),
     )
     .unwrap();
 
@@ -778,6 +779,7 @@ fn source_contexts_ignore_globs_external_imports_and_missing_subjects() {
         &digests,
         &findings,
         &host(),
+        &BTreeMap::new(),
     )
     .unwrap();
 
@@ -795,6 +797,7 @@ fn source_contexts_return_empty_when_no_supported_evidence_is_requested() {
         &BTreeMap::new(),
         &[context_finding("demo::engine", &["public_items"])],
         &host(),
+        &BTreeMap::new(),
     )
     .unwrap();
 
@@ -816,6 +819,7 @@ fn source_contexts_detect_missing_digest_changed_missing_invalid_and_malformed_s
         &BTreeMap::new(),
         std::slice::from_ref(&finding),
         &host(),
+        &BTreeMap::new(),
     )
     .unwrap_err();
     assert!(error.contains("missing source digest"));
@@ -828,6 +832,7 @@ fn source_contexts_detect_missing_digest_changed_missing_invalid_and_malformed_s
         &digests,
         std::slice::from_ref(&finding),
         &host(),
+        &BTreeMap::new(),
     )
     .unwrap_err();
     assert!(error.contains("source changed"));
@@ -841,6 +846,7 @@ fn source_contexts_detect_missing_digest_changed_missing_invalid_and_malformed_s
         &digests,
         std::slice::from_ref(&finding),
         &host(),
+        &BTreeMap::new(),
     )
     .unwrap_err();
     assert!(error.contains("cannot read"));
@@ -854,6 +860,7 @@ fn source_contexts_detect_missing_digest_changed_missing_invalid_and_malformed_s
         &digests,
         std::slice::from_ref(&finding),
         &host(),
+        &BTreeMap::new(),
     )
     .unwrap_err();
     assert!(error.contains("not valid UTF-8"));
@@ -868,6 +875,7 @@ fn source_contexts_detect_missing_digest_changed_missing_invalid_and_malformed_s
         &digests,
         &[finding],
         &host(),
+        &BTreeMap::new(),
     )
     .unwrap_err();
     assert!(error.contains("Rust parse failed"));
@@ -933,6 +941,7 @@ fn source_context_span_capture_covers_every_decision_syntax_family() {
         &digests,
         &[context_finding("demo::engine", &["decision_sites"])],
         &host(),
+        &BTreeMap::new(),
     )
     .unwrap();
 
