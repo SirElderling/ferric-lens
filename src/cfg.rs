@@ -61,6 +61,17 @@ impl HostCfg {
         &self.digest
     }
 
+    pub fn with_features(&self, features: &[String]) -> Self {
+        let mut cfg = self.clone();
+        cfg.explicit_features = features
+            .iter()
+            .map(|feature| feature.trim().to_owned())
+            .filter(|feature| !feature.is_empty())
+            .collect();
+        cfg.rehash();
+        cfg
+    }
+
     pub fn canonical_lines(&self) -> Vec<String> {
         let mut lines = self.flags.iter().cloned().collect::<Vec<_>>();
         for (key, values) in &self.values {
