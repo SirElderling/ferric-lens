@@ -162,7 +162,7 @@ candidate
 Definitions:
 
 - **proven**: deterministically established by an invariant or directly observable condition.
-- **strong**: supported by multiple independent deterministic signals.
+- **strong**: supported by deterministic evidence whose semantics justify a strong claim; multiple weak observations do not automatically become strong merely because they are independent.
 - **candidate**: notable evidence exists, but not enough to justify a strong conclusion.
 
 Evidence strength describes the claim, not permission to fail CI. For example, a syntax-level `.clone()` occurrence proves only that syntax exists; it does not establish allocation, unnecessary copying, or a runtime bottleneck. A complete observed dependency cycle proves a graph property, not a policy violation.
@@ -346,7 +346,7 @@ Allowed directions include:
 
 Ferric Lens must not generate source changes or prescribe a final architecture.
 
-V1 synthesizes `refactor.multi_signal_candidate` advisories from the deterministic signals it already owns. A candidate requires at least two independent signal kinds for the same module. The initial signal kinds are decision complexity, dependency surface/reach, and clone/copying syntax risk. Multiple observations of the same signal kind do not satisfy corroboration. The candidate carries the supporting evidence, preserves baseline change relevance and unambiguous movement identity, and provides only a bounded structural direction. It is advisory and never changes the CI gate verdict. Future deterministic history, public-surface, imported test, or measured performance evidence may extend this synthesis only with equally explicit semantics.
+V1 synthesizes `refactor.multi_signal_candidate` advisories from compatible deterministic signals it already owns. A candidate requires at least two independent signal kinds for the same module. The initial synthesis uses decision complexity and dependency surface/reach. Raw `.clone()` syntax concentration remains runtime-risk observation evidence and does not independently corroborate an architectural refactor. Multiple observations of the same signal kind do not satisfy corroboration, and combining candidate-only observations does not upgrade evidence to strong. A synthesized candidate becomes strong/investigate only when at least one supporting finding already carries strong or proven evidence. The candidate carries the supporting evidence, preserves baseline change relevance and unambiguous movement identity, and provides only a bounded structural direction. It is advisory and never changes the CI gate verdict. Future deterministic history, public-surface, contextual copying, imported test, or measured performance evidence may extend this synthesis only with equally explicit semantics.
 
 ## 12. Runtime performance-risk analysis
 
