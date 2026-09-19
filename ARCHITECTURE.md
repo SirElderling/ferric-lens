@@ -154,7 +154,7 @@ Accept one normalized evidence envelope with version, producer, source/configura
 
 ## 8. Validation and performance acceptance
 
-Implement behavior fixtures before enabling CI gates. The repository currently contains documentation only, so none of these runtime checks are claimed to have passed.
+Behavior fixtures, specification-derived regression tests, cross-platform CI, and a source-centric 100% production coverage gate are implemented in PR #2. Release performance acceptance remains a separate measured step: the repository now includes deterministic standard and stress fixture generation plus a non-thresholded measurement workflow, but shared-runner observations are diagnostic rather than release promises.
 
 | Property | Required verification |
 | --- | --- |
