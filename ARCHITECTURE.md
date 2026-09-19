@@ -39,7 +39,7 @@ Capture stable rustc target cfg data and Cargo feature information. Evaluate kno
 | Unambiguous explicit local paths/imports | Method dispatch, glob ambiguity, macro-generated edges, full call graph |
 | Resolved Cargo dependencies/features where locally available | Invented resolution when packages or lockfile data are missing |
 | Dependency reach and potential rebuild exposure | Actual compile duration, monomorphization, code size |
-| Clone/allocation-like syntax candidates | Runtime allocation cost, execution frequency, bottlenecks |
+| Contextual copy-risk syntax (for-loop clones, mutable working-copy clones) | Runtime allocation cost, execution frequency, bottlenecks |
 
 **Reason:** stable/offline analysis and broken-project support are compatible with syntax and partial resolution. They do not justify pretending to have a compiler's semantic model. Source names alone are insufficient for performance claims.
 
