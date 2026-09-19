@@ -109,11 +109,7 @@ impl RawFactCache {
 
         let mut files = entries
             .filter_map(Result::ok)
-            .filter_map(|entry| {
-                let path = entry.path();
-                let metadata = entry.metadata().ok()?;
-                metadata.is_file().then_some((path, metadata.len()))
-            })
+            .filter_map(cache_file)
             .collect::<Vec<_>>();
 
         let total = files.iter().map(|(_, len)| *len).sum::<u64>();
@@ -127,10 +123,28 @@ impl RawFactCache {
             if remaining <= MAX_CACHE_BYTES {
                 break;
             }
-            if fs::remove_file(path).is_ok() {
-                remaining = remaining.saturating_sub(len);
-            }
+            remove_cache_file(&path, len, &mut remaining);
         }
+    }
+}
+
+
+fn cache_file(entry: fs::DirEntry) -> Option<(PathBuf, u64)> {
+    let path = entry.path();
+    cache_file_from_metadata(path, entry.metadata())
+}
+
+fn cache_file_from_metadata(
+    path: PathBuf,
+    metadata: std::io::Result<fs::Metadata>,
+) -> Option<(PathBuf, u64)> {
+    let metadata = metadata.ok()?;
+    metadata.is_file().then_some((path, metadata.len()))
+}
+
+fn remove_cache_file(path: &Path, len: u64, remaining: &mut u64) {
+    if fs::remove_file(path).is_ok() {
+        *remaining = remaining.saturating_sub(len);
     }
 }
 
