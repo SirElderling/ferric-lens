@@ -32,6 +32,9 @@ enum Command {
         /// Optional normalized local evidence envelope for report enrichment.
         #[arg(long)]
         evidence: Option<PathBuf>,
+        /// Print compact deterministic JSON for AI/agent consumption instead of the human summary.
+        #[arg(long)]
+        ai: bool,
     },
     /// Record an explicit acceptance for one current finding.
     Accept {
@@ -68,6 +71,9 @@ enum Command {
         features: Vec<String>,
         #[arg(long)]
         json: Option<PathBuf>,
+        /// Print compact deterministic JSON for AI/agent consumption instead of the human summary.
+        #[arg(long)]
+        ai: bool,
     },
 }
 
@@ -91,6 +97,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             json,
             html,
             evidence,
+            ai,
         } => {
             let result = ferric_lens::analyze_with_profile(
                 &path,
@@ -102,7 +109,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             let json_text = report::json(&result);
             report::write(&json, &json_text)?;
             report::write(&html, &report::html(&result))?;
-            print_summary(&result);
+            print!("{}", output_text(&result, ai));
             Ok(exit_code(&result.verdict))
         }
         Command::Accept {
@@ -130,6 +137,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             target,
             features,
             json,
+            ai,
         } => {
             let result = ferric_lens::check_with_profile(
                 &path,
@@ -140,39 +148,18 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             if let Some(path) = json {
                 report::write(&path, &report::json(&result))?;
             }
-            print_summary(&result);
+            print!("{}", output_text(&result, ai));
             Ok(exit_code(&result.verdict))
         }
     }
 }
 
-fn print_summary(result: &ferric_lens::model::AnalysisResult) {
-    println!("Ferric Lens: {:?}", result.verdict);
-    println!("{}", result.verdict_reason);
-    if let Some(baseline) = &result.baseline {
-        println!(
-            "baseline {} -> merge base {}",
-            baseline.target_ref, baseline.merge_base
-        );
+fn output_text(result: &ferric_lens::model::AnalysisResult, ai: bool) -> String {
+    if ai {
+        format!("{}\n", report::ai_json(result))
+    } else {
+        report::cli_summary(result)
     }
-    let gate_findings = result
-        .findings
-        .iter()
-        .filter(|finding| finding.gate && !finding.accepted)
-        .count();
-    let accepted = result
-        .findings
-        .iter()
-        .filter(|finding| finding.accepted)
-        .count();
-    println!(
-        "{} source files, {} applicable gate subjects, {} unaccepted gate findings, {} accepted findings, {} total findings",
-        result.snapshot.source_files,
-        result.applicable_gate_subjects,
-        gate_findings,
-        accepted,
-        result.findings.len()
-    );
 }
 
 fn exit_code(verdict: &GateVerdict) -> ExitCode {
