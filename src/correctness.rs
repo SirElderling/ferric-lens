@@ -20,8 +20,7 @@ const CARGO_NO_DEPS: &str = concat!("--no", "-deps");
 const FEATURE_KEY_BRANCH: &str = concat!("key == ", "\"feature\"");
 const SYMBOLIC_TARGET_IDENTITY: &str = concat!("target={target_", "label};features=");
 const SYMBOLIC_PROFILE_TARGET: &str = concat!("profile.", "target");
-const ROOT_ONLY_CARGO_LOOP: &str =
-    concat!("for name in [\"Cargo.", "toml\", \"Cargo.lock\"]");
+const ROOT_ONLY_CARGO_LOOP: &str = concat!("for name in [\"Cargo.", "toml\", \"Cargo.lock\"]");
 const WORKSPACE_MANIFEST_PATH: &str = concat!("package.", "manifest_path");
 const GIT_COMMAND: &str = concat!("Command::new(", "\"git\")");
 const LOSSY_RECORD: &str = concat!("String::from_utf8_lossy(", "record)");
@@ -182,9 +181,7 @@ fn detect_lossy_git_paths(sources: &[SourceFile], scan: &mut CorrectnessScan) {
             continue;
         }
         for (index, line) in text.lines().enumerate() {
-            if line.contains(LOSSY_RECORD)
-                || line.contains(LOSSY_PATH)
-            {
+            if line.contains(LOSSY_RECORD) || line.contains(LOSSY_PATH) {
                 lossy.push(Match {
                     path: source.relative_path.clone(),
                     line: index + 1,
