@@ -60,8 +60,7 @@ fn ignores_exact_cfg_test_items_for_production_metrics() {
 
 #[test]
 fn marks_unknown_cfg_and_macros_incomplete_for_gating() {
-    let cfg_metrics =
-        extract(&source("#[cfg(my_custom_cfg)] fn platform() {}"), &host()).unwrap();
+    let cfg_metrics = extract(&source("#[cfg(my_custom_cfg)] fn platform() {}"), &host()).unwrap();
     assert!(!cfg_metrics.gate_complete);
 
     let macro_metrics = extract(&source("fn f() { vec![1, 2, 3]; }"), &host()).unwrap();
