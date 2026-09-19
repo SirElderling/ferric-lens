@@ -5,6 +5,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use crate::{cfg::HostCfg, model::AnalysisProfile, profile::ProfileContext};
+
 use super::{
     acquire_inventory, collect_reachable_module, collect_rust_files, collect_target_roots,
     finalize_inventory, inventory_from_metadata, module_path_from_relative, rust_name,
