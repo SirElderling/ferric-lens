@@ -1101,7 +1101,8 @@ fn fallback_recursive_directory_errors_are_propagated() {
     fs::set_permissions(&locked, permissions).unwrap();
     assert!(result.is_err());
     fs::remove_dir_all(root).unwrap();
-}\n
+}
+
 #[test]
 fn metadata_helpers_report_spawn_parse_manifest_and_io_errors() {
     let root = temp_root();
