@@ -16,6 +16,17 @@ struct Match {
     excerpt: String,
 }
 
+const CARGO_NO_DEPS: &str = concat!("--no", "-deps");
+const FEATURE_KEY_BRANCH: &str = concat!("key == ", "\"feature\"");
+const SYMBOLIC_TARGET_IDENTITY: &str = concat!("target={target_", "label};features=");
+const SYMBOLIC_PROFILE_TARGET: &str = concat!("profile.", "target");
+const ROOT_ONLY_CARGO_LOOP: &str =
+    concat!("for name in [\"Cargo.", "toml\", \"Cargo.lock\"]");
+const WORKSPACE_MANIFEST_PATH: &str = concat!("package.", "manifest_path");
+const GIT_COMMAND: &str = concat!("Command::new(", "\"git\")");
+const LOSSY_RECORD: &str = concat!("String::from_utf8_lossy(", "record)");
+const LOSSY_PATH: &str = concat!("String::from_utf8_lossy(", "path)");
+
 pub fn scan(sources: &[SourceFile]) -> CorrectnessScan {
     let mut scan = CorrectnessScan::default();
     detect_cargo_feature_resolution(sources, &mut scan);
@@ -31,8 +42,8 @@ pub fn scan(sources: &[SourceFile]) -> CorrectnessScan {
 }
 
 fn detect_cargo_feature_resolution(sources: &[SourceFile], scan: &mut CorrectnessScan) {
-    let no_deps = matches(sources, "--no-deps");
-    let feature_branch = matches(sources, r#"key == "feature""#);
+    let no_deps = matches(sources, CARGO_NO_DEPS);
+    let feature_branch = matches(sources, FEATURE_KEY_BRANCH);
     let explicit_features = matches(sources, "explicit_features");
     if no_deps.is_empty() || feature_branch.is_empty() || explicit_features.is_empty() {
         return;
@@ -58,8 +69,8 @@ fn detect_cargo_feature_resolution(sources: &[SourceFile], scan: &mut Correctnes
 }
 
 fn detect_symbolic_target_identity(sources: &[SourceFile], scan: &mut CorrectnessScan) {
-    let symbolic = matches(sources, "target={target_label};features=");
-    let symbolic_match = matches(sources, "profile.target");
+    let symbolic = matches(sources, SYMBOLIC_TARGET_IDENTITY);
+    let symbolic_match = matches(sources, SYMBOLIC_PROFILE_TARGET);
     let resolved = matches(sources, "resolved_target");
     if symbolic.is_empty() || symbolic_match.is_empty() || resolved.is_empty() {
         return;
@@ -135,8 +146,8 @@ fn detect_stdout_mode_artifacts(sources: &[SourceFile], scan: &mut CorrectnessSc
 }
 
 fn detect_workspace_manifest_snapshot_gap(sources: &[SourceFile], scan: &mut CorrectnessScan) {
-    let root_only = matches(sources, r#"for name in ["Cargo.toml", "Cargo.lock"]"#);
-    let member_manifest = matches(sources, "package.manifest_path");
+    let root_only = matches(sources, ROOT_ONLY_CARGO_LOOP);
+    let member_manifest = matches(sources, WORKSPACE_MANIFEST_PATH);
     let verifier = matches(sources, "verify_stable_inputs");
     if root_only.is_empty() || member_manifest.is_empty() || verifier.is_empty() {
         return;
@@ -167,12 +178,12 @@ fn detect_lossy_git_paths(sources: &[SourceFile], scan: &mut CorrectnessScan) {
         let Ok(text) = std::str::from_utf8(&source.bytes) else {
             continue;
         };
-        if !text.contains(r#"Command::new("git")"#) {
+        if !text.contains(GIT_COMMAND) {
             continue;
         }
         for (index, line) in text.lines().enumerate() {
-            if line.contains("String::from_utf8_lossy(record)")
-                || line.contains("String::from_utf8_lossy(path)")
+            if line.contains(LOSSY_RECORD)
+                || line.contains(LOSSY_PATH)
             {
                 lossy.push(Match {
                     path: source.relative_path.clone(),
