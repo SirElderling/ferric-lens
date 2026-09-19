@@ -204,7 +204,6 @@ fn full_analysis_enriches_changed_production_paths_with_history() {
     assert!(module.history.is_some());
 }
 
-
 fn refactor_fixture_module(index: usize, decisions: usize, dependencies: usize) -> String {
     let mut source = String::new();
     for dependency in 1..=dependencies {
@@ -244,13 +243,15 @@ fn public_analysis_surfaces_multi_signal_refactor_candidates() {
         .findings
         .iter()
         .find(|finding| {
-            finding.rule == "refactor.multi_signal_candidate"
-                && finding.subject == "fixture::m0"
+            finding.rule == "refactor.multi_signal_candidate" && finding.subject == "fixture::m0"
         })
         .expect("expected first-class refactor candidate");
 
     assert!(!candidate.gate);
-    assert_eq!(candidate.priority, ferric_lens::model::Priority::Investigate);
+    assert_eq!(
+        candidate.priority,
+        ferric_lens::model::Priority::Investigate
+    );
     assert!(candidate.summary.contains("decision complexity"));
     assert!(candidate.summary.contains("dependency surface"));
     assert!(report::json(&result).contains("refactor.multi_signal_candidate"));
