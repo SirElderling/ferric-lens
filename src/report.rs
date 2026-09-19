@@ -338,222 +338,336 @@ fn verdict_label(verdict: &GateVerdict) -> &'static str {
     }
 }
 
+
 pub fn html(result: &AnalysisResult) -> String {
     let result_digest = result_digest(result);
-    let verdict = match result.verdict {
-        GateVerdict::Pass => "PASS",
-        GateVerdict::Regression => "REGRESSION",
-        GateVerdict::Inconclusive => "INCONCLUSIVE",
+    let active_findings = ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| !finding.accepted)
+            .collect(),
+    );
+    let accepted_findings = ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| finding.accepted)
+            .collect(),
+    );
+    let active_html = render_findings(
+        &active_findings,
+        "No active finding currently has enough evidence to recommend investigation.",
+        &result.modules,
+        &result.source_contexts,
+    );
+    let accepted_html = render_findings(
+        &accepted_findings,
+        "No findings have been explicitly accepted.",
+        &result.modules,
+        &result.source_contexts,
+    );
+
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ferric Lens report</title>
+<style>
+:root {{ color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }}
+* {{ box-sizing: border-box; }}
+body {{ max-width: 1180px; margin: 0 auto; padding: 2rem; line-height: 1.55; }}
+header {{ border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); margin-bottom: 2rem; padding-bottom: 1rem; }}
+h1, h2, h3 {{ line-height: 1.2; }}
+.verdict {{ font-size: 1.35rem; font-weight: 750; margin-bottom: .35rem; }}
+.muted, .finding-meta, .location {{ opacity: .78; }}
+.attention-grid, .overview-grid {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap: 1rem; }}
+.card, article, details {{ min-width: 0; overflow-wrap: anywhere; }}
+.card, article.finding-card, .analysis-details, .explorer-module {{ border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: .7rem; padding: 1rem; margin: .8rem 0; }}
+article.finding-card.gate {{ border-width: 2px; }}
+.finding-header {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }}
+.badges {{ display: flex; flex-wrap: wrap; gap: .4rem; }}
+.badge {{ border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 999px; padding: .15rem .55rem; font-size: .82rem; }}
+.guidance {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: .8rem; margin: 1rem 0; }}
+.guidance > div {{ border-left: 3px solid color-mix(in srgb, currentColor 25%, transparent); padding-left: .8rem; }}
+.guidance h4 {{ margin: 0 0 .3rem; }}
+summary {{ cursor: pointer; }}
+.source-evidence {{ margin: .8rem 0; }}
+.source-context {{ margin: .7rem 0; }}
+.source-context pre {{ margin: .35rem 0; padding: .7rem; overflow-x: auto; white-space: pre-wrap; background: color-mix(in srgb, currentColor 6%, transparent); border-radius: .4rem; }}
+.metric-list {{ margin: .5rem 0; padding-left: 1.2rem; }}
+.metric-list li {{ margin: .25rem 0; }}
+.explorer-intro {{ max-width: 760px; }}
+.explorer-summary {{ display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }}
+.explorer-status {{ font-weight: 650; }}
+.explorer-metrics {{ display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin: .8rem 0; }}
+.explorer-metrics span {{ white-space: nowrap; }}
+.explorer-detail {{ margin-top: .8rem; }}
+.analysis-details .detail-grid {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(250px,1fr)); gap: 1rem; }}
+.technical-list {{ padding-left: 1.2rem; }}
+.technical-list li {{ margin: .35rem 0; overflow-wrap: anywhere; }}
+.digest {{ word-break: break-all; }}
+code {{ overflow-wrap: anywhere; }}
+a {{ color: inherit; }}
+@media (max-width: 650px) {{
+  body {{ padding: 1rem; }}
+  .guidance, .attention-grid, .overview-grid {{ grid-template-columns: 1fr; }}
+}}
+</style>
+</head>
+<body>
+<header>
+<h1>Ferric Lens</h1>
+<p class="verdict">Analysis result: {verdict}</p>
+<p>{reason}</p>
+</header>
+
+<section>
+<h2>What needs attention</h2>
+<div class="attention-grid"><div class="card">{triage}</div></div>
+{active_html}
+</section>
+
+<section>
+<h2>Repository overview</h2>
+{overview}
+</section>
+
+<section>
+<h2>Repository explorer</h2>
+<p class="explorer-intro">Use this after a finding points you to an area, or when you want structural context for a module. Metrics here are context, not problems by themselves.</p>
+{explorer}
+</section>
+
+<details class="analysis-details">
+<summary><strong>Analysis details</strong> — baseline, configuration, history, capabilities, and provenance</summary>
+{details}
+</details>
+
+<details class="analysis-details">
+<summary><strong>Accepted findings</strong> ({accepted_count})</summary>
+{accepted_html}
+</details>
+</body></html>"#,
+        verdict = verdict_label(&result.verdict),
+        reason = escape(&result.verdict_reason),
+        triage = render_triage_summary(result),
+        overview = render_repository_overview(result),
+        explorer = render_repository_explorer(result),
+        details = render_analysis_details(result, &result_digest),
+        accepted_count = accepted_findings.len(),
+    )
+}
+
+fn render_repository_overview(result: &AnalysisResult) -> String {
+    let subjects = active_subjects(result);
+    let partial_capabilities = result
+        .capabilities
+        .iter()
+        .filter(|capability| capability.status != crate::model::CapabilityStatus::Complete)
+        .count();
+
+    let quality = if result.architecture.incomplete_modules == 0 && partial_capabilities == 0 {
+        "Ferric Lens completed the available evidence checks for this run. Metrics without findings are context only.".to_owned()
+    } else {
+        format!(
+            "Some evidence is incomplete: {} of {} modules have incomplete graph evidence and {} capability limitation(s) were recorded. Missing evidence is not treated as proof that an area is healthy.",
+            result.architecture.incomplete_modules,
+            result.architecture.modules,
+            partial_capabilities
+        )
+    };
+    let cycle_text = if result.architecture.cycles.is_empty() {
+        "No explicit-import dependency cycles were observed.".to_owned()
+    } else {
+        format!(
+            "{} explicit-import dependency cycle(s) were observed and may deserve architectural review.",
+            result.architecture.cycles.len()
+        )
     };
 
-    let mut capabilities = String::new();
-    for capability in &result.capabilities {
-        capabilities.push_str("<li><strong>");
-        capabilities.push_str(&escape(&capability.name));
-        capabilities.push_str("</strong>: ");
-        capabilities.push_str(&escape(&format!("{:?}", capability.status).to_lowercase()));
-        if let Some(detail) = &capability.detail {
-            capabilities.push_str(" — ");
-            capabilities.push_str(&escape(detail));
-        }
-        capabilities.push_str("</li>");
-    }
+    format!(
+        r#"<div class="overview-grid">
+<div class="card"><h3>Attention</h3><p><strong>{areas}</strong></p><p class="muted">Only areas with enough evidence to justify investigation are counted here.</p></div>
+<div class="card"><h3>Structure</h3><p><strong>{modules} modules</strong><br>{edges} resolved repository dependency edges</p><p>{cycles}</p></div>
+<div class="card"><h3>Analysis confidence</h3><p>{quality}</p></div>
+</div>"#,
+        areas = count_phrase(subjects.len(), "area worth reviewing", "areas worth reviewing"),
+        modules = result.architecture.modules,
+        edges = result.architecture.explicit_dependency_edges,
+        cycles = escape(&cycle_text),
+        quality = escape(&quality),
+    )
+}
 
-    let gate_findings = result
+fn render_repository_explorer(result: &AnalysisResult) -> String {
+    let active = result
         .findings
         .iter()
-        .filter(|finding| finding.gate)
+        .filter(|finding| !finding.accepted)
         .collect::<Vec<_>>();
-    let refactor_advisories = result
-        .findings
-        .iter()
-        .filter(|finding| !finding.gate && finding.rule.starts_with("refactor."))
-        .collect::<Vec<_>>();
-    let structural_advisories = result
-        .findings
-        .iter()
-        .filter(|finding| !finding.gate && finding.rule.starts_with("structure."))
-        .collect::<Vec<_>>();
-    let runtime_advisories = result
-        .findings
-        .iter()
-        .filter(|finding| !finding.gate && finding.rule.starts_with("runtime."))
-        .collect::<Vec<_>>();
-    let build_advisories = result
-        .findings
-        .iter()
-        .filter(|finding| !finding.gate && finding.rule.starts_with("build."))
-        .collect::<Vec<_>>();
-    let other_advisories = result
-        .findings
-        .iter()
-        .filter(|finding| {
-            !finding.gate
-                && !finding.rule.starts_with("refactor.")
-                && !finding.rule.starts_with("structure.")
-                && !finding.rule.starts_with("runtime.")
-                && !finding.rule.starts_with("build.")
-        })
-        .collect::<Vec<_>>();
+    let mut modules = result.modules.iter().collect::<Vec<_>>();
+    modules.sort_by(|a, b| {
+        let a_subject = module_subject(a);
+        let b_subject = module_subject(b);
+        let a_findings = active
+            .iter()
+            .filter(|finding| finding.subject == a_subject)
+            .copied()
+            .collect::<Vec<_>>();
+        let b_findings = active
+            .iter()
+            .filter(|finding| finding.subject == b_subject)
+            .copied()
+            .collect::<Vec<_>>();
+        best_priority_rank(&a_findings)
+            .cmp(&best_priority_rank(&b_findings))
+            .then_with(|| b_findings.len().cmp(&a_findings.len()))
+            .then_with(|| a.path.cmp(&b.path))
+    });
 
-    let gate_html = render_findings(
-        &gate_findings,
-        "No gate regression was established.",
-        &result.modules,
-        &result.source_contexts,
-    );
-    let refactor_html = render_findings(
-        &refactor_advisories,
-        "No multi-signal refactoring candidates were established.",
-        &result.modules,
-        &result.source_contexts,
-    );
-    let structural_html = render_findings(
-        &structural_advisories,
-        "No structural advisory outliers were found in eligible populations.",
-        &result.modules,
-        &result.source_contexts,
-    );
-    let runtime_html = render_findings(
-        &runtime_advisories,
-        "No static runtime-risk candidates were found in eligible populations.",
-        &result.modules,
-        &result.source_contexts,
-    );
-    let build_html = render_findings(
-        &build_advisories,
-        "No build-efficiency candidates were found in eligible populations.",
-        &result.modules,
-        &result.source_contexts,
-    );
-    let other_html = render_findings(
-        &other_advisories,
-        "No other advisory findings.",
-        &result.modules,
-        &result.source_contexts,
-    );
-    let triage_summary = render_triage_summary(result);
-
-    let mut modules = String::new();
-    let mut current_crate = String::new();
-    for module in &result.modules {
-        if module.crate_name != current_crate {
-            if !current_crate.is_empty() {
-                modules.push_str("</div></details>");
-            }
-            current_crate = module.crate_name.clone();
-            modules.push_str("<details><summary><strong>");
-            modules.push_str(&escape(&current_crate));
-            modules.push_str(r#"</strong></summary><div class="crate">"#);
-        }
+    let mut html = String::new();
+    for module in modules {
         let subject = module_subject(module);
+        let module_findings = active
+            .iter()
+            .filter(|finding| finding.subject == subject)
+            .copied()
+            .collect::<Vec<_>>();
         let anchor = anchor_id("module", &subject);
-        modules.push_str(r#"<div class="module-block" id=""#);
-        modules.push_str(&anchor);
-        modules.push_str(r#""><div class="module"><code>"#);
-        modules.push_str(&escape(if module.module_path.is_empty() {
-            "crate root"
+        let status = if module_findings.is_empty() {
+            "No issue currently identified".to_owned()
         } else {
-            &module.module_path
-        }));
-        modules.push_str("</code><span>");
-        modules.push_str(&escape(&format!(
-            "{} decisions · {} repo deps · {} public items · {} functions · {} types · {} clone syntax sites · {} lines{}",
+            format!(
+                "Worth investigating — {}",
+                count_phrase(module_findings.len(), "finding", "findings")
+            )
+        };
+
+        html.push_str(r#"<details class="explorer-module" id=""#);
+        html.push_str(&anchor);
+        html.push_str(r#""><summary><span class="explorer-summary"><span><code>"#);
+        html.push_str(&escape(&module.path));
+        html.push_str("</code><br><small>");
+        html.push_str(&escape(&subject));
+        html.push_str("</small></span><span class="explorer-status">");
+        html.push_str(&escape(&status));
+        html.push_str("</span></span></summary>");
+
+        if module_findings.is_empty() {
+            html.push_str("<p>These metrics are shown for context. Ferric Lens did not find enough evidence to recommend investigating this module.</p>");
+        } else {
+            html.push_str("<p>Start with the finding");
+            if module_findings.len() != 1 {
+                html.push('s');
+            }
+            html.push_str(" above. This explorer shows structural context for the affected area.</p><p>");
+            for (index, finding) in module_findings.iter().enumerate() {
+                if index > 0 {
+                    html.push_str(" · ");
+                }
+                html.push_str(r#"<a href="#"#);
+                html.push_str(&anchor_id("finding", &finding.fingerprint));
+                html.push_str(r#"">View finding</a>"#);
+            }
+            html.push_str("</p>");
+        }
+
+        html.push_str(r#"<div class="explorer-metrics">"#);
+        html.push_str(&format!(
+            "<span><strong>{}</strong> decision points</span><span><strong>{}</strong> repository dependencies</span><span><strong>{}</strong> public items</span><span><strong>{}</strong> clone sites</span><span><strong>{}</strong> lines</span>",
             module.decision_sites,
             module.local_dependency_modules.len(),
             module.public_items,
-            module.functions.len(),
-            module.types.len(),
             module.clone_calls,
-            module.lines,
-            if module.gate_complete {
-                ""
-            } else {
-                " · gate evidence incomplete"
-            }
-        )));
-        modules.push_str("</span></div>");
+            module.lines
+        ));
+        html.push_str("</div>");
 
+        if !module.gate_complete {
+            html.push_str("<p class="muted">Some gate-relevant evidence for this module is incomplete.</p>");
+        }
         if !module.local_dependency_modules.is_empty() {
-            modules.push_str("<details><summary>Dependencies (");
-            modules.push_str(&module.local_dependency_modules.len().to_string());
-            modules.push_str(")</summary><ul>");
+            html.push_str("<details class="explorer-detail"><summary>Dependencies (");
+            html.push_str(&module.local_dependency_modules.len().to_string());
+            html.push_str(")</summary><ul>");
             for dependency in &module.local_dependency_modules {
-                modules.push_str("<li><code>");
-                modules.push_str(&escape(dependency));
-                modules.push_str("</code></li>");
+                html.push_str("<li><code>");
+                html.push_str(&escape(dependency));
+                html.push_str("</code></li>");
             }
-            modules.push_str("</ul></details>");
+            html.push_str("</ul></details>");
         }
-
         if !module.functions.is_empty() {
-            modules.push_str("<details><summary>Functions (");
-            modules.push_str(&module.functions.len().to_string());
-            modules.push_str(")</summary><ul>");
+            html.push_str("<details class="explorer-detail"><summary>Functions (");
+            html.push_str(&module.functions.len().to_string());
+            html.push_str(")</summary><ul>");
             for function in &module.functions {
-                modules.push_str("<li><code>");
-                modules.push_str(&escape(&function.name));
-                modules.push_str("</code> · ");
-                modules.push_str(&escape(&format!("{:?}", function.kind).to_lowercase()));
-                modules.push_str(" · ");
-                modules.push_str(if function.public_declared {
-                    "public"
-                } else {
-                    "private"
-                });
-                modules.push_str("</li>");
+                html.push_str("<li><code>");
+                html.push_str(&escape(&function.name));
+                html.push_str("</code> · ");
+                html.push_str(&escape(&format!("{:?}", function.kind).to_lowercase()));
+                html.push_str(" · ");
+                html.push_str(if function.public_declared { "public" } else { "private" });
+                html.push_str("</li>");
             }
-            modules.push_str("</ul></details>");
+            html.push_str("</ul></details>");
         }
-
         if !module.types.is_empty() {
-            modules.push_str("<details><summary>Types (");
-            modules.push_str(&module.types.len().to_string());
-            modules.push_str(")</summary><ul>");
+            html.push_str("<details class="explorer-detail"><summary>Types (");
+            html.push_str(&module.types.len().to_string());
+            html.push_str(")</summary><ul>");
             for item_type in &module.types {
-                modules.push_str("<li><code>");
-                modules.push_str(&escape(&item_type.name));
-                modules.push_str("</code> · ");
-                modules.push_str(&escape(&format!("{:?}", item_type.kind).to_lowercase()));
-                modules.push_str(" · ");
-                modules.push_str(if item_type.public_declared {
-                    "public"
-                } else {
-                    "private"
-                });
-                modules.push_str("</li>");
+                html.push_str("<li><code>");
+                html.push_str(&escape(&item_type.name));
+                html.push_str("</code> · ");
+                html.push_str(&escape(&format!("{:?}", item_type.kind).to_lowercase()));
+                html.push_str(" · ");
+                html.push_str(if item_type.public_declared { "public" } else { "private" });
+                html.push_str("</li>");
             }
-            modules.push_str("</ul></details>");
+            html.push_str("</ul></details>");
         }
-
         if let Some(history) = &module.history {
-            modules.push_str(r#"<div class="history"><small>"#);
-            modules.push_str(&escape(&format!(
-                "history: changed in {} of {} sampled non-merge commits",
+            html.push_str("<details class="explorer-detail"><summary>History context</summary><p>");
+            html.push_str(&escape(&format!(
+                "Changed in {} of {} sampled non-merge commits.",
                 history.change_commits, history.sampled_commits
             )));
             if !history.cochange.is_empty() {
-                modules.push_str(" · co-change: ");
+                html.push_str("</p><p>Often changed with: ");
                 for (index, related) in history.cochange.iter().enumerate() {
                     if index > 0 {
-                        modules.push_str(", ");
+                        html.push_str(", ");
                     }
-                    modules.push_str("<code>");
-                    modules.push_str(&escape(&related.path));
-                    modules.push_str("</code> ");
-                    modules.push_str(&escape(&format!("({})", related.shared_commits)));
+                    html.push_str("<code>");
+                    html.push_str(&escape(&related.path));
+                    html.push_str("</code>");
                 }
             }
-            modules.push_str("</small></div>");
+            html.push_str("</p></details>");
         }
-        modules.push_str("</div>");
+        html.push_str("</details>");
     }
-    if !current_crate.is_empty() {
-        modules.push_str("</div></details>");
-    }
+    html
+}
 
-    let profile_summary = format!(
-        "<p><strong>{}</strong><br>resolved target <code>{}</code><br>{}<br>{} rustc cfg fact(s)</p>",
+fn render_analysis_details(result: &AnalysisResult, digest: &str) -> String {
+    let baseline = result.baseline.as_ref().map_or_else(
+        || "<p>No comparable baseline was available.</p>".to_owned(),
+        |baseline| {
+            format!(
+                "<p><strong>Target:</strong> <code>{}</code><br><strong>Merge base:</strong> <code class="digest">{}</code><br>{} baseline source files</p>",
+                escape(&baseline.target_ref),
+                escape(&baseline.merge_base),
+                baseline.source_files
+            )
+        },
+    );
+    let profile = format!(
+        "<p><strong>{}</strong><br>resolved target <code>{}</code><br>{}</p>",
         escape(&result.profile.id),
         escape(&result.profile.resolved_target),
         if result.profile.features.is_empty() {
@@ -563,11 +677,9 @@ pub fn html(result: &AnalysisResult) -> String {
                 "default + explicit features <code>{}</code>",
                 escape(&result.profile.features.join(","))
             )
-        },
-        result.profile.target_cfg.len()
+        }
     );
-
-    let history_summary = result.history.as_ref().map_or_else(
+    let history = result.history.as_ref().map_or_else(
         || "<p>Not collected for this analysis mode.</p>".to_owned(),
         |history| {
             format!(
@@ -583,36 +695,11 @@ pub fn html(result: &AnalysisResult) -> String {
             )
         },
     );
-
-    let architecture_summary = if result.architecture.cycles.is_empty() {
-        format!(
-            "<p>{} modules<br>{} resolved explicit dependency edges<br>{} modules with incomplete graph evidence<br>No observed explicit-import cycles.</p>",
-            result.architecture.modules,
-            result.architecture.explicit_dependency_edges,
-            result.architecture.incomplete_modules
-        )
-    } else {
-        let mut html = format!(
-            "<p>{} modules<br>{} resolved explicit dependency edges<br>{} modules with incomplete graph evidence<br><strong>{} observed explicit-import cycle(s)</strong></p><ul>",
-            result.architecture.modules,
-            result.architecture.explicit_dependency_edges,
-            result.architecture.incomplete_modules,
-            result.architecture.cycles.len()
-        );
-        for cycle in &result.architecture.cycles {
-            html.push_str("<li>");
-            html.push_str(&escape(&cycle.modules.join(" → ")));
-            html.push_str("</li>");
-        }
-        html.push_str("</ul>");
-        html
-    };
-
-    let imported_evidence = result.imported_evidence.as_ref().map_or_else(
+    let external = result.imported_evidence.as_ref().map_or_else(
         || "<p>No external evidence imported.</p>".to_owned(),
         |evidence| {
-            let mut html = format!(
-                "<p><strong>{}</strong> {}<br>{}<br><strong>{}</strong><br>target <code>{}</code>{}</p>",
+            format!(
+                "<p><strong>{}</strong> {}<br>{}<br>{}</p>",
                 escape(&evidence.producer),
                 escape(&evidence.producer_version),
                 if evidence.attached {
@@ -620,144 +707,71 @@ pub fn html(result: &AnalysisResult) -> String {
                 } else {
                     "unattached context only"
                 },
-                escape(&evidence.attachment_reason),
-                escape(&evidence.target),
-                if evidence.features.is_empty() {
-                    String::new()
-                } else {
-                    format!("<br>features: <code>{}</code>", escape(&evidence.features.join(",")))
-                }
-            );
-            if !evidence.observations.is_empty() {
-                html.push_str("<details><summary>");
-                html.push_str(&format!(
-                    "{} imported observation(s)</summary><ul>",
-                    evidence.observations.len()
-                ));
-                for observation in &evidence.observations {
-                    html.push_str("<li><code>");
-                    html.push_str(&escape(&observation.subject));
-                    html.push_str("</code> · ");
-                    html.push_str(&escape(&observation.metric));
-                    html.push_str(" = ");
-                    html.push_str(&escape(&format!(
-                        "{} {}",
-                        observation.value, observation.unit
-                    )));
-                    if let Some(note) = &observation.note {
-                        html.push_str(" — ");
-                        html.push_str(&escape(note));
-                    }
-                    html.push_str("</li>");
-                }
-                html.push_str("</ul></details>");
-            }
-            html
-        },
-    );
-
-    let baseline = result.baseline.as_ref().map_or_else(
-        || "<p>No comparable baseline was available.</p>".to_owned(),
-        |baseline| {
-            format!(
-                "<p><strong>Target:</strong> <code>{}</code><br><strong>Merge base:</strong> <code>{}</code><br>{} baseline source files</p>",
-                escape(&baseline.target_ref),
-                escape(&baseline.merge_base),
-                baseline.source_files
+                escape(&evidence.attachment_reason)
             )
         },
     );
 
+    let mut capabilities = String::new();
+    for capability in &result.capabilities {
+        capabilities.push_str("<li><strong>");
+        capabilities.push_str(&escape(&capability.name));
+        capabilities.push_str("</strong>: ");
+        capabilities.push_str(capability_status_label(&capability.status));
+        if let Some(detail) = &capability.detail {
+            capabilities.push_str(" — ");
+            capabilities.push_str(&escape(detail));
+        }
+        capabilities.push_str("</li>");
+    }
+
     format!(
-        r#"<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ferric Lens report</title>
-<style>
-:root {{ color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }}
-body {{ max-width: 1100px; margin: 0 auto; padding: 2rem; line-height: 1.5; }}
-header {{ border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); margin-bottom: 2rem; }}
-.verdict {{ font-size: 1.5rem; font-weight: 700; }}
-.grid {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap: 1rem; }}
-.card, article, details {{ border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: .6rem; padding: 1rem; margin: .8rem 0; }}
-article.gate {{ border-width: 2px; }}
-summary {{ cursor: pointer; }}
-.module-block {{ scroll-margin-top: 1rem; }}
-.module {{ display: flex; justify-content: space-between; gap: 1rem; padding: .35rem 0; border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent); }}
-.module span {{ text-align: right; opacity: .8; }}
-.finding-meta, .location {{ opacity: .85; }}
-.source-evidence {{ margin: .8rem 0; }}
-.source-context {{ margin: .7rem 0; }}
-.source-context pre {{ margin: .35rem 0; padding: .7rem; overflow-x: auto; white-space: pre-wrap; background: color-mix(in srgb, currentColor 6%, transparent); border-radius: .4rem; }}
-.history {{ margin: -.15rem 0 .5rem; padding-left: .5rem; opacity: .8; }}
-code {{ overflow-wrap: anywhere; }}
-</style>
-</head>
-<body>
-<header><h1>Ferric Lens</h1><p class="verdict">{verdict}</p><p>{reason}</p></header>
-<section class="grid">
-<div class="card"><h2>Triage</h2>{triage_summary}</div>
-<div class="card"><h2>Snapshot</h2><p><strong>Result digest</strong><br><code>{result_digest}</code></p><p><strong>Source digest</strong><br><code>{digest}</code></p><p>{source_files} source files<br>{applicable} applicable gate subjects</p></div>
-<div class="card"><h2>Baseline</h2>{baseline}</div>
-<div class="card"><h2>Profile</h2>{profile_summary}</div>
-<div class="card"><h2>Architecture</h2>{architecture_summary}</div>
-<div class="card"><h2>History</h2>{history_summary}</div>
-<div class="card"><h2>External evidence</h2>{imported_evidence}</div>
-<div class="card"><h2>Coverage</h2><ul>{capabilities}</ul></div>
-</section>
-<section><h2>Gate findings</h2>{gate_html}</section>
-<section><h2>Refactoring candidates</h2>{refactor_html}</section>
-<section><h2>Structural advisories</h2>{structural_html}</section>
-<section><h2>Runtime-risk candidates</h2>{runtime_html}</section>
-<section><h2>Build-efficiency candidates</h2>{build_html}</section>
-<section><h2>Other advisories</h2>{other_html}</section>
-<section><h2>Codebase map</h2>{modules}</section>
-</body></html>"#,
-        reason = escape(&result.verdict_reason),
-        result_digest = escape(&result_digest),
-        digest = escape(&result.snapshot.content_digest),
-        source_files = result.snapshot.source_files,
-        applicable = result.applicable_gate_subjects,
+        r#"<div class="detail-grid">
+<div><h3>Baseline</h3>{baseline}</div>
+<div><h3>Analysis profile</h3>{profile}</div>
+<div><h3>History</h3>{history}</div>
+<div><h3>External evidence</h3>{external}</div>
+<div><h3>Provenance</h3><p><strong>Result digest</strong><br><code class="digest">{result_digest}</code></p><p><strong>Source digest</strong><br><code class="digest">{source_digest}</code></p></div>
+</div>
+<details><summary><strong>Technical capability details</strong> ({capability_count})</summary><ul class="technical-list">{capabilities}</ul></details>"#,
+        result_digest = escape(digest),
+        source_digest = escape(&result.snapshot.content_digest),
+        capability_count = result.capabilities.len(),
     )
 }
 
+
 fn render_triage_summary(result: &AnalysisResult) -> String {
-    let active = result
+    let summary = ai_summary(result);
+    format!(
+        "<h3>{}</h3><p>{} · {} · {}</p><p class="muted">Ferric Lens only recommends investigation when deterministic evidence meets a rule threshold. Large metric values alone are not treated as problems.</p>",
+        count_phrase(
+            summary.areas_worth_reviewing,
+            "area worth reviewing",
+            "areas worth reviewing"
+        ),
+        count_phrase(summary.act_first, "act first", "act first"),
+        count_phrase(summary.investigate, "investigate", "investigate"),
+        count_phrase(summary.observe, "observe", "observe"),
+    )
+}
+
+
+fn active_subjects(result: &AnalysisResult) -> std::collections::BTreeSet<&str> {
+    result
         .findings
         .iter()
         .filter(|finding| !finding.accepted)
-        .collect::<Vec<_>>();
-    let act_first = active
-        .iter()
-        .filter(|finding| finding.priority == Priority::ActFirst)
-        .count();
-    let investigate = active
-        .iter()
-        .filter(|finding| finding.priority == Priority::Investigate)
-        .count();
-    let observe = active
-        .iter()
-        .filter(|finding| finding.priority == Priority::Observe)
-        .count();
-    let refactors = active
-        .iter()
-        .filter(|finding| finding.rule.starts_with("refactor."))
-        .count();
-    let changed = active
-        .iter()
-        .filter(|finding| matches!(finding.delta, DeltaStatus::New | DeltaStatus::Worsened))
-        .count();
+        .map(|finding| finding.subject.as_str())
+        .collect()
+}
 
-    format!(
-        "<p><strong>{}</strong><br>{}<br>{}<br>{}<br>{}</p>",
-        count_phrase(act_first, "act first", "act first"),
-        count_phrase(investigate, "investigate", "investigate"),
-        count_phrase(observe, "observe", "observe"),
-        count_phrase(refactors, "refactoring candidate", "refactoring candidates"),
-        count_phrase(changed, "new/worsened finding", "new/worsened findings")
-    )
+fn best_priority_rank(findings: &[&Finding]) -> u8 {
+    findings
+        .iter()
+        .map(|finding| priority_rank(&finding.priority))
+        .min()
+        .unwrap_or(u8::MAX)
 }
 
 fn count_phrase(count: usize, singular: &str, plural: &str) -> String {
