@@ -237,7 +237,7 @@ mod tests {
         let ai = output_text(&result, true);
 
         assert!(human.contains("Ferric Lens: PASS"));
-        assert!(human.contains("area worth reviewing"));
+        assert!(human.contains("areas worth reviewing"));
         assert!(ai.contains("\"format\": \"ferric_lens_ai\""));
         assert!(!ai.contains("Ferric Lens: PASS"));
     }
