@@ -431,6 +431,178 @@ mod tests {
     }
 
     #[test]
+    fn renders_non_empty_report_sections_and_writes_atomically() {
+        use std::fs;
+
+        use crate::model::{
+            AnalysisProfile, AnalysisResult, ArchitectureSummary, BaselineContext, Capability,
+            CapabilityStatus, CoChangeEvidence, DependencyCycle, Evidence, EvidenceClass, Finding,
+            HistoryEvidence, HistorySummary, ImportedEvidence, ImportedObservation, ModuleMetrics,
+            Priority, Snapshot,
+        };
+
+        let mut result = minimal_result();
+        result.verdict = GateVerdict::Regression;
+        result.verdict_reason = "<regression>".into();
+        result.profile = AnalysisProfile {
+            id: "target=fixture;features=default+alpha".into(),
+            target: "fixture".into(),
+            resolved_target: "fixture-target".into(),
+            features: vec!["alpha".into()],
+            target_cfg: vec!["target_os=fixture".into()],
+        };
+        result.baseline = Some(BaselineContext {
+            target_ref: "main".into(),
+            target_oid: "a".repeat(40),
+            merge_base: "b".repeat(40),
+            source_files: 2,
+            content_digest: "baseline".into(),
+        });
+        result.capabilities = vec![Capability {
+            name: "syntax".into(),
+            status: CapabilityStatus::Partial,
+            detail: Some("<limited>".into()),
+        }];
+        result.architecture = ArchitectureSummary {
+            modules: 2,
+            explicit_dependency_edges: 2,
+            incomplete_modules: 1,
+            cycles: vec![DependencyCycle {
+                modules: vec!["demo::a".into(), "demo::b".into()],
+            }],
+        };
+        result.history = Some(HistorySummary {
+            sampled_commits: 3,
+            changed_path_records: 4,
+            broad_commits_excluded_from_cochange: 1,
+            truncated: true,
+        });
+        result.imported_evidence = Some(ImportedEvidence {
+            producer: "bench".into(),
+            producer_version: "1".into(),
+            target: "fixture".into(),
+            features: vec!["alpha".into()],
+            attached: false,
+            attachment_reason: "different source".into(),
+            observations: vec![ImportedObservation {
+                subject: "src/a.rs".into(),
+                metric: "instructions".into(),
+                value: 7.0,
+                unit: "count".into(),
+                note: Some("<note>".into()),
+            }],
+        });
+        result.modules = vec![
+            ModuleMetrics {
+                crate_name: "demo".into(),
+                module_path: String::new(),
+                path: "src/lib.rs".into(),
+                lines: 10,
+                decision_sites: 2,
+                public_items: 1,
+                explicit_imports: Vec::new(),
+                local_dependency_modules: vec!["demo::a".into()],
+                structure_digest: "root".into(),
+                parse_complete: true,
+                gate_complete: false,
+                limitation: Some("macro".into()),
+                history: None,
+            },
+            ModuleMetrics {
+                crate_name: "demo".into(),
+                module_path: "a".into(),
+                path: "src/a.rs".into(),
+                lines: 20,
+                decision_sites: 4,
+                public_items: 2,
+                explicit_imports: Vec::new(),
+                local_dependency_modules: Vec::new(),
+                structure_digest: "a".into(),
+                parse_complete: true,
+                gate_complete: true,
+                limitation: None,
+                history: Some(HistoryEvidence {
+                    change_commits: 2,
+                    sampled_commits: 3,
+                    cochange: vec![
+                        CoChangeEvidence {
+                            path: "src/b.rs".into(),
+                            shared_commits: 2,
+                        },
+                        CoChangeEvidence {
+                            path: "src/c.rs".into(),
+                            shared_commits: 1,
+                        },
+                    ],
+                }),
+            },
+        ];
+        result.findings = vec![
+            Finding {
+                fingerprint: "gate".into(),
+                configuration: "fixture".into(),
+                rule: "rule.gate".into(),
+                subject: "demo::a".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::ActFirst,
+                delta: crate::model::DeltaStatus::Worsened,
+                gate: true,
+                accepted: true,
+                acceptance_reason: Some("<accepted>".into()),
+                summary: "<summary>".into(),
+                direction: "<direction>".into(),
+                evidence: vec![Evidence {
+                    metric: "decisions".into(),
+                    value: 10,
+                    reference: 5,
+                    population: 20,
+                    baseline: Some(6),
+                    material_delta: Some(3),
+                }],
+            },
+            Finding {
+                fingerprint: "advisory".into(),
+                configuration: "fixture".into(),
+                rule: "rule.advisory".into(),
+                subject: "demo".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: crate::model::DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "observe".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            },
+        ];
+
+        let rendered = html(&result);
+        assert!(rendered.contains("REGRESSION"));
+        assert!(rendered.contains("observed explicit-import cycle"));
+        assert!(rendered.contains("Sample truncated"));
+        assert!(rendered.contains("unattached context only"));
+        assert!(rendered.contains("&lt;accepted&gt;"));
+        assert!(rendered.contains("co-change"));
+
+        let path = std::env::temp_dir().join(format!(
+            "ferric-lens-report-test-{}-nested/report.txt",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+        super::write(&path, "first").unwrap();
+        super::write(&path, "second").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "second");
+        let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn write_rejects_paths_without_file_names() {
+        let error = super::write(std::path::Path::new("/"), "content").unwrap_err();
+        assert!(error.contains("output path has no file name"));
+    }
+
+    #[test]
     fn json_and_html_embed_the_same_semantic_result_digest() {
         let result = minimal_result();
         let digest = result_digest(&result).unwrap();
