@@ -1816,7 +1816,6 @@ fn stability_verification_reports_source_disappearance() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn cargo_resolution_identity_propagates_cargo_input_read_failure() {
     let root = temp_root();
