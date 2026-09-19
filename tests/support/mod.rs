@@ -42,6 +42,31 @@ impl Repo {
         repo
     }
 
+    pub fn gate_fixture(name: &str) -> (Self, String) {
+        let repo = Self::new(name);
+        let declarations = (0..20)
+            .map(|index| format!("mod m{index};"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        repo.write("src/lib.rs", &declarations);
+        for index in 0..20 {
+            let (decisions, dependencies) = match index {
+                0 => (12, 4),
+                1..=16 => (10, 3),
+                _ => (15, 5),
+            };
+            repo.write(
+                &format!("src/m{index}.rs"),
+                &gate_module_source(index, decisions, dependencies),
+            );
+        }
+        repo.commit("baseline");
+        let baseline = git(&repo.root, &["rev-parse", "HEAD"]);
+        repo.write("src/m0.rs", &gate_module_source(0, 18, 7));
+        repo.commit("regression");
+        (repo, baseline)
+    }
+
     pub fn write(&self, path: &str, contents: &str) {
         let path = self.root.join(path);
         if let Some(parent) = path.parent() {
@@ -77,4 +102,21 @@ pub fn git(root: &Path, args: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+
+fn gate_module_source(index: usize, decisions: usize, dependencies: usize) -> String {
+    let mut source = String::new();
+    for dependency in 1..=dependencies {
+        let target = (index + dependency) % 20;
+        if target != index {
+            source.push_str(&format!("use crate::m{target};\n"));
+        }
+    }
+    source.push_str("fn measured(value: bool) {\n");
+    for _ in 0..decisions {
+        source.push_str("    if value {}\n");
+    }
+    source.push_str("}\n");
+    source
 }
