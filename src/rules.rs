@@ -19,8 +19,6 @@ pub struct GateEvaluation {
 pub fn current_snapshot_findings(modules: &[ModuleMetrics]) -> Vec<Finding> {
     let mut findings = structural_coupled_outliers(modules);
     findings.extend(small_population_decision_concentrations(modules));
-    findings.extend(runtime_clone_syntax_outliers(modules));
-    findings.extend(small_population_clone_concentrations(modules));
     findings.extend(build_rebuild_exposure_candidates(modules));
     findings.extend(small_population_rebuild_concentrations(modules));
     sort_findings(&mut findings);
@@ -302,53 +300,6 @@ fn small_population_decision_concentrations(modules: &[ModuleMetrics]) -> Vec<Fi
     findings
 }
 
-fn small_population_clone_concentrations(modules: &[ModuleMetrics]) -> Vec<Finding> {
-    let mut by_crate = BTreeMap::<&str, Vec<&ModuleMetrics>>::new();
-    for module in modules.iter().filter(|module| module.parse_complete) {
-        by_crate.entry(&module.crate_name).or_default().push(module);
-    }
-
-    let mut findings = Vec::new();
-    for (crate_name, population) in by_crate {
-        if population.len() < MIN_DESCRIPTIVE_POPULATION || population.len() >= MIN_POPULATION {
-            continue;
-        }
-        let values = population
-            .iter()
-            .map(|module| module.clone_calls)
-            .collect::<Vec<_>>();
-        let Some((index, value, reference)) = dominant_unique_max(&values) else {
-            continue;
-        };
-        let module = population[index];
-        let module_subject = subject(crate_name, &module.module_path);
-        findings.push(Finding {
-            fingerprint: String::new(),
-            rule: "runtime.small_population_clone_concentration".into(),
-            subject: module_subject.clone(),
-            identity: module_subject,
-            configuration: String::new(),
-            evidence_class: EvidenceClass::Candidate,
-            priority: Priority::Observe,
-            delta: DeltaStatus::Current,
-            gate: false,
-            accepted: false,
-            acceptance_reason: None,
-            summary: "module has a clearly separated highest observed .clone() syntax count in a small cohort; this is descriptive concentration, not a statistical outlier and does not establish allocation or runtime cost".into(),
-            direction: "inspect receiver types and execution frequency, then measure before changing copying or allocation behavior".into(),
-            evidence: vec![Evidence {
-                metric: "clone_call_syntax_sites".into(),
-                value,
-                reference,
-                population: values.len(),
-                baseline: None,
-                material_delta: None,
-            }],
-        });
-    }
-    findings
-}
-
 fn small_population_rebuild_concentrations(modules: &[ModuleMetrics]) -> Vec<Finding> {
     let eligible = modules
         .iter()
@@ -402,56 +353,6 @@ fn small_population_rebuild_concentrations(modules: &[ModuleMetrics]) -> Vec<Fin
             material_delta: None,
         }],
     }]
-}
-
-fn runtime_clone_syntax_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
-    let mut by_crate = BTreeMap::<&str, Vec<&ModuleMetrics>>::new();
-    for module in modules.iter().filter(|module| module.parse_complete) {
-        by_crate.entry(&module.crate_name).or_default().push(module);
-    }
-
-    let mut findings = Vec::new();
-    for (crate_name, population) in by_crate {
-        if population.len() < MIN_POPULATION {
-            continue;
-        }
-        let values = population
-            .iter()
-            .map(|module| module.clone_calls)
-            .collect::<Vec<_>>();
-        let p90 = nearest_rank_p90(&values);
-
-        for module in population {
-            if module.clone_calls <= p90 {
-                continue;
-            }
-            let subject = subject(crate_name, &module.module_path);
-            findings.push(Finding {
-                fingerprint: String::new(),
-                rule: "runtime.clone_syntax_outlier".into(),
-                subject: subject.clone(),
-                identity: subject,
-                configuration: String::new(),
-                evidence_class: EvidenceClass::Candidate,
-                priority: Priority::Observe,
-                delta: DeltaStatus::Current,
-                gate: false,
-                accepted: false,
-                acceptance_reason: None,
-                summary: "module is a repository-relative outlier for observed .clone() method-call syntax; this proves source syntax only and does not establish allocation, unnecessary copying, execution frequency, or a runtime bottleneck".into(),
-                direction: "inspect receiver types and execution frequency, then measure before changing copying or allocation behavior".into(),
-                evidence: vec![Evidence {
-                    metric: "clone_call_syntax_sites".into(),
-                    value: module.clone_calls,
-                    reference: p90,
-                    population: values.len(),
-                    baseline: None,
-                    material_delta: None,
-                }],
-            });
-        }
-    }
-    findings
 }
 
 fn build_rebuild_exposure_candidates(modules: &[ModuleMetrics]) -> Vec<Finding> {
