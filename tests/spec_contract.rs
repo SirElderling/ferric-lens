@@ -203,3 +203,55 @@ fn full_analysis_enriches_changed_production_paths_with_history() {
         .unwrap();
     assert!(module.history.is_some());
 }
+
+
+fn refactor_fixture_module(index: usize, decisions: usize, dependencies: usize) -> String {
+    let mut source = String::new();
+    for dependency in 1..=dependencies {
+        let target = (index + dependency) % 20;
+        if target != index {
+            source.push_str(&format!("use crate::m{target};\n"));
+        }
+    }
+    source.push_str("fn measured(value: bool) {\n");
+    for _ in 0..decisions {
+        source.push_str("    if value {}\n");
+    }
+    source.push_str("}\n");
+    source
+}
+
+#[test]
+fn public_analysis_surfaces_multi_signal_refactor_candidates() {
+    let repo = Repo::new("refactor-candidates");
+    let declarations = (0..20)
+        .map(|index| format!("mod m{index};"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    repo.write("src/lib.rs", &declarations);
+
+    for index in 0..20 {
+        let (decisions, dependencies) = if index == 0 { (20, 8) } else { (10, 3) };
+        repo.write(
+            &format!("src/m{index}.rs"),
+            &refactor_fixture_module(index, decisions, dependencies),
+        );
+    }
+    repo.commit("baseline");
+
+    let result = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
+    let candidate = result
+        .findings
+        .iter()
+        .find(|finding| {
+            finding.rule == "refactor.multi_signal_candidate"
+                && finding.subject == "fixture::m0"
+        })
+        .expect("expected first-class refactor candidate");
+
+    assert!(!candidate.gate);
+    assert_eq!(candidate.priority, ferric_lens::model::Priority::Investigate);
+    assert!(candidate.summary.contains("decision complexity"));
+    assert!(candidate.summary.contains("dependency surface"));
+    assert!(report::json(&result).contains("refactor.multi_signal_candidate"));
+}
