@@ -428,7 +428,6 @@ fn run() {
         .any(|finding| finding.rule == "correctness.stdout_mode_unconditional_artifacts"));
 }
 
-
 #[test]
 fn workspace_snapshot_detector_ignores_direct_cfg_test_compatibility_helpers() {
     let sources = vec![source(
