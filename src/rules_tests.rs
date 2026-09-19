@@ -786,3 +786,11 @@ fn crate_roots_are_not_rebuild_exposure_candidates() {
         .any(|finding| finding.rule == "build.rebuild_exposure_candidate"
             && finding.subject == "demo"));
 }
+
+#[test]
+fn dependency_hub_requires_material_separation_from_reference() {
+    assert!(!super::materially_above_reference(5, 5));
+    assert!(!super::materially_above_reference(8, 5));
+    assert!(super::materially_above_reference(10, 5));
+    assert!(super::materially_above_reference(2, 0));
+}
