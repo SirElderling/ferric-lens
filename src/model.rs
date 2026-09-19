@@ -104,7 +104,6 @@ pub struct TypeFact {
     pub public_declared: bool,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum FunctionKind {
