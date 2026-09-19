@@ -276,10 +276,8 @@ def _write_fast_import_commit(
     stream.write(f"from {parent}\n")
     stream.write(f"M 100644 inline {path}\n")
     stream.write(f"data {len(payload)}\n")
-    stream.flush()
-    assert stream.buffer is not None
-    stream.buffer.write(payload)
-    stream.buffer.write(b"\n")
+    stream.write(payload.decode("ascii"))
+    stream.write("\n")
     stream.flush()
 
 
@@ -381,7 +379,7 @@ def build_fixture(
     )
 
     _git(root, "init", "-q")
-    _git(root, "checkout", "-q", "-b", "main")
+    _git(root, "symbolic-ref", "HEAD", "refs/heads/main")
     _git(root, "config", "user.name", "Ferric Lens Fixture")
     _git(root, "config", "user.email", FIXTURE_EMAIL)
     _git(root, "config", "commit.gpgsign", "false")
