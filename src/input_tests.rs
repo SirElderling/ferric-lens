@@ -1348,3 +1348,37 @@ fn directory_path_reader_propagates_entry_iteration_failure() {
     assert!(error.contains("fixture entry iteration failure"));
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn canonical_module_and_directory_path_helpers_propagate_supplied_errors() {
+    let root = temp_root();
+    let source = root.join("src/raced.rs");
+    let mut visited = BTreeSet::new();
+    let mut budget = SourceBudget::default();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+
+    let error = super::collect_canonical_module(
+        &root,
+        "demo",
+        &source,
+        "raced",
+        false,
+        None,
+        1,
+        Err(std::io::Error::other("canonicalization race")),
+        &mut visited,
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap_err();
+    assert!(error.contains("cannot resolve"));
+
+    let error =
+        super::directory_paths_from_entries(Err("directory entry race".into())).unwrap_err();
+    assert_eq!(error, "directory entry race");
+
+    fs::remove_dir_all(root).unwrap();
+}
