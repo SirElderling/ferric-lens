@@ -280,8 +280,17 @@ fn finding_sort_orders_gates_first_then_rule_and_subject() {
     assert_eq!(
         findings
             .iter()
-            .map(|finding| (finding.gate, finding.rule.as_str(), finding.subject.as_str()))
+            .map(|finding| (
+                finding.gate,
+                finding.rule.as_str(),
+                finding.subject.as_str()
+            ))
             .collect::<Vec<_>>(),
-        vec![(true, "a", "a"), (true, "a", "z"), (true, "b", "b"), (false, "b", "z")]
+        vec![
+            (true, "a", "a"),
+            (true, "a", "z"),
+            (true, "b", "b"),
+            (false, "b", "z")
+        ]
     );
 }
