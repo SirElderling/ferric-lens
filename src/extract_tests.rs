@@ -916,10 +916,7 @@ fn source_context_span_capture_covers_every_decision_syntax_family() {
     );
     fs::write(root.join("src/engine.rs"), text).unwrap();
     let module = context_module("engine", "src/engine.rs", text);
-    let digests = BTreeMap::from([(
-        "src/engine.rs".into(),
-        source_digest(text.as_bytes()),
-    )]);
+    let digests = BTreeMap::from([("src/engine.rs".into(), source_digest(text.as_bytes()))]);
 
     let contexts = super::source_contexts_for_findings(
         &root,
