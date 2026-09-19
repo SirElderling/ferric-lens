@@ -507,4 +507,32 @@ fn final_history_commit_is_finished_through_the_shared_helper() {
 
     assert_eq!(commits.len(), 2);
     assert_eq!(broad, 1);
+}\n
+#[test]
+fn worktree_path_preparation_reports_non_directory_removal_errors() {
+    let root = std::env::temp_dir().join(format!(
+        "ferric-lens-worktree-file-{}-{}",
+        std::process::id(),
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::write(&root, "file").unwrap();
+
+    let error = super::prepare_worktree_path(&root).unwrap_err();
+
+    assert!(error.contains("cannot clear temporary baseline directory"));
+    fs::remove_file(root).unwrap();
+}
+
+#[test]
+fn git_execution_reports_missing_working_directory() {
+    let root = std::env::temp_dir().join(format!(
+        "ferric-lens-missing-cwd-{}-{}",
+        std::process::id(),
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = fs::remove_dir_all(&root);
+
+    let error = super::git_bytes(&root, [std::ffi::OsStr::new("status")]).unwrap_err();
+
+    assert!(error.contains("could not execute git"));
 }
