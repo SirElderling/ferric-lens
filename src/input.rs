@@ -238,7 +238,6 @@ fn load_metadata(root: &Path, profile: Option<&ProfileContext>) -> Result<Metada
     parse_metadata_output(&output.stdout)
 }
 
-
 fn parse_metadata_output(bytes: &[u8]) -> Result<Metadata, String> {
     match serde_json::from_slice(bytes) {
         Ok(metadata) => Ok(metadata),
@@ -257,11 +256,7 @@ fn manifest_parent(manifest_path: &str) -> Result<PathBuf, String> {
     }
 }
 
-fn io_with_path<T>(
-    result: std::io::Result<T>,
-    action: &str,
-    path: &Path,
-) -> Result<T, String> {
+fn io_with_path<T>(result: std::io::Result<T>, action: &str, path: &Path) -> Result<T, String> {
     match result {
         Ok(value) => Ok(value),
         Err(error) => Err(format!("cannot {action} {}: {error}", path.display())),
