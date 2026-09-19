@@ -398,7 +398,6 @@ fn descriptive_small_population_candidates_require_four_subjects_and_a_unique_ma
     }));
 }
 
-
 #[test]
 fn unique_max_helper_handles_empty_and_singleton_inputs_without_false_concentration() {
     assert_eq!(super::unique_max_above_median(&[]), None);
