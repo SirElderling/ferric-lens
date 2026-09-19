@@ -30,6 +30,9 @@ struct SnapshotAnalysis {
     content_digest: String,
     metadata_complete: bool,
     metadata_detail: Option<String>,
+    cargo_input_digest: String,
+    cargo_resolution_digest: Option<String>,
+    auxiliary_targets: input::AuxiliaryTargetSummary,
     modules: Vec<ModuleMetrics>,
     parse_failures: usize,
 }
@@ -588,12 +591,16 @@ fn analyze_snapshot(
         content_digest: inventory.content_digest,
         metadata_complete: inventory.metadata_complete,
         metadata_detail: inventory.metadata_detail,
+        cargo_input_digest: inventory.cargo_input_digest,
+        cargo_resolution_digest: inventory.cargo_resolution_digest,
+        auxiliary_targets: inventory.auxiliary_targets,
         modules,
         parse_failures,
     })
 }
 
 fn snapshot_capabilities(side: &str, snapshot: &SnapshotAnalysis) -> Vec<Capability> {
+    let cargo_metadata_available = snapshot.cargo_resolution_digest.is_some();
     vec![
         Capability {
             name: format!("{side}.source_inventory"),
@@ -603,6 +610,44 @@ fn snapshot_capabilities(side: &str, snapshot: &SnapshotAnalysis) -> Vec<Capabil
                 CapabilityStatus::Partial
             },
             detail: snapshot.metadata_detail.clone(),
+        },
+        Capability {
+            name: format!("{side}.cargo_inputs"),
+            status: CapabilityStatus::Complete,
+            detail: Some(format!("digest {}", snapshot.cargo_input_digest)),
+        },
+        Capability {
+            name: format!("{side}.cargo_resolution"),
+            status: if cargo_metadata_available {
+                CapabilityStatus::Complete
+            } else {
+                CapabilityStatus::Unavailable
+            },
+            detail: snapshot
+                .cargo_resolution_digest
+                .as_ref()
+                .map(|digest| format!("digest {digest}"))
+                .or_else(|| Some("Cargo metadata resolution unavailable".into())),
+        },
+        Capability {
+            name: format!("{side}.source_scopes"),
+            status: if cargo_metadata_available {
+                CapabilityStatus::Complete
+            } else {
+                CapabilityStatus::Unavailable
+            },
+            detail: if cargo_metadata_available {
+                Some(format!(
+                    "tests={}, benches={}, examples={}, build_scripts={}, proc_macros={}",
+                    snapshot.auxiliary_targets.tests,
+                    snapshot.auxiliary_targets.benches,
+                    snapshot.auxiliary_targets.examples,
+                    snapshot.auxiliary_targets.build_scripts,
+                    snapshot.auxiliary_targets.proc_macros
+                ))
+            } else {
+                Some("auxiliary source classes unavailable without Cargo metadata".into())
+            },
         },
         Capability {
             name: format!("{side}.syntax_extraction"),
