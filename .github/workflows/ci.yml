@@ -72,15 +72,17 @@ jobs:
       - name: Self-analyze Ferric Lens
         if: runner.os == 'Linux'
         run: |
+          git status --porcelain=v1 --untracked-files=all > target/ferric-lens-pre-analysis-status.txt
           set +e
           cargo run --locked -- analyze . --base origin/main --json target/ferric-lens-self-analysis.json --html target/ferric-lens-self-analysis.html
           status=$?
           echo "$status" > target/ferric-lens-self-analysis.exit
           echo "Ferric Lens self-analysis exit code: $status"
+          git status --porcelain=v1 --untracked-files=all > target/ferric-lens-post-analysis-status.txt
           exit 0
 
       - name: End-to-end check
-        run: cargo run --locked -- check . --base origin/main --json target/ferric-lens-self-check.json
+        run: cargo run --locked -- check . --base HEAD --json target/ferric-lens-self-check.json
 
       - name: Upload self-analysis
         if: always() && runner.os == 'Linux'
@@ -92,6 +94,8 @@ jobs:
             target/ferric-lens-self-analysis.html
             target/ferric-lens-self-analysis.exit
             target/ferric-lens-self-check.json
+            target/ferric-lens-pre-analysis-status.txt
+            target/ferric-lens-post-analysis-status.txt
           if-no-files-found: warn
 
       - name: Release build
