@@ -83,28 +83,63 @@ fn history_candidates_include_changed_renamed_and_finding_paths_only_when_owned(
 }
 
 #[test]
-fn advisory_identity_rebinds_only_with_matching_subject_and_correspondence() {
-    let head = vec![module("demo", "moved", "src/moved.rs")];
-    let baseline = vec![module("demo", "old", "src/old.rs")];
-    let mut findings = vec![
-        finding("structure.current_coupled_outlier", "demo::moved"),
-        finding("structure.current_coupled_outlier", "missing"),
-        finding("other", "demo::moved"),
+fn advisory_baseline_attribution_distinguishes_unchanged_worsened_new_and_unknown() {
+    let head = vec![
+        module("demo", "moved", "src/moved.rs"),
+        module("demo", "added", "src/added.rs"),
+        module("demo", "ambiguous", "src/ambiguous.rs"),
+        module("demo", "unmatched", "src/unmatched.rs"),
     ];
+    let baseline = vec![module("demo", "old", "src/old.rs")];
+
+    let mut unchanged = finding("structure.current_coupled_outlier", "demo::moved");
+    unchanged.priority = Priority::Investigate;
+    let mut findings = vec![
+        unchanged,
+        finding("runtime.clone_syntax_outlier", "demo::moved"),
+        finding("build.rebuild_exposure_candidate", "demo::added"),
+        finding("build.rebuild_exposure_candidate", "demo::ambiguous"),
+        finding("build.rebuild_exposure_candidate", "demo::unmatched"),
+        finding("correctness.example", "demo::moved"),
+        finding("other", "missing"),
+    ];
+    let baseline_findings = vec![finding(
+        "structure.current_coupled_outlier",
+        "demo::old",
+    )];
     let correspondence = Correspondence {
         head_to_baseline: [(0, 0)].into_iter().collect(),
-        ambiguous_head: Default::default(),
+        ambiguous_head: BTreeSet::from([2]),
+    };
+    let changes = ChangeSet {
+        added: BTreeSet::from(["src/added.rs".into()]),
+        modified: BTreeSet::new(),
+        deleted: BTreeSet::new(),
+        renames: BTreeMap::new(),
     };
 
-    super::rebind_advisory_identities(&mut findings, &head, &baseline, &correspondence);
+    super::rebind_advisory_baseline(
+        &mut findings,
+        &head,
+        &baseline,
+        &correspondence,
+        &baseline_findings,
+        &changes,
+    );
 
     assert_eq!(findings[0].identity, "demo::old");
-    assert_eq!(findings[1].identity, "missing");
-    assert_eq!(findings[2].identity, "demo::moved");
+    assert_eq!(findings[0].delta, DeltaStatus::Unchanged);
+    assert_eq!(findings[0].priority, Priority::Observe);
 
-    let mut no_match = vec![finding("structure.current_coupled_outlier", "demo::moved")];
-    super::rebind_advisory_identities(&mut no_match, &head, &baseline, &Correspondence::default());
-    assert_eq!(no_match[0].identity, "demo::moved");
+    assert_eq!(findings[1].identity, "demo::old");
+    assert_eq!(findings[1].delta, DeltaStatus::Worsened);
+
+    assert_eq!(findings[2].delta, DeltaStatus::New);
+    assert_eq!(findings[3].delta, DeltaStatus::Unknown);
+    assert_eq!(findings[4].delta, DeltaStatus::Unknown);
+
+    assert_eq!(findings[5].delta, DeltaStatus::Current);
+    assert_eq!(findings[6].delta, DeltaStatus::Current);
 }
 
 #[test]
