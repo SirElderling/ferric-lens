@@ -1415,11 +1415,7 @@ mod tests {
 
     #[test]
     fn module_discovery_supports_nested_mod_rs_and_test_cfg_is_excluded_when_cfg_is_unavailable() {
-        use crate::{
-            cfg::HostCfg,
-            model::AnalysisProfile,
-            profile::ProfileContext,
-        };
+        use crate::{cfg::HostCfg, model::AnalysisProfile, profile::ProfileContext};
 
         let root = temp_root();
         fs::create_dir_all(root.join("src/nested")).unwrap();
