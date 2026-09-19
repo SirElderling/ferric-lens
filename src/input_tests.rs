@@ -1,13 +1,15 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use super::{
-    collect_reachable_module, inventory_from_metadata, module_path_from_relative, rust_name,
-    Metadata, Package, SourceBudget, Target, MAX_SNAPSHOT_SOURCE_BYTES,
+    acquire_inventory, collect_reachable_module, collect_rust_files, collect_target_roots,
+    finalize_inventory, inventory_from_metadata, module_path_from_relative, rust_name, Dependency,
+    Metadata, Package, SourceBudget, SourceFile, Target, TargetRoot, WorkspaceAliases,
+    MAX_SNAPSHOT_SOURCE_BYTES,
 };
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -974,5 +976,386 @@ fn fallback_inventory_reports_unreadable_root_shape() {
     let error = super::fallback_inventory(&file).unwrap_err();
 
     assert!(error.contains("cannot read"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+
+#[test]
+fn metadata_inventory_failure_falls_back_without_claiming_completeness() {
+    let root = temp_root();
+    fs::remove_file(root.join("src/lib.rs")).ok();
+    fs::create_dir_all(root.join("src/lib.rs")).unwrap();
+    let package_id = "demo-id".to_owned();
+    let metadata = Metadata {
+        packages: vec![Package {
+            name: "demo".into(),
+            id: package_id.clone(),
+            manifest_path: root.join("Cargo.toml").to_string_lossy().into_owned(),
+            targets: vec![Target {
+                name: "demo".into(),
+                kind: vec!["lib".into()],
+                src_path: root.join("src/lib.rs").to_string_lossy().into_owned(),
+            }],
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec![package_id],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+
+    let (_, aliases, complete, detail) =
+        acquire_inventory(&root, Ok(metadata), None).unwrap();
+
+    assert!(aliases.is_empty());
+    assert!(!complete);
+    assert!(detail
+        .as_deref()
+        .unwrap()
+        .contains("Cargo metadata inventory failed"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn final_inventory_deduplicates_sources_and_hashes_workspace_aliases() {
+    let source = SourceFile {
+        crate_name: "demo".into(),
+        module_path: "a".into(),
+        relative_path: "src/a.rs".into(),
+        bytes: b"pub fn a() {}".to_vec(),
+    };
+    let aliases = WorkspaceAliases::from([(
+        "demo".into(),
+        BTreeMap::from([("shared".into(), "shared".into())]),
+    )]);
+
+    let inventory = finalize_inventory((
+        vec![source.clone(), source],
+        aliases.clone(),
+        true,
+        None,
+    ));
+    let without_aliases = finalize_inventory((
+        inventory.sources.clone(),
+        WorkspaceAliases::new(),
+        true,
+        None,
+    ));
+
+    assert_eq!(inventory.sources.len(), 1);
+    assert_eq!(inventory.workspace_aliases, aliases);
+    assert_ne!(inventory.content_digest, without_aliases.content_digest);
+}
+
+#[test]
+fn metadata_inventory_skips_external_packages_invalid_targets_and_non_workspace_dependencies() {
+    let root = temp_root();
+    fs::write(root.join("src/lib.rs"), "pub fn demo() {}").unwrap();
+    fs::write(root.join("src/not-rust.txt"), "ignored").unwrap();
+
+    let outside = std::env::temp_dir().join(format!(
+        "ferric-lens-input-outside-package-{}-{}",
+        std::process::id(),
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(outside.join("src")).unwrap();
+    fs::write(outside.join("src/lib.rs"), "pub fn outside() {}").unwrap();
+
+    let demo_id = "demo-id".to_owned();
+    let outside_id = "outside-id".to_owned();
+    let metadata = Metadata {
+        packages: vec![
+            Package {
+                name: "demo".into(),
+                id: demo_id.clone(),
+                manifest_path: root.join("Cargo.toml").to_string_lossy().into_owned(),
+                targets: vec![
+                    Target {
+                        name: "demo".into(),
+                        kind: vec!["lib".into()],
+                        src_path: root.join("src/lib.rs").to_string_lossy().into_owned(),
+                    },
+                    Target {
+                        name: "bad".into(),
+                        kind: vec!["bin".into()],
+                        src_path: root.join("src/not-rust.txt").to_string_lossy().into_owned(),
+                    },
+                ],
+                dependencies: vec![
+                    Dependency {
+                        name: "registry".into(),
+                        rename: None,
+                        path: None,
+                    },
+                    Dependency {
+                        name: "missing-workspace-lib".into(),
+                        rename: None,
+                        path: Some(root.join("missing").to_string_lossy().into_owned()),
+                    },
+                ],
+            },
+            Package {
+                name: "outside".into(),
+                id: outside_id.clone(),
+                manifest_path: outside.join("Cargo.toml").to_string_lossy().into_owned(),
+                targets: vec![Target {
+                    name: "outside".into(),
+                    kind: vec!["lib".into()],
+                    src_path: outside.join("src/lib.rs").to_string_lossy().into_owned(),
+                }],
+                dependencies: Vec::new(),
+            },
+        ],
+        workspace_members: vec![demo_id, outside_id],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+
+    let (sources, aliases, limitations) =
+        inventory_from_metadata(&root, metadata, None).unwrap();
+
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].relative_path, "src/lib.rs");
+    assert!(aliases["demo"].is_empty());
+    assert!(limitations.is_empty());
+
+    fs::remove_dir_all(outside).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn target_collection_stops_immediately_when_budget_is_exhausted() {
+    let root = temp_root();
+    fs::write(root.join("src/lib.rs"), "pub fn demo() {}").unwrap();
+    let target = TargetRoot {
+        id: "demo".into(),
+        import_name: "demo".into(),
+        kind: "lib",
+        source: root.join("src/lib.rs"),
+        package_root: root.clone(),
+        dependencies: Vec::new(),
+    };
+    let mut budget = SourceBudget {
+        used: 0,
+        exhausted: true,
+    };
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+
+    collect_target_roots(
+        &root,
+        vec![target],
+        None,
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap();
+
+    assert!(sources.is_empty());
+    assert!(limitations.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn target_collection_propagates_source_read_errors() {
+    let root = temp_root();
+    fs::create_dir_all(root.join("src/broken.rs")).unwrap();
+    let target = TargetRoot {
+        id: "demo".into(),
+        import_name: "demo".into(),
+        kind: "lib",
+        source: root.join("src/broken.rs"),
+        package_root: root.clone(),
+        dependencies: Vec::new(),
+    };
+    let mut budget = SourceBudget::default();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+
+    assert!(collect_target_roots(
+        &root,
+        vec![target],
+        None,
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )
+    .is_err());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn nested_module_read_errors_propagate_through_inline_and_file_discovery() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_root();
+    fs::create_dir_all(root.join("src/outer")).unwrap();
+    fs::write(root.join("src/lib.rs"), "mod outer { mod child; }").unwrap();
+    let child = root.join("src/outer/child.rs");
+    fs::write(&child, "pub fn child() {}").unwrap();
+    let mut permissions = fs::metadata(&child).unwrap().permissions();
+    permissions.set_mode(0o000);
+    fs::set_permissions(&child, permissions).unwrap();
+
+    let mut visited = BTreeSet::new();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    let mut budget = SourceBudget::default();
+    let result = collect_reachable_module(
+        &root,
+        "demo",
+        &root.join("src/lib.rs"),
+        "",
+        true,
+        None,
+        &mut visited,
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    );
+
+    let mut permissions = fs::metadata(&child).unwrap().permissions();
+    permissions.set_mode(0o600);
+    fs::set_permissions(&child, permissions).unwrap();
+    assert!(result.is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn module_cfg_discovery_covers_malformed_and_true_cfg_paths() {
+    use crate::{
+        cfg::HostCfg,
+        model::AnalysisProfile,
+        profile::ProfileContext,
+    };
+
+    let root = temp_root();
+    fs::write(
+        root.join("src/lib.rs"),
+        "#[cfg()] mod malformed; #[cfg(unix)] mod enabled;",
+    )
+    .unwrap();
+    fs::write(root.join("src/enabled.rs"), "pub fn enabled() {}").unwrap();
+    let profile = ProfileContext {
+        public: AnalysisProfile {
+            id: "test".into(),
+            target: "host".into(),
+            resolved_target: "test-target".into(),
+            features: Vec::new(),
+            target_cfg: Vec::new(),
+        },
+        cfg: HostCfg::test(&["unix"]),
+    };
+    let mut visited = BTreeSet::new();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    let mut budget = SourceBudget::default();
+
+    collect_reachable_module(
+        &root,
+        "demo",
+        &root.join("src/lib.rs"),
+        "",
+        true,
+        Some(&profile),
+        &mut visited,
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap();
+
+    assert!(sources
+        .iter()
+        .any(|source| source.relative_path == "src/enabled.rs"));
+    assert!(limitations
+        .iter()
+        .any(|detail| detail.contains("unresolved cfg reachability")));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn fallback_inventory_propagates_missing_root_errors() {
+    let root = temp_root();
+    let missing = root.join("missing");
+    assert!(super::fallback_inventory(&missing).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn fallback_collection_honors_preexhausted_and_newly_exhausted_budgets() {
+    let root = temp_root();
+    fs::write(root.join("src/lib.rs"), "pub fn demo() {}").unwrap();
+    let target = root.join("target");
+
+    let mut preexhausted = SourceBudget {
+        used: 0,
+        exhausted: true,
+    };
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    collect_rust_files(
+        &root,
+        &root,
+        &target,
+        "demo",
+        &mut preexhausted,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap();
+    assert!(sources.is_empty());
+
+    let mut full = SourceBudget {
+        used: MAX_SNAPSHOT_SOURCE_BYTES,
+        exhausted: false,
+    };
+    collect_rust_files(
+        &root,
+        &root.join("src"),
+        &target,
+        "demo",
+        &mut full,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap();
+    assert!(limitations
+        .iter()
+        .any(|detail| detail.contains("512 MiB snapshot limit")));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn fallback_recursive_directory_errors_are_propagated() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_root();
+    let locked = root.join("locked");
+    fs::create_dir_all(&locked).unwrap();
+    let mut permissions = fs::metadata(&locked).unwrap().permissions();
+    permissions.set_mode(0o000);
+    fs::set_permissions(&locked, permissions).unwrap();
+
+    let target = root.join("target");
+    let mut budget = SourceBudget::default();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    let result = collect_rust_files(
+        &root,
+        &root,
+        &target,
+        "demo",
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    );
+
+    let mut permissions = fs::metadata(&locked).unwrap().permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&locked, permissions).unwrap();
+    assert!(result.is_err());
     fs::remove_dir_all(root).unwrap();
 }
