@@ -51,6 +51,7 @@ fn evaluates_boolean_cfg_combinators() {
         cfg.evaluate(&parse_quote!(all(unix, not(windows)))),
         Truth::True
     );
+    assert_eq!(cfg.evaluate(&parse_quote!(not(unix))), Truth::False);
     assert_eq!(
         cfg.evaluate(&parse_quote!(any(target_os = "macos", windows))),
         Truth::False
