@@ -1,7 +1,17 @@
 name: Performance acceptance
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "tools/perf_fixture.py"
+      - "tools/perf_acceptance.py"
+      - ".github/workflows/perf-acceptance.yml"
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "src/**"
       - "Cargo.toml"
@@ -31,6 +41,7 @@ concurrency:
 jobs:
   measure:
     name: Linux / ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'standard' }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -71,3 +82,4 @@ jobs:
           name: ferric-lens-performance-${{ github.run_id }}
           path: target/perf-acceptance/
           if-no-files-found: warn
+          retention-days: 3
