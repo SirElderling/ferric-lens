@@ -11,7 +11,7 @@ use syn::{
     visit::{self, Visit},
     Attribute, BinOp, ExprBinary, ExprForLoop, ExprIf, ExprLoop, ExprMatch, ExprMethodCall,
     ExprWhile, File, ForeignItemFn, ImplItemFn, Item, ItemEnum, ItemFn, ItemImpl, ItemMod,
-    ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse, Macro, Pat, TraitItemFn,
+    ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse, Macro, TraitItemFn,
     UseTree, Visibility,
 };
 
