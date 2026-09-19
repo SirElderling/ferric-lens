@@ -27,6 +27,151 @@ pub fn current_snapshot_findings(modules: &[ModuleMetrics]) -> Vec<Finding> {
     findings
 }
 
+pub fn refactor_candidates(findings: &[Finding]) -> Vec<Finding> {
+    let mut by_subject = BTreeMap::<&str, Vec<&Finding>>::new();
+    for finding in findings
+        .iter()
+        .filter(|finding| !finding.rule.starts_with("refactor."))
+    {
+        if finding.evidence.iter().any(|item| refactor_signal(&item.metric).is_some()) {
+            by_subject.entry(&finding.subject).or_default().push(finding);
+        }
+    }
+
+    let mut candidates = Vec::new();
+    for (subject, supporting) in by_subject {
+        let mut signals = BTreeMap::<&str, &str>::new();
+        let mut evidence = Vec::new();
+
+        for finding in &supporting {
+            for item in &finding.evidence {
+                let Some((signal, label)) = refactor_signal(&item.metric) else {
+                    continue;
+                };
+                signals.insert(signal, label);
+                evidence.push(item.clone());
+            }
+        }
+
+        if signals.len() < 2 {
+            continue;
+        }
+
+        evidence.sort_by(|a, b| {
+            (
+                &a.metric,
+                a.value,
+                a.reference,
+                a.population,
+                a.baseline,
+                a.material_delta,
+            )
+                .cmp(&(
+                    &b.metric,
+                    b.value,
+                    b.reference,
+                    b.population,
+                    b.baseline,
+                    b.material_delta,
+                ))
+        });
+        evidence.dedup();
+
+        let labels = signals.values().copied().collect::<Vec<_>>();
+        let identity = refactor_identity(subject, &supporting);
+        let delta = refactor_delta(&supporting);
+        let direction = refactor_direction(signals.keys().copied().collect());
+
+        candidates.push(Finding {
+            fingerprint: String::new(),
+            rule: "refactor.multi_signal_candidate".into(),
+            subject: subject.to_owned(),
+            identity,
+            configuration: String::new(),
+            evidence_class: EvidenceClass::Strong,
+            priority: Priority::Investigate,
+            delta,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: format!(
+                "module has corroborating refactor evidence across {} independent signals: {}",
+                labels.len(),
+                labels.join(", ")
+            ),
+            direction,
+            evidence,
+        });
+    }
+
+    sort_findings(&mut candidates);
+    candidates
+}
+
+fn refactor_signal(metric: &str) -> Option<(&'static str, &'static str)> {
+    match metric {
+        "decision_sites" => Some(("decision_complexity", "decision complexity")),
+        "local_dependency_modules" | "reverse_repository_dependents" => {
+            Some(("dependency_surface", "dependency surface"))
+        }
+        "clone_call_syntax_sites" => Some(("copying_runtime_risk", "copying/runtime risk")),
+        _ => None,
+    }
+}
+
+fn refactor_identity(subject: &str, supporting: &[&Finding]) -> String {
+    let identities = supporting
+        .iter()
+        .filter_map(|finding| (finding.identity != subject).then_some(finding.identity.as_str()))
+        .collect::<BTreeSet<_>>();
+
+    if identities.len() == 1 {
+        identities.into_iter().next().unwrap_or(subject).to_owned()
+    } else {
+        subject.to_owned()
+    }
+}
+
+fn refactor_delta(supporting: &[&Finding]) -> DeltaStatus {
+    if supporting
+        .iter()
+        .any(|finding| finding.delta == DeltaStatus::Worsened)
+    {
+        DeltaStatus::Worsened
+    } else if supporting
+        .iter()
+        .any(|finding| finding.delta == DeltaStatus::New)
+    {
+        DeltaStatus::New
+    } else if supporting
+        .iter()
+        .any(|finding| finding.delta == DeltaStatus::Current)
+    {
+        DeltaStatus::Current
+    } else if supporting
+        .iter()
+        .any(|finding| finding.delta == DeltaStatus::Unchanged)
+    {
+        DeltaStatus::Unchanged
+    } else {
+        DeltaStatus::Unknown
+    }
+}
+
+fn refactor_direction(signals: BTreeSet<&str>) -> String {
+    let complexity = signals.contains("decision_complexity");
+    let dependency = signals.contains("dependency_surface");
+    let copying = signals.contains("copying_runtime_risk");
+
+    match (complexity, dependency, copying) {
+        (true, true, true) => "consider splitting responsibilities and narrowing dependency surface; isolate copying-sensitive paths and measure runtime/build effects before changing behavior".into(),
+        (true, true, false) => "consider splitting responsibilities and narrowing dependency surface without prescribing a final architecture".into(),
+        (true, false, true) => "consider separating complex orchestration from copying-sensitive paths; inspect receiver types and execution frequency before changing behavior".into(),
+        (false, true, true) => "consider isolating copying-sensitive behavior behind a narrower, stable dependency boundary; measure runtime and build impact before optimizing".into(),
+        _ => "investigate the corroborating evidence before choosing a refactor direction".into(),
+    }
+}
+
 fn structural_coupled_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
     let mut by_crate = BTreeMap::<&str, Vec<&ModuleMetrics>>::new();
     for module in modules.iter().filter(|module| module.parse_complete) {
