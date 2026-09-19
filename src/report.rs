@@ -51,6 +51,11 @@ pub fn html(result: &AnalysisResult) -> String {
         .iter()
         .filter(|finding| finding.gate)
         .collect::<Vec<_>>();
+    let refactor_advisories = result
+        .findings
+        .iter()
+        .filter(|finding| !finding.gate && finding.rule.starts_with("refactor."))
+        .collect::<Vec<_>>();
     let structural_advisories = result
         .findings
         .iter()
@@ -71,6 +76,7 @@ pub fn html(result: &AnalysisResult) -> String {
         .iter()
         .filter(|finding| {
             !finding.gate
+                && !finding.rule.starts_with("refactor.")
                 && !finding.rule.starts_with("structure.")
                 && !finding.rule.starts_with("runtime.")
                 && !finding.rule.starts_with("build.")
@@ -78,6 +84,10 @@ pub fn html(result: &AnalysisResult) -> String {
         .collect::<Vec<_>>();
 
     let gate_html = render_findings(&gate_findings, "No gate regression was established.");
+    let refactor_html = render_findings(
+        &refactor_advisories,
+        "No multi-signal refactoring candidates were established.",
+    );
     let structural_html = render_findings(
         &structural_advisories,
         "No structural advisory outliers were found in eligible populations.",
@@ -355,6 +365,7 @@ code {{ overflow-wrap: anywhere; }}
 <div class="card"><h2>Coverage</h2><ul>{capabilities}</ul></div>
 </section>
 <section><h2>Gate findings</h2>{gate_html}</section>
+<section><h2>Refactoring candidates</h2>{refactor_html}</section>
 <section><h2>Structural advisories</h2>{structural_html}</section>
 <section><h2>Runtime-risk candidates</h2>{runtime_html}</section>
 <section><h2>Build-efficiency candidates</h2>{build_html}</section>
