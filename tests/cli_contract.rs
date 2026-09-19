@@ -14,10 +14,8 @@ struct Repo {
 impl Repo {
     fn new(name: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "ferric-lens-cli-{name}-{}-{n}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("ferric-lens-cli-{name}-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(
@@ -27,7 +25,10 @@ impl Repo {
         .unwrap();
         fs::write(root.join("src/lib.rs"), "pub fn stable() -> usize { 1 }\n").unwrap();
         git(&root, &["init", "-q"]);
-        git(&root, &["config", "user.email", "ferric-lens@example.invalid"]);
+        git(
+            &root,
+            &["config", "user.email", "ferric-lens@example.invalid"],
+        );
         git(&root, &["config", "user.name", "Ferric Lens Test"]);
         git(&root, &["add", "."]);
         git(&root, &["commit", "-q", "-m", "baseline"]);
@@ -140,6 +141,5 @@ fn accept_rejects_unknown_fingerprint_through_cli() {
     ]);
 
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr)
-        .contains("not present in the current analysis"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not present in the current analysis"));
 }
