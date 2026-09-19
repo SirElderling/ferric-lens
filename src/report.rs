@@ -51,17 +51,46 @@ pub fn html(result: &AnalysisResult) -> String {
         .iter()
         .filter(|finding| finding.gate)
         .collect::<Vec<_>>();
-    let advisory_findings = result
+    let structural_advisories = result
         .findings
         .iter()
-        .filter(|finding| !finding.gate)
+        .filter(|finding| !finding.gate && finding.rule.starts_with("structure."))
+        .collect::<Vec<_>>();
+    let runtime_advisories = result
+        .findings
+        .iter()
+        .filter(|finding| !finding.gate && finding.rule.starts_with("runtime."))
+        .collect::<Vec<_>>();
+    let build_advisories = result
+        .findings
+        .iter()
+        .filter(|finding| !finding.gate && finding.rule.starts_with("build."))
+        .collect::<Vec<_>>();
+    let other_advisories = result
+        .findings
+        .iter()
+        .filter(|finding| {
+            !finding.gate
+                && !finding.rule.starts_with("structure.")
+                && !finding.rule.starts_with("runtime.")
+                && !finding.rule.starts_with("build.")
+        })
         .collect::<Vec<_>>();
 
     let gate_html = render_findings(&gate_findings, "No gate regression was established.");
-    let advisory_html = render_findings(
-        &advisory_findings,
-        "No advisory coupled outliers were found in eligible crate populations.",
+    let structural_html = render_findings(
+        &structural_advisories,
+        "No structural advisory outliers were found in eligible populations.",
     );
+    let runtime_html = render_findings(
+        &runtime_advisories,
+        "No static runtime-risk candidates were found in eligible populations.",
+    );
+    let build_html = render_findings(
+        &build_advisories,
+        "No build-efficiency candidates were found in eligible populations.",
+    );
+    let other_html = render_findings(&other_advisories, "No other advisory findings.");
 
     let mut modules = String::new();
     let mut current_crate = String::new();
@@ -83,10 +112,13 @@ pub fn html(result: &AnalysisResult) -> String {
         }));
         modules.push_str("</code><span>");
         modules.push_str(&escape(&format!(
-            "{} decisions · {} repo deps · {} public items · {} lines{}",
+            "{} decisions · {} repo deps · {} public items · {} functions · {} types · {} clone syntax sites · {} lines{}",
             module.decision_sites,
             module.local_dependency_modules.len(),
             module.public_items,
+            module.functions.len(),
+            module.types.len(),
+            module.clone_calls,
             module.lines,
             if module.gate_complete {
                 ""
@@ -270,7 +302,10 @@ code {{ overflow-wrap: anywhere; }}
 <div class="card"><h2>Coverage</h2><ul>{capabilities}</ul></div>
 </section>
 <section><h2>Gate findings</h2>{gate_html}</section>
-<section><h2>Advisory findings</h2>{advisory_html}</section>
+<section><h2>Structural advisories</h2>{structural_html}</section>
+<section><h2>Runtime-risk candidates</h2>{runtime_html}</section>
+<section><h2>Build-efficiency candidates</h2>{build_html}</section>
+<section><h2>Other advisories</h2>{other_html}</section>
 <section><h2>Codebase map</h2>{modules}</section>
 </body></html>"#,
         reason = escape(&result.verdict_reason),
