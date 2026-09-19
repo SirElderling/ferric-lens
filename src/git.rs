@@ -160,8 +160,8 @@ pub fn changes_since(root: &Path, merge_base: &str) -> Result<ChangeSet, String>
     let records = output
         .split(|byte| *byte == 0)
         .filter(|record| !record.is_empty())
-        .map(|record| String::from_utf8_lossy(record).into_owned())
-        .collect::<Vec<_>>();
+        .map(|record| decode_git_text(record, "git diff path/status record"))
+        .collect::<Result<Vec<_>, _>>()?;
 
     finalize_changes(root, merge_base, &records, list_untracked(root))
 }
@@ -201,7 +201,7 @@ fn detect_exact_worktree_renames(
     tree_args.extend(changes.deleted.iter().map(OsString::from));
     let tree = git_bytes(root, tree_args)?;
 
-    let deleted_by_oid = parse_tree_oids(&tree);
+    let deleted_by_oid = parse_tree_oids(&tree)?;
 
     let added_paths = changes.added.iter().cloned().collect::<Vec<_>>();
     let mut hash_args = vec![
@@ -306,20 +306,20 @@ fn list_untracked(root: &Path) -> Result<Vec<String>, String> {
             OsStr::new("--"),
         ],
     )?;
-    Ok(output
+    output
         .split(|byte| *byte == 0)
         .filter(|record| !record.is_empty())
-        .map(|path| String::from_utf8_lossy(path).into_owned())
-        .collect())
+        .map(|path| decode_git_text(path, "untracked Git path"))
+        .collect()
 }
 
-fn parse_tree_oids(tree: &[u8]) -> BTreeMap<String, Vec<String>> {
+fn parse_tree_oids(tree: &[u8]) -> Result<BTreeMap<String, Vec<String>>, String> {
     let mut by_oid = BTreeMap::<String, Vec<String>>::new();
     for record in tree
         .split(|byte| *byte == 0)
         .filter(|record| !record.is_empty())
     {
-        let text = String::from_utf8_lossy(record);
+        let text = decode_git_text(record, "git tree path record")?;
         let Some((metadata, path)) = text.split_once('\t') else {
             continue;
         };
@@ -331,7 +331,7 @@ fn parse_tree_oids(tree: &[u8]) -> BTreeMap<String, Vec<String>> {
             .or_default()
             .push(path.to_owned());
     }
-    by_oid
+    Ok(by_oid)
 }
 
 fn index_added_hashes(
@@ -392,7 +392,9 @@ fn parse_history(output: &[u8]) -> Result<HistorySample, String> {
                 }
             }
 
-            let oid = String::from_utf8_lossy(raw).trim().to_owned();
+            let oid = decode_git_text(raw, "git history commit identifier")?
+                .trim()
+                .to_owned();
             if !is_object_id(&oid) {
                 return Err("git history stream contained an invalid commit identifier".into());
             }
@@ -419,7 +421,7 @@ fn parse_history(output: &[u8]) -> Result<HistorySample, String> {
         } else {
             raw
         };
-        let path = String::from_utf8_lossy(raw_path).into_owned();
+        let path = decode_git_text(raw_path, "git history path")?;
         commit.paths.push(path);
         changed_path_records += 1;
     }
@@ -546,7 +548,8 @@ fn resolve_commit(root: &Path, reference: &str) -> Result<String, String> {
             OsStr::new(&spec),
         ],
     )?;
-    parse_resolved_commit(reference, &String::from_utf8_lossy(&output))
+    let output = decode_git_text(&output, "resolved Git commit")?;
+    parse_resolved_commit(reference, &output)
 }
 
 fn parse_resolved_commit(reference: &str, output: &str) -> Result<String, String> {
@@ -561,12 +564,18 @@ fn parse_resolved_commit(reference: &str, output: &str) -> Result<String, String
 fn git_text<const N: usize>(root: &Path, args: [&str; N]) -> Result<String, String> {
     let args = args.map(OsStr::new);
     let output = git_bytes(root, args)?;
-    Ok(String::from_utf8_lossy(&output).into_owned())
+    decode_git_text(&output, "Git text output")
 }
 
 fn git_text_os(root: &Path, args: Vec<OsString>) -> Result<String, String> {
     let output = git_bytes(root, args)?;
     Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+fn decode_git_text(bytes: &[u8], context: &str) -> Result<String, String> {
+    std::str::from_utf8(bytes)
+        .map(str::to_owned)
+        .map_err(|_| format!("{context} is not valid UTF-8; repository path analysis is incomplete"))
 }
 
 fn git_bytes<I, S>(root: &Path, args: I) -> Result<Vec<u8>, String>
