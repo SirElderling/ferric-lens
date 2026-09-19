@@ -1284,7 +1284,9 @@ mod tests {
 
         let rendered = html(&result);
 
-        assert!(rendered.find("structure.a").unwrap() < rendered.find("structure.z").unwrap());
+        assert!(
+            rendered.find("structure.a").unwrap() < rendered.find("structure.z").unwrap()
+        );
         assert!(rendered.find("demo::a").unwrap() < rendered.find("demo::b").unwrap());
     }
 
