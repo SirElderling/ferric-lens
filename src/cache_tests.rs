@@ -295,6 +295,6 @@ fn eviction_ignores_entries_whose_metadata_cannot_be_read() {
 
     cache.evict_if_needed();
 
-    assert!(cache.directory.join("dangling.json").exists());
+    assert!(fs::symlink_metadata(cache.directory.join("dangling.json")).is_ok());
     fs::remove_dir_all(root).unwrap();
 }
