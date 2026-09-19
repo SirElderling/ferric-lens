@@ -52,11 +52,17 @@ impl ProfileContext {
 }
 
 fn rustc_host() -> Result<String, String> {
-    let output = Command::new("rustc")
-        .arg("-vV")
-        .output()
-        .map_err(|error| format!("could not execute rustc -vV: {error}"))?;
+    let mut command = Command::new("rustc");
+    command.arg("-vV");
+    let output = run_rustc_host(&mut command)?;
     parse_rustc_host_output(&output)
+}
+
+fn run_rustc_host(command: &mut Command) -> Result<std::process::Output, String> {
+    match command.output() {
+        Ok(output) => Ok(output),
+        Err(error) => Err(format!("could not execute rustc -vV: {error}")),
+    }
 }
 
 fn parse_rustc_host_output(output: &std::process::Output) -> Result<String, String> {
