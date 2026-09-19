@@ -41,15 +41,9 @@ Open the generated HTML report in a normal browser. Keep the JSON beside it when
 
 Use Jeko and Kronicle as the initial private real-project inputs. Their source or reports do not need to be committed to this repository.
 
-For each project, review every emitted finding in these sections:
+For each project, start at **What needs attention** and review every active finding before opening the repository explorer. The report should tell you why an area deserves attention before asking you to interpret its metrics.
 
-1. Gate findings
-2. Refactoring candidates
-3. Structural advisories
-4. Runtime-risk candidates
-5. Build-efficiency candidates
-
-Also identify important architecture/refactoring concerns already known to the human reviewer that Ferric Lens did not surface.
+Then use **Repository explorer** only as drill-down context for affected modules. Also identify important architecture/refactoring concerns already known to the human reviewer that Ferric Lens did not surface.
 
 ## 4. Review each finding
 
@@ -61,9 +55,11 @@ Record one row per finding using this scorecard:
 | Project | Jeko / Kronicle / other |
 | Correct evidence? | yes / no / uncertain |
 | Source context accurate? | yes / no / not available |
+| "Why this matters" understandable? | yes / no |
+| Consequence proportionate to evidence? | yes / overstated / understated |
 | Useful to investigate? | yes / no |
 | Priority appropriate? | yes / too high / too low |
-| Direction useful? | yes / no / partly |
+| Next investigation step useful? | yes / no / partly |
 | Noise classification | none / false positive / technically true but irrelevant |
 | Understandable within ~30 seconds? | yes / no |
 | Notes | Plain-English reason |
@@ -99,10 +95,13 @@ If any valid gate finding feels too noisy to block development, treat that as ru
 
 After reviewing a project, answer these separately from finding correctness:
 
-- Could the first screen tell you what deserves attention?
+- Could the first screen tell you what deserves attention and why you should care?
+- Could a non-expert understand the likely engineering consequence without knowing Ferric Lens rule or metric names?
+- Was the distinction between evidence, possible consequence, and recommended investigation clear?
 - Were priority and evidence strength understandable?
 - Could you move from a finding to the exact evidence line/excerpt quickly, while still reaching the affected module when needed?
-- Was the distinction between gate, refactor, structural, runtime-risk, and build findings clear?
+- Did the repository explorer feel like useful drill-down context rather than a wall of inventory?
+- Were technical capabilities/digests available when needed without dominating the report?
 - Was anything important buried or repeated?
 - Did the report make any claim stronger than its evidence justified?
 
@@ -115,5 +114,13 @@ V1 can move from human testing toward release acceptance when:
 - refactor candidates are usually useful rather than merely technically true,
 - report navigation and terminology are understandable without reading the implementation,
 - known missed issues are either deliberate V1 limits or have an explicit follow-up decision.
+
+Also compare the compact agent output with the same run:
+
+```bash
+/path/to/ferric-lens analyze /path/to/project --base origin/main --ai
+```
+
+Verify that it contains the active actionable findings, evidence, source contexts, next steps, result digest, and relevant analysis limitations, while omitting the full repository inventory. The full canonical JSON remains the reference if anything needs deeper inspection.
 
 After that, run the documented 10x source/history stress fixtures, browser DOM/open measurement, and recorded release-environment performance acceptance.
