@@ -80,8 +80,7 @@ struct Target {
     src_path: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 struct Dependency {
     name: String,
     rename: Option<String>,
@@ -115,12 +114,7 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
     Ok(finalize_inventory(acquired))
 }
 
-type AcquiredInventory = (
-    Vec<SourceFile>,
-    WorkspaceAliases,
-    bool,
-    Option<String>,
-);
+type AcquiredInventory = (Vec<SourceFile>, WorkspaceAliases, bool, Option<String>);
 
 fn acquire_inventory(
     root: &Path,
@@ -163,9 +157,7 @@ fn acquire_inventory(
     }
 }
 
-fn finalize_inventory(
-    acquired: AcquiredInventory,
-) -> Inventory {
+fn finalize_inventory(acquired: AcquiredInventory) -> Inventory {
     let (mut sources, workspace_aliases, complete, detail) = acquired;
     sources.sort_by(|a, b| {
         (&a.crate_name, &a.module_path, &a.relative_path).cmp(&(
