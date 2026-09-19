@@ -23,6 +23,7 @@ Ferric Lens must:
 - support fast CI gating and deeper full analysis,
 - prioritize changed-code impact,
 - identify architecture, coupling, complexity, refactor, runtime-risk, and build-efficiency concerns,
+- identify a deliberately narrow set of high-confidence deterministic correctness risks when a concrete failure mechanism can be established from source evidence,
 - use Git history as targeted evidence,
 - distinguish proven findings from strong evidence and candidates,
 - avoid opaque aggregate quality scores,
@@ -189,6 +190,20 @@ Observe
 ```
 
 Every priority must be explainable from the finding evidence.
+
+### 7.3 Deterministic correctness risks
+
+Ferric Lens is not a general correctness linter, but V1 may emit a small family of source-backed correctness-risk findings when all of the following hold:
+
+- the pattern is deterministically observable without building or executing the target project,
+- multiple contextual facts establish a concrete failure mechanism rather than a generic style preference,
+- a bounded remediation follows directly from the evidence,
+- obvious nearby safe forms have explicit negative tests,
+- the rule remains advisory unless a separate gate contract explicitly promotes it.
+
+The initial family covers: Cargo feature-gated reachability inferred while the Cargo resolve graph is intentionally unavailable; persistent machine configuration keyed by a symbolic target despite an available resolved target; compact/stdout modes with unconditional default artifact writes; snapshot verification that omits workspace manifests already consumed by analysis; and lossy decoding of NUL-delimited Git path streams.
+
+Generic syntax such as `unwrap()`, `.clone()`, file writes, or `from_utf8_lossy()` is insufficient by itself. Prefer lower recall over broad bug-pattern matching that would create noisy false positives.
 
 ## 8. CI gating
 
@@ -452,9 +467,9 @@ Linux and macOS are first-class supported platforms.
 
 A CI setup may use one canonical full analysis plus targeted platform validation so shared work is not unnecessarily duplicated.
 
-The default is one host target, default Cargo features, and production library/binary targets. Explicit target/feature input selects additional concrete runs; v1 does not enumerate the feature powerset or assume `--all-features` is valid. Record rustc target cfg facts, selected features, Cargo resolution identity, and relevant input digests.
+The default is one host target, Cargo's resolved default feature set, and production library/binary targets. Explicit target/feature input selects one additional concrete profile; v1 does not enumerate the feature powerset or assume `--all-features` is valid. When Cargo metadata resolution is available, evaluate `cfg(feature = "...")` against the enabled feature set of the workspace package that owns the target, including default/transitive activation represented by Cargo's resolve graph. Record rustc target cfg facts, selected features, per-package resolved features, Cargo resolution identity, and relevant input digests.
 
-Unknown build-script cfg, unresolved feature activation, and macro-generated structure are unknown, not false. Exclude unresolved branches from definite graphs and mark affected capabilities incomplete. Do not gate rules that require those missing facts. Combining platform results preserves separate configuration keys; cache only facts actually shared across configurations.
+Unknown build-script cfg, feature activation when the Cargo resolve graph is unavailable, and macro-generated structure are unknown, not false. Exclude unresolved branches from definite graphs and mark affected capabilities incomplete. Do not gate rules that require those missing facts. Combining platform results preserves separate configuration keys; cache only facts actually shared across configurations.
 
 ## 18. Partial analysis
 
@@ -519,7 +534,7 @@ Canonical JSON is the complete machine interface. It must represent the same can
 
 Ferric Lens may additionally expose a compact deterministic AI/agent view derived only from the canonical result. V1 exposes it with `--ai` on `analyze` and `check`. That view is intentionally selective: verdict/reason, canonical result digest, actionable `findings`, secondary `observations`, priority/evidence/delta, plain-language meaning, core evidence, exact source contexts where available, recommended next investigation step, rule identity, and non-complete analysis limitations. `Observe` priority must never be mixed into the actionable `findings` collection. The view omits raw module/function/type inventory, accepted findings from the active action list, and capabilities that are fully complete. It must not recompute semantics independently or change the command exit code.
 
-`--ai` changes stdout presentation only. When normal JSON/HTML paths are requested, those artifacts retain their standard full/canonical behavior.
+`--ai` selects the compact stdout presentation. For `analyze --ai`, default JSON/HTML files are not created; explicitly requested `--json` and `--html` paths still receive the normal full/canonical artifacts. The output mode must not change analysis semantics or the command exit code.
 
 Publish schema versions independently where needed. Use explicit unavailable/null states, deterministic ordering, stable string identifiers, exact integer metrics, and documented units. Runtime timings and cache statistics belong in separate diagnostic output, not canonical artifacts.
 
