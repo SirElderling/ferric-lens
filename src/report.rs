@@ -491,9 +491,9 @@ fn render_findings(findings: &[&Finding], empty: &str, modules: &[ModuleMetrics]
             let anchor = anchor_id("module", &finding.subject);
             html.push_str(r#"<p class="location"><strong>Source:</strong> <code>"#);
             html.push_str(&escape(&module.path));
-            html.push_str(r#"</code> · <a href="#"#);
+            html.push_str("</code> · <a href=\"#");
             html.push_str(&anchor);
-            html.push_str(r#"">View module</a></p>"#);
+            html.push_str("\">View module</a></p>");
         }
 
         html.push_str("<p><strong>Fingerprint:</strong> <code>");
