@@ -6,7 +6,10 @@ use crate::{
     model::{DeltaStatus, EvidenceClass, Finding, ModuleMetrics, Priority},
 };
 
-use super::{current_snapshot_findings, evaluate_regressions, nearest_rank_p90, refactor_candidates, sort_findings};
+use super::{
+    current_snapshot_findings, evaluate_regressions, nearest_rank_p90, refactor_candidates,
+    sort_findings,
+};
 
 fn module(index: usize, decisions: usize, dependencies: usize) -> ModuleMetrics {
     ModuleMetrics {
@@ -404,7 +407,6 @@ fn unique_max_helper_handles_empty_and_singleton_inputs_without_false_concentrat
     assert_eq!(super::unique_max_above_median(&[7]), None);
     assert_eq!(super::unique_max_above_median(&[1, 2]), None);
 }
-
 
 fn advisory_finding(
     rule: &str,
