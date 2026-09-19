@@ -522,21 +522,33 @@ fn sort_findings(findings: &mut [Finding]) {
 }
 
 fn unique_max_above_median(values: &[usize]) -> Option<(usize, usize, usize)> {
-    if values.is_empty() {
+    let (&first, rest) = values.split_first()?;
+    let mut max = first;
+    let mut max_index = 0usize;
+    let mut max_count = 1usize;
+
+    for (index, &value) in rest.iter().enumerate() {
+        if value > max {
+            max = value;
+            max_index = index + 1;
+            max_count = 1;
+        } else if value == max {
+            max_count += 1;
+        }
+    }
+
+    if max_count != 1 {
         return None;
     }
-    let max = *values.iter().max()?;
-    if values.iter().filter(|value| **value == max).count() != 1 {
-        return None;
-    }
+
     let mut sorted = values.to_vec();
     sorted.sort_unstable();
     let median = sorted[sorted.len() / 2];
     if max <= median {
         return None;
     }
-    let index = values.iter().position(|value| *value == max)?;
-    Some((index, max, median))
+
+    Some((max_index, max, median))
 }
 
 fn nearest_rank_p90(values: &[usize]) -> usize {
