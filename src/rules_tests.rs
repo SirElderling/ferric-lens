@@ -634,6 +634,29 @@ fn refactor_candidate_ignores_unrecognized_metrics() {
     ];
 
     assert!(refactor_candidates(&findings).is_empty());
+
+    let mixed = vec![
+        advisory_finding(
+            "structure.decision_concentration",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![
+                evidence("decision_sites", 20),
+                evidence("public_items", 12),
+            ],
+        ),
+        advisory_finding(
+            "build.rebuild_exposure_candidate",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![evidence("reverse_repository_dependents", 15)],
+        ),
+    ];
+    let candidate = refactor_candidates(&mixed).remove(0);
+    assert!(candidate
+        .evidence
+        .iter()
+        .all(|item| item.metric != "public_items"));
 }
 
 #[test]
