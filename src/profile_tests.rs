@@ -9,7 +9,10 @@ fn normalizes_explicit_profile_inputs() {
 
     assert_eq!(profile.public.target, "x86_64-unknown-linux-gnu");
     assert_eq!(profile.public.features, ["a", "z"]);
-    assert!(profile.public.id.contains("target=x86_64-unknown-linux-gnu"));
+    assert!(profile
+        .public
+        .id
+        .contains("target=x86_64-unknown-linux-gnu"));
     assert!(profile.public.id.contains("default+a,z"));
 }
 
