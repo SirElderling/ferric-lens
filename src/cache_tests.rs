@@ -41,6 +41,9 @@ fn module(path: &str) -> ModuleMetrics {
         lines: 1,
         decision_sites: 0,
         public_items: 0,
+        clone_calls: 0,
+        functions: Vec::new(),
+        types: Vec::new(),
         explicit_imports: vec![ImportPath {
             segments: vec!["crate".into(), "model".into(), "Thing".into()],
             glob: false,
