@@ -269,10 +269,8 @@ mod tests {
     #[test]
     fn analyze_artifact_writer_covers_explicit_and_stdout_only_paths() {
         let result = result();
-        let root = std::env::temp_dir().join(format!(
-            "ferric-lens-main-artifacts-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("ferric-lens-main-artifacts-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let json = root.join("result.json");
