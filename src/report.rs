@@ -10,23 +10,25 @@ static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn result_digest(result: &AnalysisResult) -> Result<String, String> {
     let bytes = serde_json::to_vec(result)
-        .map_err(|error| format!("cannot serialize result for digest: {error}"))?;
+        .expect("analysis result schema contains only JSON-serializable values");
     Ok(blake3::hash(&bytes).to_hex().to_string())
 }
 
 pub fn json(result: &AnalysisResult) -> Result<String, String> {
     let digest = result_digest(result)?;
     let mut value =
-        serde_json::to_value(result).map_err(|error| format!("cannot serialize JSON: {error}"))?;
+        serde_json::to_value(result).expect("analysis result schema is JSON-serializable");
     let object = value
         .as_object_mut()
-        .ok_or_else(|| "analysis result did not serialize as a JSON object".to_owned())?;
+        .expect("analysis result serializes as a JSON object");
     object.insert("result_digest".into(), serde_json::Value::String(digest));
-    serde_json::to_string_pretty(&value).map_err(|error| format!("cannot serialize JSON: {error}"))
+    Ok(serde_json::to_string_pretty(&value)
+        .expect("analysis result JSON value is serializable"))
 }
 
 pub fn html(result: &AnalysisResult) -> String {
-    let result_digest = result_digest(result).unwrap_or_else(|_| "unavailable".into());
+    let result_digest =
+        result_digest(result).expect("analysis result digest serialization is infallible");
     let verdict = match result.verdict {
         GateVerdict::Pass => "PASS",
         GateVerdict::Regression => "REGRESSION",
