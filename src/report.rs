@@ -855,7 +855,7 @@ fn render_triage_summary(result: &AnalysisResult) -> String {
         ),
         count_phrase(summary.act_first, "act first", "act first"),
         count_phrase(summary.investigate, "investigate", "investigate"),
-        count_phrase(summary.observe, "observe", "observe"),
+        count_phrase(summary.observe, "observation", "observations"),
     )
 }
 
