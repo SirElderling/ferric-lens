@@ -688,7 +688,15 @@ pub fn source_contexts_for_findings(
         }
     }
 
-    contexts.sort();
+    contexts.sort_by(|left, right| {
+        (&left.subject, &left.metric)
+            .cmp(&(&right.subject, &right.metric))
+            .then(
+                source_context_display_priority(right)
+                    .cmp(&source_context_display_priority(left)),
+            )
+            .then(left.cmp(right))
+    });
     contexts.dedup();
     let mut counts = BTreeMap::<(String, String), usize>::new();
     contexts.retain(|context| {
@@ -701,6 +709,7 @@ pub fn source_contexts_for_findings(
         *count += 1;
         true
     });
+    contexts.sort();
     Ok(contexts)
 }
 
@@ -791,9 +800,12 @@ fn source_context_priority(metric: &str, span: LineSpan, text: &str) -> i32 {
     let line = text
         .lines()
         .nth(span.start.saturating_sub(1))
-        .unwrap_or_default()
-        .trim();
+        .unwrap_or_default();
+    source_line_priority(metric, line)
+}
 
+fn source_line_priority(metric: &str, line: &str) -> i32 {
+    let line = line.trim();
     match metric {
         "clone_call_syntax_sites" => {
             let mut score = 0;
@@ -826,6 +838,13 @@ fn source_context_priority(metric: &str, span: LineSpan, text: &str) -> i32 {
         }
         _ => 0,
     }
+}
+
+fn source_context_display_priority(context: &SourceContext) -> i32 {
+    source_line_priority(
+        &context.metric,
+        context.excerpt.lines().next().unwrap_or_default(),
+    )
 }
 
 fn source_context(
