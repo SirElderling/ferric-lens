@@ -226,16 +226,46 @@ fn load_metadata(root: &Path, profile: Option<&ProfileContext>) -> Result<Metada
         }
     }
 
-    let output = command
-        .output()
-        .map_err(|error| format!("could not execute cargo metadata: {error}"))?;
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(error) => return Err(format!("could not execute cargo metadata: {error}")),
+    };
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
     }
 
-    serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("invalid cargo metadata JSON: {error}"))
+    parse_metadata_output(&output.stdout)
+}
+
+
+fn parse_metadata_output(bytes: &[u8]) -> Result<Metadata, String> {
+    match serde_json::from_slice(bytes) {
+        Ok(metadata) => Ok(metadata),
+        Err(error) => Err(format!("invalid cargo metadata JSON: {error}")),
+    }
+}
+
+fn manifest_parent(manifest_path: &str) -> Result<PathBuf, String> {
+    let manifest = PathBuf::from(manifest_path);
+    match manifest.parent() {
+        Some(parent) => Ok(parent.to_path_buf()),
+        None => Err(format!(
+            "manifest has no parent directory: {}",
+            manifest.display()
+        )),
+    }
+}
+
+fn io_with_path<T>(
+    result: std::io::Result<T>,
+    action: &str,
+    path: &Path,
+) -> Result<T, String> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => Err(format!("cannot {action} {}: {error}", path.display())),
+    }
 }
 
 fn inventory_from_metadata(
@@ -259,11 +289,7 @@ fn inventory_from_metadata(
     let mut package_roots = BTreeMap::<PathBuf, String>::new();
 
     for package in &packages {
-        let manifest = PathBuf::from(&package.manifest_path);
-        let package_root = manifest
-            .parent()
-            .ok_or_else(|| format!("manifest has no parent directory: {}", manifest.display()))?
-            .to_path_buf();
+        let package_root = manifest_parent(&package.manifest_path)?;
 
         if !package_root.starts_with(&metadata_root) || !package_root.starts_with(root) {
             continue;
@@ -273,10 +299,7 @@ fn inventory_from_metadata(
 
     let mut raw_targets = Vec::<(String, &'static str, PathBuf, PathBuf, Vec<Dependency>)>::new();
     for package in &packages {
-        let manifest = PathBuf::from(&package.manifest_path);
-        let package_root = manifest
-            .parent()
-            .ok_or_else(|| format!("manifest has no parent directory: {}", manifest.display()))?;
+        let package_root = manifest_parent(&package.manifest_path)?;
 
         if !package_roots.contains_key(package_root) {
             continue;
@@ -477,9 +500,7 @@ fn collect_reachable_module(
         return Ok(());
     }
 
-    let canonical = source_path
-        .canonicalize()
-        .map_err(|error| format!("cannot resolve {}: {error}", source_path.display()))?;
+    let canonical = io_with_path(source_path.canonicalize(), "resolve", source_path)?;
     if !canonical.starts_with(repo_root) {
         limitations.push(format!(
             "{crate_name}: module source {} resolves outside the repository",
@@ -500,11 +521,10 @@ fn collect_reachable_module(
         return Ok(());
     }
 
-    let bytes = fs::read(&canonical)
-        .map_err(|error| format!("cannot read {}: {error}", canonical.display()))?;
+    let bytes = io_with_path(fs::read(&canonical), "read", &canonical)?;
     let relative = canonical
         .strip_prefix(repo_root)
-        .map_err(|_| format!("source escaped repository: {}", canonical.display()))?;
+        .expect("canonical source path was already verified inside repository");
     let relative_path = slash_path(relative);
 
     out.push(SourceFile {
@@ -537,7 +557,7 @@ fn collect_reachable_module(
 
     let parent = canonical
         .parent()
-        .ok_or_else(|| format!("module source has no parent: {}", canonical.display()))?;
+        .expect("canonical absolute source path always has a parent");
     let module_dir = if is_crate_root
         || canonical.file_name().and_then(|name| name.to_str()) == Some("mod.rs")
     {
@@ -545,7 +565,7 @@ fn collect_reachable_module(
     } else {
         let stem = canonical
             .file_stem()
-            .ok_or_else(|| format!("module source has no stem: {}", canonical.display()))?;
+            .expect("non-root module source always has a file stem");
         parent.join(stem)
     };
 
@@ -757,18 +777,17 @@ fn collect_rust_files(
         return Ok(());
     }
 
-    let entries = fs::read_dir(directory)
-        .map_err(|error| format!("cannot read {}: {error}", directory.display()))?;
-    let mut entries = entries
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("cannot read directory entry: {error}"))?;
+    let entries = io_with_path(fs::read_dir(directory), "read", directory)?;
+    let mut entries = io_with_path(
+        entries.collect::<Result<Vec<_>, _>>(),
+        "read directory entry",
+        directory,
+    )?;
     entries.sort_by_key(|entry| entry.file_name());
 
     for entry in entries {
         let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
+        let file_type = io_with_path(entry.file_type(), "inspect", &path)?;
 
         if file_type.is_symlink() {
             limitations.push(format!(
@@ -806,8 +825,7 @@ fn collect_rust_files(
             continue;
         }
 
-        let metadata = fs::metadata(&path)
-            .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
+        let metadata = io_with_path(fs::metadata(&path), "inspect", &path)?;
         if metadata.len() > MAX_SOURCE_FILE_BYTES {
             limitations.push(format!(
                 "fallback inventory skipped {} because it exceeds the 8 MiB source limit",
@@ -824,11 +842,10 @@ fn collect_rust_files(
             break;
         }
 
-        let bytes =
-            fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let bytes = io_with_path(fs::read(&path), "read", &path)?;
         let relative = path
             .strip_prefix(repo_root)
-            .map_err(|_| format!("source escaped repository: {}", path.display()))?;
+            .expect("fallback traversal only visits repository descendants");
         let relative_path = slash_path(relative);
         let module_path = module_path_from_relative(&relative_path);
 
