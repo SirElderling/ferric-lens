@@ -38,6 +38,7 @@ struct SnapshotAnalysis {
     cargo_resolution_digest: Option<String>,
     auxiliary_targets: input::AuxiliaryTargetSummary,
     workspace_aliases: input::WorkspaceAliases,
+    resolved_features_by_crate: BTreeMap<String, Vec<String>>,
     source_digests: BTreeMap<String, String>,
     modules: Vec<ModuleMetrics>,
     correctness_findings: Vec<model::Finding>,
@@ -501,6 +502,7 @@ fn finding_source_contexts(
         &snapshot.source_digests,
         findings,
         &profile.cfg,
+        &snapshot.resolved_features_by_crate,
     )?;
     let requested = findings
         .iter()
@@ -638,19 +640,24 @@ fn analyze_snapshot(
         })
         .collect::<BTreeMap<_, _>>();
     let workspace_aliases = inventory.workspace_aliases.clone();
+    let resolved_features_by_crate = inventory.resolved_features_by_crate.clone();
     let fact_cache = cache::RawFactCache::new(cache_root);
     let mut modules = Vec::with_capacity(inventory.sources.len());
     let mut parse_failures = 0usize;
 
     for source in &inventory.sources {
-        if let Some(module) = fact_cache.load(source, profile.cfg.digest()) {
+        let cfg = resolved_features_by_crate
+            .get(&source.crate_name)
+            .map(|features| profile.cfg.with_features(features))
+            .unwrap_or_else(|| profile.cfg.clone());
+        if let Some(module) = fact_cache.load(source, cfg.digest()) {
             modules.push(module);
             continue;
         }
 
-        match extract::extract(source, &profile.cfg) {
+        match extract::extract(source, &cfg) {
             Ok(module) => {
-                fact_cache.store(source, profile.cfg.digest(), &module);
+                fact_cache.store(source, cfg.digest(), &module);
                 modules.push(module);
             }
             Err(error) => {
@@ -678,6 +685,7 @@ fn analyze_snapshot(
         cargo_resolution_digest: inventory.cargo_resolution_digest,
         auxiliary_targets: inventory.auxiliary_targets,
         workspace_aliases,
+        resolved_features_by_crate,
         source_digests,
         modules,
         correctness_findings: correctness.findings,
