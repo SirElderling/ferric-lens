@@ -42,12 +42,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build release binary
-        run: |
-          cargo generate-lockfile
-          cargo build --release --locked
-          echo "-----BEGIN GENERATED CARGO.LOCK-----"
-          cat Cargo.lock
-          echo "-----END GENERATED CARGO.LOCK-----"
+        run: cargo build --release --locked
 
       - name: Run performance acceptance
         env:
