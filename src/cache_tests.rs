@@ -333,7 +333,7 @@ fn cache_candidate_ignores_a_dangling_symlink_deterministically() {
         .unwrap()
         .unwrap();
 
-    assert!(super::cache_entry_candidate(entry).is_none());
+    assert!(super::cache_file_from_metadata(entry.path(), fs::metadata(entry.path())).is_none());
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -353,7 +353,7 @@ fn cache_removal_failure_preserves_remaining_size() {
     fs::set_permissions(&directory, permissions).unwrap();
 
     let mut remaining = 10;
-    super::remove_cache_entry(&path, 4, &mut remaining);
+    super::remove_cache_file(&path, 4, &mut remaining);
 
     let mut permissions = fs::metadata(&directory).unwrap().permissions();
     permissions.set_mode(0o755);
