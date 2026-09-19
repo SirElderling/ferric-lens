@@ -354,6 +354,12 @@ fn auxiliary_target_summary(metadata: &Metadata) -> AuxiliaryTargetSummary {
     summary
 }
 
+fn cargo_input_label(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .map(slash_path)
+        .unwrap_or_else(|_| path.to_string_lossy().into_owned())
+}
+
 fn cargo_input_snapshot(
     root: &Path,
     metadata: Option<&Metadata>,
@@ -380,10 +386,7 @@ fn cargo_input_snapshot(
     let mut entries = Vec::new();
     let mut hasher = blake3::Hasher::new();
     for path in paths {
-        let label = path
-            .strip_prefix(root)
-            .map(slash_path)
-            .unwrap_or_else(|_| path.to_string_lossy().into_owned());
+        let label = cargo_input_label(root, &path);
         let bytes = match fs::read(&path) {
             Ok(bytes) => Some(bytes),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
