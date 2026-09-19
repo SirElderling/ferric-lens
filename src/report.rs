@@ -1246,6 +1246,49 @@ mod tests {
     }
 
     #[test]
+    fn human_report_ordering_covers_stable_tiebreakers_and_ranks() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        assert_eq!(super::priority_rank(&Priority::ActFirst), 0);
+        assert_eq!(super::priority_rank(&Priority::Investigate), 1);
+        assert_eq!(super::priority_rank(&Priority::Observe), 2);
+        assert_eq!(super::delta_rank(&DeltaStatus::Worsened), 0);
+        assert_eq!(super::delta_rank(&DeltaStatus::New), 1);
+        assert_eq!(super::delta_rank(&DeltaStatus::Current), 2);
+        assert_eq!(super::delta_rank(&DeltaStatus::Unchanged), 3);
+        assert_eq!(super::delta_rank(&DeltaStatus::Unknown), 4);
+
+        let mut result = minimal_result();
+        for (fingerprint, rule, subject) in [
+            ("b", "structure.z", "demo::b"),
+            ("a-z", "structure.z", "demo::a"),
+            ("a-a", "structure.a", "demo::a"),
+        ] {
+            result.findings.push(Finding {
+                fingerprint: fingerprint.into(),
+                rule: rule.into(),
+                subject: subject.into(),
+                identity: subject.into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "candidate".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            });
+        }
+
+        let rendered = html(&result);
+
+        assert!(rendered.find("structure.a").unwrap() < rendered.find("structure.z").unwrap());
+        assert!(rendered.find("demo::a").unwrap() < rendered.find("demo::b").unwrap());
+    }
+
+    #[test]
     fn write_reports_parent_creation_failure() {
         use std::fs;
 
