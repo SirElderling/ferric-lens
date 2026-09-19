@@ -1596,7 +1596,7 @@ mod tests {
 
         let rendered = html(&result);
         let attention = rendered
-            .split("<h2>Repository overview</h2>")
+            .split("<details class=\"analysis-details\">\n<summary><strong>Observations</strong>")
             .next()
             .expect("attention section");
 
