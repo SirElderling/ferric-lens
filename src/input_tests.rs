@@ -9,8 +9,7 @@ use super::{
     acquire_inventory, collect_reachable_module, collect_rust_files, collect_target_roots,
     finalize_inventory, inventory_from_metadata, module_path_from_relative, rust_name, Dependency,
     Metadata, Package, Resolve, ResolveNode, SourceBudget, SourceFile, Target, TargetRoot,
-    WorkspaceAliases,
-    MAX_SNAPSHOT_SOURCE_BYTES,
+    WorkspaceAliases, MAX_SNAPSHOT_SOURCE_BYTES,
 };
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -154,7 +153,8 @@ fn library_and_binary_with_same_target_name_remain_distinct() {
         resolve: None,
     };
 
-    let (sources, aliases, _, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, _, limitations) =
+        inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert!(limitations.is_empty());
     assert!(sources
@@ -691,7 +691,8 @@ fn workspace_metadata_builds_renamed_dependency_aliases_and_skips_non_production
         resolve: None,
     };
 
-    let (sources, aliases, _, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, _, limitations) =
+        inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert!(limitations.is_empty());
     assert_eq!(sources.len(), 2);
@@ -868,7 +869,8 @@ fn metadata_inventory_skips_external_packages_invalid_targets_and_non_workspace_
         resolve: None,
     };
 
-    let (sources, aliases, _, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, _, limitations) =
+        inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert_eq!(sources.len(), 1);
     assert_eq!(sources[0].relative_path, "src/lib.rs");
@@ -1259,7 +1261,8 @@ fn binary_only_package_has_no_implicit_library_alias() {
         resolve: None,
     };
 
-    let (sources, aliases, _, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, _, limitations) =
+        inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert_eq!(sources.len(), 1);
     assert!(aliases.get("demo").unwrap().is_empty());
@@ -1929,7 +1932,13 @@ fn verified_inventory_propagates_source_stability_failure() {
 
     let error = super::finalize_verified_inventory(
         &root,
-        (vec![source], WorkspaceAliases::new(), BTreeMap::new(), true, None),
+        (
+            vec![source],
+            WorkspaceAliases::new(),
+            BTreeMap::new(),
+            true,
+            None,
+        ),
         &cargo_inputs,
         None,
         super::AuxiliaryTargetSummary::default(),
@@ -2039,7 +2048,11 @@ fn workspace_member_manifest_change_invalidates_captured_cargo_snapshot() {
     let root = temp_root();
     let member = root.join("crates/member");
     fs::create_dir_all(&member).unwrap();
-    fs::write(root.join("Cargo.toml"), "[workspace]\nmembers=['crates/member']\n").unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers=['crates/member']\n",
+    )
+    .unwrap();
     fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
     fs::write(
         member.join("Cargo.toml"),
