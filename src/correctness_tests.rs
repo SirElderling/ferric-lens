@@ -166,7 +166,7 @@ fn detects_lossy_git_path_decoding() {
         "src/git.rs",
         r#"
 fn run() {
-    let output = Command::new("git").output()?;
+    let output = Command::new("git").args(["status", "-z"]).output()?;
     let record = String::from_utf8_lossy(record).into_owned();
     let path = String::from_utf8_lossy(path).into_owned();
 }
@@ -285,4 +285,122 @@ fn generated() {
     )];
 
     assert!(scan(&sources).findings.is_empty());
+}
+
+
+#[test]
+fn correctness_detectors_are_not_tied_to_ferric_lens_variable_names() {
+    let sources = vec![
+        source(
+            "src/cargo_probe.rs",
+            r#"
+fn inspect_manifest_graph() {
+    command.args(["metadata", "--no-deps"]);
+}
+fn evaluate_cfg(selector: &str, enabled_options: &Set) {
+    if selector == "feature" && enabled_options.contains("fast") {}
+}
+"#,
+        ),
+        source(
+            "src/platform.rs",
+            r#"
+fn identity() {
+    let resolved_target = resolve_platform();
+    let display_target = requested.unwrap_or("host");
+    let cache_key = format!("target={display_target};features=default");
+}
+fn compatible(left: &Config, right: &Config) -> bool {
+    left.target == right.target
+}
+"#,
+        ),
+        source(
+            "src/cli.rs",
+            r#"
+fn run(machine: bool) {
+    let result = analyze();
+    artifact::write(&json, serialize(&result));
+    artifact::write(&html, render(&result));
+    println!("{}", machine_output(&result, machine));
+}
+"#,
+        ),
+        source(
+            "src/snapshot.rs",
+            r#"
+fn root_inputs(root: &Path) {
+    for file in ["Cargo.toml", "Cargo.lock"] {}
+}
+fn member_state(pkg: &Package) {
+    let manifest = pkg.manifest_path.clone();
+    let bytes = fs::read(manifest)?;
+}
+fn check_snapshot(root: &Path) {
+    root_inputs(root);
+}
+"#,
+        ),
+        source(
+            "src/repository.rs",
+            r#"
+fn paths() {
+    let bytes = Command::new("git").args(["ls-files", "-z"]).output()?;
+    let entry = String::from_utf8_lossy(entry).into_owned();
+}
+"#,
+        ),
+    ];
+
+    let result = scan(&sources);
+    let rules = result
+        .findings
+        .iter()
+        .map(|finding| finding.rule.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert!(rules.contains("correctness.cargo_feature_resolution_without_resolve"));
+    assert!(rules.contains("correctness.symbolic_target_identity"));
+    assert!(rules.contains("correctness.stdout_mode_unconditional_artifacts"));
+    assert!(rules.contains("correctness.workspace_manifest_snapshot_gap"));
+    assert!(rules.contains("correctness.lossy_git_path_decoding"));
+}
+
+#[test]
+fn workspace_snapshot_detector_does_not_flag_manifest_complete_capture_function() {
+    let sources = vec![source(
+        "src/snapshot.rs",
+        r#"
+fn cargo_inputs(root: &Path, package: &Package) {
+    let mut paths = BTreeSet::from([root.join("Cargo.toml"), root.join("Cargo.lock")]);
+    paths.insert(PathBuf::from(&package.manifest_path));
+}
+fn verify_snapshot() {
+    cargo_inputs(root, package);
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "correctness.workspace_manifest_snapshot_gap"));
+}
+
+#[test]
+fn lossy_non_path_git_text_does_not_trigger_path_risk_without_nul_path_stream() {
+    let sources = vec![source(
+        "src/git.rs",
+        r#"
+fn command_error() {
+    let output = Command::new("git").arg("status").output()?;
+    let message = String::from_utf8_lossy(&output.stderr);
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "correctness.lossy_git_path_decoding"));
 }
