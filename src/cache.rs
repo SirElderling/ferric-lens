@@ -128,7 +128,6 @@ impl RawFactCache {
     }
 }
 
-
 fn cache_file(entry: fs::DirEntry) -> Option<(PathBuf, u64)> {
     let path = entry.path();
     cache_file_from_metadata(path, entry.metadata())

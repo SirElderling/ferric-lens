@@ -538,16 +538,13 @@ fn git_execution_reports_missing_working_directory() {
     assert!(error.contains("could not execute git"));
 }
 
-
 #[test]
 fn baseline_selection_helper_propagates_merge_base_parse_failures() {
-    assert!(super::baseline_selection_from_output(
-        "main".into(),
-        "a".repeat(40),
-        ""
-    )
-    .unwrap_err()
-    .contains("exactly one usable merge base"));
+    assert!(
+        super::baseline_selection_from_output("main".into(), "a".repeat(40), "")
+            .unwrap_err()
+            .contains("exactly one usable merge base")
+    );
 
     let selection = super::baseline_selection_from_output(
         "main".into(),
@@ -562,14 +559,11 @@ fn baseline_selection_helper_propagates_merge_base_parse_failures() {
 fn finalize_changes_propagates_parse_untracked_and_rename_failures() {
     let repo = Repo::new("finalize-changes-errors");
 
-    assert!(super::finalize_changes(
-        &repo.root,
-        "HEAD",
-        &["M".into()],
-        Ok(Vec::new()),
-    )
-    .unwrap_err()
-    .contains("truncated path record"));
+    assert!(
+        super::finalize_changes(&repo.root, "HEAD", &["M".into()], Ok(Vec::new()),)
+            .unwrap_err()
+            .contains("truncated path record")
+    );
 
     assert_eq!(
         super::finalize_changes(&repo.root, "HEAD", &[], Err("untracked failed".into()))
@@ -577,19 +571,11 @@ fn finalize_changes_propagates_parse_untracked_and_rename_failures() {
         "untracked failed"
     );
 
-    let records = vec![
-        "D".into(),
-        "old.rs".into(),
-        "A".into(),
-        "new.rs".into(),
-    ];
-    assert!(super::finalize_changes(
-        &repo.root,
-        "definitely-missing",
-        &records,
-        Ok(Vec::new()),
-    )
-    .is_err());
+    let records = vec!["D".into(), "old.rs".into(), "A".into(), "new.rs".into()];
+    assert!(
+        super::finalize_changes(&repo.root, "definitely-missing", &records, Ok(Vec::new()),)
+            .is_err()
+    );
 }
 
 #[test]
@@ -601,15 +587,14 @@ fn exact_rename_detection_propagates_hash_errors_and_ambiguous_hashes() {
     let mut missing_added = ChangeSet::default();
     missing_added.deleted.insert("old.rs".into());
     missing_added.added.insert("missing.rs".into());
-    assert!(super::detect_exact_worktree_renames(
-        &repo.root,
-        &baseline,
-        &mut missing_added,
-    )
-    .is_err());
+    assert!(
+        super::detect_exact_worktree_renames(&repo.root, &baseline, &mut missing_added,).is_err()
+    );
 
     let mut ambiguous = ChangeSet::default();
-    ambiguous.deleted.extend(["old1.rs".into(), "old2.rs".into()]);
+    ambiguous
+        .deleted
+        .extend(["old1.rs".into(), "old2.rs".into()]);
     ambiguous.added.extend(["new1.rs".into(), "new2.rs".into()]);
     let deleted_by_oid = std::collections::BTreeMap::from([(
         "same".into(),
@@ -699,15 +684,9 @@ fn materialize_worktree_reports_stale_non_directory_path() {
     fs::remove_file(path).unwrap();
 }
 
-
 #[test]
 fn baseline_selection_helper_propagates_merge_base_shape_errors() {
-    assert!(super::baseline_selection_from_merge_bases(
-        "main".into(),
-        "a".repeat(40),
-        ""
-    )
-    .is_err());
+    assert!(super::baseline_selection_from_merge_bases("main".into(), "a".repeat(40), "").is_err());
 }
 
 #[test]

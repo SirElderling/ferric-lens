@@ -460,7 +460,6 @@ fn public_acceptance_wrappers_record_an_exact_current_finding() {
     );
 }
 
-
 fn baseline_then_break_git(
     baseline_root: &Path,
     repo_root: &Path,

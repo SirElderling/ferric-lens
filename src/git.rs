@@ -517,19 +517,13 @@ fn automatic_target_candidates(root: &Path) -> Vec<(String, bool)> {
     candidates
 }
 
-fn append_optional_base_candidate(
-    candidates: &mut Vec<(String, bool)>,
-    base: Option<&str>,
-) {
+fn append_optional_base_candidate(candidates: &mut Vec<(String, bool)>, base: Option<&str>) {
     if let Some(base) = base {
         append_base_candidates(candidates, base);
     }
 }
 
-fn append_symbolic_candidate(
-    candidates: &mut Vec<(String, bool)>,
-    symbolic: Option<&str>,
-) {
+fn append_symbolic_candidate(candidates: &mut Vec<(String, bool)>, symbolic: Option<&str>) {
     let Some(symbolic) = symbolic.map(str::trim).filter(|value| !value.is_empty()) else {
         return;
     };

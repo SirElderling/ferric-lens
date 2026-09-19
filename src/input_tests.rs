@@ -1166,7 +1166,6 @@ fn directory_entry_collection_maps_iterator_errors() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn inventory_and_acquisition_propagate_fallback_io_failures() {
     let root = temp_root();
@@ -1187,12 +1186,10 @@ fn inventory_and_acquisition_propagate_fallback_io_failures() {
         workspace_root: root.to_string_lossy().into_owned(),
     };
     assert!(super::acquire_inventory(&not_directory, Ok(bad_metadata), None).is_err());
-    assert!(super::acquire_inventory(
-        &not_directory,
-        Err("metadata unavailable".into()),
-        None,
-    )
-    .is_err());
+    assert!(
+        super::acquire_inventory(&not_directory, Err("metadata unavailable".into()), None,)
+            .is_err()
+    );
 
     fs::remove_dir_all(root).unwrap();
 }

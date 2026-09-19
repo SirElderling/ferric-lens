@@ -299,7 +299,6 @@ fn eviction_ignores_entries_whose_metadata_cannot_be_read() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn cache_metadata_and_remove_failures_are_non_fatal() {
     let missing = temp_root().join("missing");
@@ -318,7 +317,6 @@ fn cache_metadata_and_remove_failures_are_non_fatal() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[cfg(unix)]
 #[test]
 fn cache_candidate_ignores_a_dangling_symlink_deterministically() {
@@ -329,7 +327,11 @@ fn cache_candidate_ignores_a_dangling_symlink_deterministically() {
     fs::create_dir_all(&cache.directory).unwrap();
     let link = cache.directory.join("dangling.json");
     symlink(cache.directory.join("missing"), &link).unwrap();
-    let entry = fs::read_dir(&cache.directory).unwrap().next().unwrap().unwrap();
+    let entry = fs::read_dir(&cache.directory)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
 
     assert!(super::cache_entry_candidate(entry).is_none());
 
