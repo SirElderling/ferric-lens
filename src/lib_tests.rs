@@ -139,7 +139,6 @@ fn snapshot_capabilities_reflect_complete_and_partial_syntax_and_inventory() {
         .any(|capability| capability.detail.as_deref()
             == Some("2 Rust source file(s) could not be parsed")));
 }
-
 static REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 struct Repo {
@@ -245,15 +244,19 @@ fn baseline_materialization_failure_is_reported_as_inconclusive() {
 fn baseline_analysis_failure_is_reported_as_inconclusive() {
     let repo = Repo::new("baseline-analysis-failure");
 
-    let result = super::analyze_internal_with(
+    let ops = super::AnalysisOps {
+        materialize_baseline: crate::git::materialize_worktree,
+        analyze_baseline: baseline_failure,
+        sample_history: crate::git::sample_history,
+    };
+    let result = super::analyze_internal_with_ops(
         &repo.root,
         Some("HEAD"),
         false,
         None,
         None,
         &[],
-        baseline_failure,
-        crate::git::sample_history,
+        &ops,
     )
     .unwrap();
 
@@ -266,15 +269,19 @@ fn unavailable_history_degrades_capability_without_changing_gate_semantics() {
     let repo = Repo::new("history-failure");
     repo.write("src/lib.rs", "pub fn stable() -> usize { 2 }\n");
 
-    let result = super::analyze_internal_with(
+    let ops = super::AnalysisOps {
+        materialize_baseline: crate::git::materialize_worktree,
+        analyze_baseline: super::analyze_snapshot,
+        sample_history: history_failure,
+    };
+    let result = super::analyze_internal_with_ops(
         &repo.root,
         Some("HEAD"),
         true,
         None,
         None,
         &[],
-        super::analyze_snapshot,
-        history_failure,
+        &ops,
     )
     .unwrap();
 
@@ -296,15 +303,19 @@ fn truncated_history_is_explicitly_partial() {
     let repo = Repo::new("history-truncated");
     repo.write("src/lib.rs", "pub fn stable() -> usize { 2 }\n");
 
-    let result = super::analyze_internal_with(
+    let ops = super::AnalysisOps {
+        materialize_baseline: crate::git::materialize_worktree,
+        analyze_baseline: super::analyze_snapshot,
+        sample_history: truncated_history,
+    };
+    let result = super::analyze_internal_with_ops(
         &repo.root,
         Some("HEAD"),
         true,
         None,
         None,
         &[],
-        super::analyze_snapshot,
-        truncated_history,
+        &ops,
     )
     .unwrap();
 
