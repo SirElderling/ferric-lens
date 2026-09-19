@@ -40,6 +40,14 @@ class PerformanceAcceptanceTests(unittest.TestCase):
             self.assertEqual(module.directory_size(root), 8)
             self.assertEqual(module.directory_size(root / "missing"), 0)
 
+    def test_wait4_usage_rss_provides_a_final_sample_floor(self):
+        module = load_module()
+
+        class Usage:
+            ru_maxrss = 1234
+
+        self.assertGreater(module._usage_max_rss_kib(Usage()), 0)
+
     def test_measure_command_records_exit_wall_cpu_and_output(self):
         module = load_module()
         with tempfile.TemporaryDirectory() as directory:
