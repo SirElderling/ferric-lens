@@ -298,3 +298,22 @@ fn eviction_ignores_entries_whose_metadata_cannot_be_read() {
     assert!(fs::symlink_metadata(cache.directory.join("dangling.json")).is_ok());
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn cache_metadata_and_remove_failures_are_non_fatal() {
+    let missing = temp_root().join("missing");
+    let metadata_error = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
+    assert!(super::cache_file_from_metadata(missing.clone(), Err(metadata_error)).is_none());
+
+    let mut remaining = 10;
+    super::remove_cache_file(&missing, 4, &mut remaining);
+    assert_eq!(remaining, 10);
+
+    let root = temp_root();
+    let file = root.join("entry");
+    fs::write(&file, "x").unwrap();
+    super::remove_cache_file(&file, 4, &mut remaining);
+    assert_eq!(remaining, 6);
+    fs::remove_dir_all(root).unwrap();
+}
