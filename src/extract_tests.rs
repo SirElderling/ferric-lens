@@ -412,3 +412,22 @@ fn unsupported_syn_item_variants_have_no_attributes_or_public_surface() {
     assert!(super::item_attributes(&item).is_empty());
     assert!(!super::is_public(&item));
 }
+
+
+#[test]
+fn gate_limitation_preserves_the_first_reason() {
+    let cfg = host();
+    let mut visitor = super::MetricsVisitor::new(&cfg);
+
+    visitor.limit_gate("first");
+    visitor.limit_gate("second");
+
+    assert_eq!(visitor.gate_limitation.as_deref(), Some("first"));
+}
+
+#[test]
+fn non_boolean_binary_expressions_do_not_count_as_decisions() {
+    let metrics = extract(&source("fn f() { let _ = 1 + 2; }"), &host()).unwrap();
+
+    assert_eq!(metrics.decision_sites, 0);
+}
