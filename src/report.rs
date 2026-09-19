@@ -933,12 +933,9 @@ mod tests {
         assert!(rendered.contains("struct · public"));
     }
 
-
     #[test]
     fn report_exposes_human_triage_labels_summary_and_module_navigation() {
-        use crate::model::{
-            DeltaStatus, EvidenceClass, Finding, ModuleMetrics, Priority,
-        };
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, ModuleMetrics, Priority};
 
         let mut result = minimal_result();
         result.modules = vec![ModuleMetrics {
@@ -1016,7 +1013,12 @@ mod tests {
 
         let mut result = minimal_result();
         for (fingerprint, subject, priority, delta) in [
-            ("observe", "demo::observe", Priority::Observe, DeltaStatus::Current),
+            (
+                "observe",
+                "demo::observe",
+                Priority::Observe,
+                DeltaStatus::Current,
+            ),
             (
                 "investigate-current",
                 "demo::investigate-current",
