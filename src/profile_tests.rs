@@ -25,3 +25,18 @@ fn rustc_host_parser_reports_command_failure_and_missing_host() {
         .unwrap_err()
         .contains("did not report a host target"));
 }
+
+#[cfg(unix)]
+#[test]
+fn rustc_host_parser_reports_empty_stderr_failure_status() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let output = std::process::Output {
+        status: std::process::ExitStatus::from_raw(1 << 8),
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    };
+
+    let error = parse_rustc_host_output(&output).unwrap_err();
+    assert!(error.contains("failed with status"));
+}
