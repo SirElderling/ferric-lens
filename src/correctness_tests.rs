@@ -487,7 +487,6 @@ fn verify_stable_inputs() {
         .any(|finding| finding.rule == "correctness.workspace_manifest_snapshot_gap"));
 }
 
-
 #[test]
 fn manifest_snapshot_detector_requires_verifier_to_reference_root_only_digest() {
     let sources = vec![source(
