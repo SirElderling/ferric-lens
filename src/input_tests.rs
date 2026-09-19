@@ -731,3 +731,248 @@ fn path_helpers_handle_non_src_and_nested_paths() {
         "a/b"
     );
 }
+
+
+#[test]
+fn metadata_inventory_failure_falls_back_without_losing_source_visibility() {
+    let root = temp_root();
+    fs::write(root.join("src/fallback.rs"), "pub fn fallback() {}").unwrap();
+    let broken_target = root.join("src/broken.rs");
+    fs::create_dir_all(&broken_target).unwrap();
+
+    let package_id = "broken-id".to_owned();
+    let metadata = Metadata {
+        packages: vec![Package {
+            name: "broken".into(),
+            id: package_id.clone(),
+            manifest_path: root.join("Cargo.toml").to_string_lossy().into_owned(),
+            targets: vec![Target {
+                name: "broken".into(),
+                kind: vec!["lib".into()],
+                src_path: broken_target.to_string_lossy().into_owned(),
+            }],
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec![package_id],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+
+    let (sources, aliases, complete, detail) =
+        super::inventory_from_metadata_result(&root, None, Ok(metadata)).unwrap();
+
+    assert!(!complete);
+    assert!(aliases.is_empty());
+    assert!(sources
+        .iter()
+        .any(|source| source.relative_path == "src/fallback.rs"));
+    assert!(detail
+        .as_deref()
+        .unwrap()
+        .contains("Cargo metadata inventory failed"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn final_inventory_deduplicates_source_identity_and_hashes_workspace_aliases() {
+    let root = temp_root();
+    let source = super::SourceFile {
+        crate_name: "demo".into(),
+        module_path: "engine".into(),
+        relative_path: "src/engine.rs".into(),
+        bytes: b"pub fn run() {}".to_vec(),
+    };
+    let aliases = super::WorkspaceAliases::from([(
+        "demo".into(),
+        std::collections::BTreeMap::from([("shared".into(), "shared_crate".into())]),
+    )]);
+
+    let first = super::finalize_inventory(
+        vec![source.clone(), source],
+        aliases.clone(),
+        true,
+        None,
+    );
+    let second = super::finalize_inventory(
+        first.sources.clone(),
+        super::WorkspaceAliases::new(),
+        true,
+        None,
+    );
+
+    assert_eq!(first.sources.len(), 1);
+    assert_eq!(first.workspace_aliases, aliases);
+    assert_ne!(first.content_digest, second.content_digest);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn metadata_inventory_skips_outside_packages_invalid_targets_and_non_workspace_dependencies() {
+    let root = temp_root();
+    let inside = root.join("crates/inside");
+    fs::create_dir_all(inside.join("src")).unwrap();
+    fs::write(inside.join("Cargo.toml"), "[package]\nname='inside'\nversion='0.1.0'\n").unwrap();
+    fs::write(inside.join("src/lib.rs"), "pub fn inside() {}").unwrap();
+    fs::write(inside.join("src/not-rust.txt"), "not rust").unwrap();
+
+    let outside = std::env::temp_dir().join(format!(
+        "ferric-lens-outside-package-{}-{}",
+        std::process::id(),
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(outside.join("src")).unwrap();
+    fs::write(outside.join("Cargo.toml"), "[package]\nname='outside'\nversion='0.1.0'\n").unwrap();
+    fs::write(outside.join("src/lib.rs"), "pub fn outside() {}").unwrap();
+
+    let inside_id = "inside-id".to_owned();
+    let outside_id = "outside-id".to_owned();
+    let metadata = Metadata {
+        packages: vec![
+            Package {
+                name: "inside".into(),
+                id: inside_id.clone(),
+                manifest_path: inside.join("Cargo.toml").to_string_lossy().into_owned(),
+                targets: vec![
+                    Target {
+                        name: "inside".into(),
+                        kind: vec!["lib".into()],
+                        src_path: inside.join("src/lib.rs").to_string_lossy().into_owned(),
+                    },
+                    Target {
+                        name: "invalid".into(),
+                        kind: vec!["bin".into()],
+                        src_path: inside.join("src/not-rust.txt").to_string_lossy().into_owned(),
+                    },
+                ],
+                dependencies: vec![
+                    super::Dependency {
+                        name: "registry".into(),
+                        rename: None,
+                        path: None,
+                    },
+                    super::Dependency {
+                        name: "missing-local".into(),
+                        rename: None,
+                        path: Some(root.join("crates/missing").to_string_lossy().into_owned()),
+                    },
+                ],
+            },
+            Package {
+                name: "outside".into(),
+                id: outside_id.clone(),
+                manifest_path: outside.join("Cargo.toml").to_string_lossy().into_owned(),
+                targets: vec![Target {
+                    name: "outside".into(),
+                    kind: vec!["lib".into()],
+                    src_path: outside.join("src/lib.rs").to_string_lossy().into_owned(),
+                }],
+                dependencies: Vec::new(),
+            },
+        ],
+        workspace_members: vec![inside_id, outside_id],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+
+    let (sources, aliases, limitations) =
+        inventory_from_metadata(&root, metadata, None).unwrap();
+
+    assert!(limitations.is_empty());
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].crate_name, "inside");
+    assert!(aliases.get("inside").unwrap().is_empty());
+
+    fs::remove_dir_all(outside).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn cfg_state_covers_malformed_and_known_true_attributes() {
+    use crate::{cfg::HostCfg, model::AnalysisProfile, profile::ProfileContext};
+
+    let profile = ProfileContext {
+        public: AnalysisProfile {
+            id: "test".into(),
+            target: "host".into(),
+            resolved_target: "test-target".into(),
+            features: Vec::new(),
+            target_cfg: Vec::new(),
+        },
+        cfg: HostCfg::test(&["unix"]),
+    };
+
+    let malformed = syn::parse_file("#[cfg()] mod child;").unwrap();
+    let syn::Item::Mod(malformed_module) = &malformed.items[0] else {
+        panic!("expected module");
+    };
+    assert_eq!(
+        super::module_cfg_state(&malformed_module.attrs, Some(&profile)),
+        crate::cfg::Truth::Unknown
+    );
+
+    let enabled = syn::parse_file("#[cfg(unix)] mod child;").unwrap();
+    let syn::Item::Mod(enabled_module) = &enabled.items[0] else {
+        panic!("expected module");
+    };
+    assert_eq!(
+        super::module_cfg_state(&enabled_module.attrs, Some(&profile)),
+        crate::cfg::Truth::True
+    );
+}
+
+#[test]
+fn fallback_collection_honors_preexhausted_and_newly_exhausted_budgets() {
+    let root = temp_root();
+    fs::write(root.join("src/one.rs"), "pub fn one() {}").unwrap();
+    let target = root.join("target");
+
+    let mut already_exhausted = SourceBudget {
+        used: 0,
+        exhausted: true,
+    };
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    super::collect_rust_files(
+        &root,
+        &root,
+        &target,
+        "demo",
+        &mut already_exhausted,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap();
+    assert!(sources.is_empty());
+
+    let mut exhausted_on_file = SourceBudget {
+        used: super::MAX_SNAPSHOT_SOURCE_BYTES,
+        exhausted: false,
+    };
+    super::collect_rust_files(
+        &root,
+        &root,
+        &target,
+        "demo",
+        &mut exhausted_on_file,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap();
+    assert!(limitations
+        .iter()
+        .any(|detail| detail.contains("fallback source input exceeds")));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn fallback_inventory_reports_unreadable_root_shape() {
+    let root = temp_root();
+    let file = root.join("not-a-directory");
+    fs::write(&file, "plain file").unwrap();
+
+    let error = super::fallback_inventory(&file).unwrap_err();
+
+    assert!(error.contains("cannot read"));
+    fs::remove_dir_all(root).unwrap();
+}
