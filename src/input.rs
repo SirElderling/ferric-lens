@@ -126,7 +126,7 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
     let cargo_input_digest = cargo_input_digest(&root)?;
     let auxiliary_targets = metadata
         .as_ref()
-        .map(|metadata| auxiliary_target_summary(metadata))
+        .map(auxiliary_target_summary)
         .unwrap_or_default();
     let cargo_resolution_digest = metadata
         .as_ref()
@@ -135,6 +135,7 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
         .transpose()?;
 
     let acquired = acquire_inventory(&root, metadata, profile)?;
+    verify_stable_inputs(&root, &acquired.0, &cargo_input_digest)?;
     let mut inventory = finalize_inventory(acquired);
     let mut hasher = blake3::Hasher::new();
     hasher.update(inventory.content_digest.as_bytes());
