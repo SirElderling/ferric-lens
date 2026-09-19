@@ -282,10 +282,15 @@ fn finding_guidance(finding: &Finding) -> FindingGuidance {
             why_care: "A disproportionate amount of branching is concentrated in this module relative to the small comparable population. That can make behavior harder to reason about even when the repository is too small for a stronger outlier claim.",
             if_ignored: "Additional branching can make future behavior changes harder to understand and test, especially if unrelated responsibilities collect in the same area.",
         },
-        "runtime.clone_syntax_outlier" | "runtime.small_population_clone_concentration" => FindingGuidance {
-            title: "Repeated copying may be worth measuring",
-            why_care: "This module contains unusually many observed .clone() calls. Some clones are cheap and intentional; others copy owned data, so this is a prompt to inspect what is being copied and how often the code runs.",
-            if_ignored: "If the cloned values are large or this path executes frequently, unnecessary copying can consume memory bandwidth or allocation work. Ferric Lens has not established that this is happening.",
+        "runtime.clone_for_iteration_candidate" => FindingGuidance {
+            title: "A collection is cloned just to iterate it",
+            why_care: "Ferric Lens observed a clone used directly as a for-loop iterator. That is more specific than clone frequency: the copy exists immediately before iteration and may be avoidable when borrowing is sufficient.",
+            if_ignored: "If the collection is large or the path runs often, the extra copy can add allocation and memory traffic. Ownership requirements may still make the clone intentional.",
+        },
+        "runtime.clone_then_mutate_candidate" => FindingGuidance {
+            title: "A whole value is copied into a mutable working copy",
+            why_care: "Ferric Lens observed a cloned value assigned to a mutable local and then changed with a known mutating operation. This can be appropriate, but it is a focused place to check whether only a smaller subset needed ownership.",
+            if_ignored: "Copying a large aggregate before filtering or mutating a small part of it can create avoidable allocation and memory traffic. Ferric Lens has not measured runtime cost.",
         },
         "build.rebuild_exposure_candidate" | "build.small_population_rebuild_concentration" => FindingGuidance {
             title: "Changes here may affect many parts of the repository",
