@@ -921,6 +921,241 @@ mod tests {
     }
 
     #[test]
+    fn human_report_explains_why_findings_matter_and_makes_repository_explorer_secondary() {
+        use crate::model::{
+            DeltaStatus, Evidence, EvidenceClass, Finding, FunctionFact, FunctionKind,
+            ModuleMetrics, Priority,
+        };
+
+        let mut result = minimal_result();
+        result.modules = vec![
+            ModuleMetrics {
+                crate_name: "demo".into(),
+                module_path: "quiet".into(),
+                path: "src/quiet.rs".into(),
+                lines: 20,
+                decision_sites: 2,
+                public_items: 1,
+                clone_calls: 0,
+                functions: Vec::new(),
+                types: Vec::new(),
+                explicit_imports: Vec::new(),
+                local_dependency_modules: Vec::new(),
+                structure_digest: "quiet".into(),
+                parse_complete: true,
+                gate_complete: true,
+                limitation: None,
+                history: None,
+            },
+            ModuleMetrics {
+                crate_name: "demo".into(),
+                module_path: "engine".into(),
+                path: "src/engine.rs".into(),
+                lines: 120,
+                decision_sites: 30,
+                public_items: 4,
+                clone_calls: 2,
+                functions: vec![FunctionFact {
+                    name: "run".into(),
+                    kind: FunctionKind::Function,
+                    public_declared: true,
+                }],
+                types: Vec::new(),
+                explicit_imports: Vec::new(),
+                local_dependency_modules: vec!["demo::quiet".into()],
+                structure_digest: "engine".into(),
+                parse_complete: true,
+                gate_complete: true,
+                limitation: None,
+                history: None,
+            },
+        ];
+        result.findings = vec![Finding {
+            fingerprint: "engine".into(),
+            rule: "structure.current_coupled_outlier".into(),
+            subject: "demo::engine".into(),
+            identity: "demo::engine".into(),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Strong,
+            priority: Priority::Investigate,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "technical summary".into(),
+            direction: "inspect boundary".into(),
+            evidence: vec![
+                Evidence {
+                    metric: "decision_sites".into(),
+                    value: 30,
+                    reference: 12,
+                    population: 20,
+                    baseline: None,
+                    material_delta: None,
+                },
+                Evidence {
+                    metric: "local_dependency_modules".into(),
+                    value: 8,
+                    reference: 4,
+                    population: 20,
+                    baseline: None,
+                    material_delta: None,
+                },
+            ],
+        }];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("What needs attention"));
+        assert!(rendered.contains("This module may be harder to change safely"));
+        assert!(rendered.contains("Why this matters"));
+        assert!(rendered.contains("If ignored"));
+        assert!(rendered.contains("What to investigate next"));
+        assert!(rendered.contains("Repository explorer"));
+        assert!(rendered.contains(
+            "Use this after a finding points you to an area"
+        ));
+        assert!(rendered.contains("Worth investigating"));
+        assert!(rendered.contains("No issue currently identified"));
+        assert!(rendered.find("demo::engine").unwrap() < rendered.find("demo::quiet").unwrap());
+        assert!(rendered.contains("Analysis details"));
+        assert!(rendered.contains("Technical capability details"));
+        assert!(!rendered.contains("<div class=\"card\"><h2>Coverage</h2>"));
+    }
+
+    #[test]
+    fn compact_ai_json_keeps_actionable_evidence_without_raw_repository_inventory() {
+        use crate::model::{
+            DeltaStatus, Evidence, EvidenceClass, Finding, ModuleMetrics, Priority, SourceContext,
+        };
+
+        let mut result = minimal_result();
+        result.modules = vec![ModuleMetrics {
+            crate_name: "demo".into(),
+            module_path: "engine".into(),
+            path: "src/engine.rs".into(),
+            lines: 50,
+            decision_sites: 20,
+            public_items: 2,
+            clone_calls: 0,
+            functions: Vec::new(),
+            types: Vec::new(),
+            explicit_imports: Vec::new(),
+            local_dependency_modules: Vec::new(),
+            structure_digest: "engine".into(),
+            parse_complete: true,
+            gate_complete: true,
+            limitation: None,
+            history: None,
+        }];
+        result.findings = vec![
+            Finding {
+                fingerprint: "active".into(),
+                rule: "runtime.clone_syntax_outlier".into(),
+                subject: "demo::engine".into(),
+                identity: "demo::engine".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "raw summary".into(),
+                direction: "measure".into(),
+                evidence: vec![Evidence {
+                    metric: "clone_call_syntax_sites".into(),
+                    value: 12,
+                    reference: 4,
+                    population: 20,
+                    baseline: None,
+                    material_delta: None,
+                }],
+            },
+            Finding {
+                fingerprint: "accepted".into(),
+                rule: "structure.current_coupled_outlier".into(),
+                subject: "demo::engine".into(),
+                identity: "demo::engine".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::Investigate,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: true,
+                acceptance_reason: Some("intentional".into()),
+                summary: "accepted".into(),
+                direction: "none".into(),
+                evidence: Vec::new(),
+            },
+        ];
+        result.source_contexts = vec![SourceContext {
+            subject: "demo::engine".into(),
+            metric: "clone_call_syntax_sites".into(),
+            path: "src/engine.rs".into(),
+            start_line: 12,
+            end_line: 12,
+            excerpt: "value.clone()".into(),
+            excerpt_truncated: false,
+        }];
+
+        let first = super::ai_json(&result);
+        let second = super::ai_json(&result);
+        let value: serde_json::Value = serde_json::from_str(&first).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(value["format"], "ferric_lens_ai");
+        assert_eq!(value["findings"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            value["findings"][0]["title"],
+            "Repeated copying may be worth measuring"
+        );
+        assert_eq!(value["findings"][0]["path"], "src/engine.rs");
+        assert_eq!(
+            value["findings"][0]["source_contexts"][0]["start_line"],
+            12
+        );
+        assert!(value["findings"][0]["why_care"]
+            .as_str()
+            .unwrap()
+            .contains("copy"));
+        assert!(value.get("modules").is_none());
+        assert!(value.get("capabilities").is_none());
+        assert_eq!(value["summary"]["accepted_findings"], 1);
+    }
+
+    #[test]
+    fn cli_summary_prioritizes_plain_language_actions_over_internal_rule_names() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        let mut result = minimal_result();
+        result.findings = vec![Finding {
+            fingerprint: "refactor".into(),
+            rule: "refactor.multi_signal_candidate".into(),
+            subject: "demo::engine".into(),
+            identity: "demo::engine".into(),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Strong,
+            priority: Priority::Investigate,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "internal summary".into(),
+            direction: "inspect responsibilities".into(),
+            evidence: Vec::new(),
+        }];
+
+        let rendered = super::cli_summary(&result);
+
+        assert!(rendered.contains("1 area worth reviewing"));
+        assert!(rendered.contains("Possible refactoring opportunity"));
+        assert!(rendered.contains("Why it matters:"));
+        assert!(rendered.contains("Next:"));
+        assert!(!rendered.contains("refactor.multi_signal_candidate"));
+    }
+
+    #[test]
     fn write_rejects_paths_without_file_names() {
         let error = super::write(std::path::Path::new("/"), "content").unwrap_err();
         assert!(error.contains("output path has no file name"));
