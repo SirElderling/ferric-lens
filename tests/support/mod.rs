@@ -104,7 +104,6 @@ pub fn git(root: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
 
-
 fn gate_module_source(index: usize, decisions: usize, dependencies: usize) -> String {
     let mut source = String::new();
     for dependency in 1..=dependencies {
