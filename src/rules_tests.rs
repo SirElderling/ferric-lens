@@ -588,7 +588,6 @@ fn refactor_synthesis_does_not_use_other_refactor_findings_as_support() {
     assert!(refactor_candidates(&supporting).is_empty());
 }
 
-
 #[test]
 fn refactor_candidate_preserves_only_unambiguous_prior_identity() {
     let mut moved = advisory_finding(
@@ -659,10 +658,7 @@ fn refactor_delta_preserves_new_unchanged_and_unknown_states() {
     );
 
     assert_eq!(super::refactor_delta(&[&new]), DeltaStatus::New);
-    assert_eq!(
-        super::refactor_delta(&[&unchanged]),
-        DeltaStatus::Unchanged
-    );
+    assert_eq!(super::refactor_delta(&[&unchanged]), DeltaStatus::Unchanged);
     assert_eq!(super::refactor_delta(&[&unknown]), DeltaStatus::Unknown);
 }
 
