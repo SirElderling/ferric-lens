@@ -335,7 +335,6 @@ fn automatic_candidates_include_symbolic_origin_head() {
         .any(|(candidate, explicit)| candidate == "origin/main" && !explicit));
 }
 
-
 #[test]
 fn merge_base_parser_requires_exactly_one_commit() {
     assert!(super::parse_merge_base_output("main", "").is_err());
@@ -370,7 +369,10 @@ fn change_record_parser_covers_all_supported_statuses_and_truncation() {
     assert!(changes.modified.contains("modified.rs"));
     assert!(changes.modified.contains("typed.rs"));
     assert!(!changes.modified.contains("ignored.rs"));
-    assert_eq!(changes.renames.get("old.rs").map(String::as_str), Some("new.rs"));
+    assert_eq!(
+        changes.renames.get("old.rs").map(String::as_str),
+        Some("new.rs")
+    );
 
     assert!(super::parse_change_records(&["M".to_owned()]).is_err());
     assert!(super::parse_change_records(&["R100".to_owned(), "old.rs".to_owned()]).is_err());
@@ -381,7 +383,10 @@ fn exact_rename_helpers_reject_malformed_or_mismatched_git_output() {
     let tree = b"100644 blob abc123\told.rs\0malformed\0100644 blob\tmissing.rs\0";
     let parsed = super::parse_tree_oids(tree);
     assert_eq!(
-        parsed.get("abc123").and_then(|paths| paths.first()).map(String::as_str),
+        parsed
+            .get("abc123")
+            .and_then(|paths| paths.first())
+            .map(String::as_str),
         Some("old.rs")
     );
 
