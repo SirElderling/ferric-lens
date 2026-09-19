@@ -251,7 +251,10 @@ fn detect_exact_worktree_renames(
     let tree = git_bytes(root, tree_args)?;
 
     let mut deleted_by_oid = BTreeMap::<String, Vec<String>>::new();
-    for record in tree.split(|byte| *byte == 0).filter(|record| !record.is_empty()) {
+    for record in tree
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
         let text = String::from_utf8_lossy(record);
         let Some((metadata, path)) = text.split_once('\t') else {
             continue;
