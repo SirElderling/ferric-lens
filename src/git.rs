@@ -127,22 +127,12 @@ pub fn resolve_baseline(root: &Path, explicit: Option<&str>) -> Result<BaselineS
         root,
         ["merge-base", "--all", head.as_str(), target_oid.as_str()],
     )?;
-    let merge_bases = merge_bases
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>();
-
-    if merge_bases.len() != 1 {
-        return Err(format!(
-            "baseline target {target_ref} does not have exactly one usable merge base"
-        ));
-    }
+    let merge_base = parse_merge_base_output(&target_ref, &merge_bases)?;
 
     Ok(BaselineSelection {
         target_ref,
         target_oid,
-        merge_base: merge_bases[0].to_owned(),
+        merge_base,
     })
 }
 
@@ -166,6 +156,82 @@ pub fn changes_since(root: &Path, merge_base: &str) -> Result<ChangeSet, String>
         .map(|record| String::from_utf8_lossy(record).into_owned())
         .collect::<Vec<_>>();
 
+    let mut changes = parse_change_records(&records)?;
+    changes.added.extend(list_untracked(root)?);
+
+    detect_exact_worktree_renames(root, merge_base, &mut changes)?;
+
+    Ok(changes)
+}
+
+fn detect_exact_worktree_renames(
+    root: &Path,
+    merge_base: &str,
+    changes: &mut ChangeSet,
+) -> Result<(), String> {
+    if changes.deleted.is_empty()
+        || changes.added.is_empty()
+        || changes.deleted.len() > EXACT_RENAME_FALLBACK_LIMIT
+        || changes.added.len() > EXACT_RENAME_FALLBACK_LIMIT
+    {
+        return Ok(());
+    }
+
+    let mut tree_args = vec![
+        OsStr::new("ls-tree").to_os_string(),
+        OsStr::new("-r").to_os_string(),
+        OsStr::new("-z").to_os_string(),
+        OsStr::new(merge_base).to_os_string(),
+        OsStr::new("--").to_os_string(),
+    ];
+    tree_args.extend(changes.deleted.iter().map(OsString::from));
+    let tree = git_bytes(root, tree_args)?;
+
+    let deleted_by_oid = parse_tree_oids(&tree);
+
+    let added_paths = changes.added.iter().cloned().collect::<Vec<_>>();
+    let mut hash_args = vec![
+        OsStr::new("hash-object").to_os_string(),
+        OsStr::new("--").to_os_string(),
+    ];
+    hash_args.extend(added_paths.iter().map(OsString::from));
+    let hashes = git_text_os(root, hash_args)?;
+    let added_by_oid = index_added_hashes(&added_paths, &hashes)?;
+
+    let mut exact = Vec::new();
+    for (oid, deleted) in deleted_by_oid {
+        let Some(added) = added_by_oid.get(&oid) else {
+            continue;
+        };
+        if deleted.len() == 1 && added.len() == 1 {
+            exact.push((deleted[0].clone(), added[0].clone()));
+        }
+    }
+
+    for (old, new) in exact {
+        changes.deleted.remove(&old);
+        changes.added.remove(&new);
+        changes.renames.insert(old, new);
+    }
+
+    Ok(())
+}
+
+fn parse_merge_base_output(target_ref: &str, output: &str) -> Result<String, String> {
+    let merge_bases = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if merge_bases.len() != 1 {
+        return Err(format!(
+            "baseline target {target_ref} does not have exactly one usable merge base"
+        ));
+    }
+    Ok(merge_bases[0].to_owned())
+}
+
+fn parse_change_records(records: &[String]) -> Result<ChangeSet, String> {
     let mut changes = ChangeSet::default();
     let mut index = 0;
     while index < records.len() {
@@ -202,8 +268,11 @@ pub fn changes_since(root: &Path, merge_base: &str) -> Result<ChangeSet, String>
             _ => {}
         }
     }
+    Ok(changes)
+}
 
-    let untracked = git_bytes(
+fn list_untracked(root: &Path) -> Result<Vec<String>, String> {
+    let output = git_bytes(
         root,
         [
             OsStr::new("ls-files"),
@@ -213,44 +282,15 @@ pub fn changes_since(root: &Path, merge_base: &str) -> Result<ChangeSet, String>
             OsStr::new("--"),
         ],
     )?;
-    for path in untracked
+    Ok(output
         .split(|byte| *byte == 0)
         .filter(|record| !record.is_empty())
-    {
-        changes
-            .added
-            .insert(String::from_utf8_lossy(path).into_owned());
-    }
-
-    detect_exact_worktree_renames(root, merge_base, &mut changes)?;
-
-    Ok(changes)
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect())
 }
 
-fn detect_exact_worktree_renames(
-    root: &Path,
-    merge_base: &str,
-    changes: &mut ChangeSet,
-) -> Result<(), String> {
-    if changes.deleted.is_empty()
-        || changes.added.is_empty()
-        || changes.deleted.len() > EXACT_RENAME_FALLBACK_LIMIT
-        || changes.added.len() > EXACT_RENAME_FALLBACK_LIMIT
-    {
-        return Ok(());
-    }
-
-    let mut tree_args = vec![
-        OsStr::new("ls-tree").to_os_string(),
-        OsStr::new("-r").to_os_string(),
-        OsStr::new("-z").to_os_string(),
-        OsStr::new(merge_base).to_os_string(),
-        OsStr::new("--").to_os_string(),
-    ];
-    tree_args.extend(changes.deleted.iter().map(OsString::from));
-    let tree = git_bytes(root, tree_args)?;
-
-    let mut deleted_by_oid = BTreeMap::<String, Vec<String>>::new();
+fn parse_tree_oids(tree: &[u8]) -> BTreeMap<String, Vec<String>> {
+    let mut by_oid = BTreeMap::<String, Vec<String>>::new();
     for record in tree
         .split(|byte| *byte == 0)
         .filter(|record| !record.is_empty())
@@ -262,46 +302,28 @@ fn detect_exact_worktree_renames(
         let Some(oid) = metadata.split_whitespace().nth(2) else {
             continue;
         };
-        deleted_by_oid
+        by_oid
             .entry(oid.to_owned())
             .or_default()
             .push(path.to_owned());
     }
+    by_oid
+}
 
-    let added_paths = changes.added.iter().cloned().collect::<Vec<_>>();
-    let mut hash_args = vec![
-        OsStr::new("hash-object").to_os_string(),
-        OsStr::new("--").to_os_string(),
-    ];
-    hash_args.extend(added_paths.iter().map(OsString::from));
-    let hashes = git_text_os(root, hash_args)?;
+fn index_added_hashes(
+    added_paths: &[String],
+    hashes: &str,
+) -> Result<BTreeMap<String, Vec<String>>, String> {
     let hashes = hashes.lines().map(str::trim).collect::<Vec<_>>();
     if hashes.len() != added_paths.len() {
         return Err("git hash-object returned an unexpected number of rename candidates".into());
     }
 
-    let mut added_by_oid = BTreeMap::<String, Vec<String>>::new();
-    for (path, oid) in added_paths.into_iter().zip(hashes) {
-        added_by_oid.entry(oid.to_owned()).or_default().push(path);
+    let mut by_oid = BTreeMap::<String, Vec<String>>::new();
+    for (path, oid) in added_paths.iter().cloned().zip(hashes) {
+        by_oid.entry(oid.to_owned()).or_default().push(path);
     }
-
-    let mut exact = Vec::new();
-    for (oid, deleted) in deleted_by_oid {
-        let Some(added) = added_by_oid.get(&oid) else {
-            continue;
-        };
-        if deleted.len() == 1 && added.len() == 1 {
-            exact.push((deleted[0].clone(), added[0].clone()));
-        }
-    }
-
-    for (old, new) in exact {
-        changes.deleted.remove(&old);
-        changes.added.remove(&new);
-        changes.renames.insert(old, new);
-    }
-
-    Ok(())
+    Ok(by_oid)
 }
 
 pub fn sample_history(root: &Path) -> Result<HistorySample, String> {
@@ -409,10 +431,7 @@ pub fn materialize_worktree(root: &Path, commit: &str) -> Result<TemporaryWorktr
         "ferric-lens-baseline-{}-{counter}",
         std::process::id()
     ));
-    if path.exists() {
-        fs::remove_dir_all(&path)
-            .map_err(|error| format!("cannot clear temporary baseline directory: {error}"))?;
-    }
+    prepare_worktree_path(&path)?;
 
     git_bytes(
         root,
@@ -433,15 +452,27 @@ pub fn materialize_worktree(root: &Path, commit: &str) -> Result<TemporaryWorktr
     })
 }
 
+fn prepare_worktree_path(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        fs::remove_dir_all(path)
+            .map_err(|error| format!("cannot clear temporary baseline directory: {error}"))?;
+    }
+    Ok(())
+}
+
+fn append_base_candidates(candidates: &mut Vec<(String, bool)>, base: &str) {
+    let base = base.trim();
+    if !base.is_empty() {
+        candidates.push((format!("refs/remotes/origin/{base}"), false));
+        candidates.push((base.to_owned(), false));
+    }
+}
+
 fn automatic_target_candidates(root: &Path) -> Vec<(String, bool)> {
     let mut candidates = Vec::new();
 
     if let Ok(base) = std::env::var("GITHUB_BASE_REF") {
-        let base = base.trim();
-        if !base.is_empty() {
-            candidates.push((format!("refs/remotes/origin/{base}"), false));
-            candidates.push((base.to_owned(), false));
-        }
+        append_base_candidates(&mut candidates, &base);
     }
 
     if let Ok(symbolic) = git_text(
@@ -476,7 +507,11 @@ fn resolve_commit(root: &Path, reference: &str) -> Result<String, String> {
             OsStr::new(&spec),
         ],
     )?;
-    let value = String::from_utf8_lossy(&output).trim().to_owned();
+    parse_resolved_commit(reference, &String::from_utf8_lossy(&output))
+}
+
+fn parse_resolved_commit(reference: &str, output: &str) -> Result<String, String> {
+    let value = output.trim().to_owned();
     if value.is_empty() {
         Err(format!("ref {reference} did not resolve to a commit"))
     } else {
