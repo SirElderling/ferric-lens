@@ -46,14 +46,18 @@ jobs:
 
       - name: Measure coverage
         if: runner.os == 'Linux'
-        run: cargo llvm-cov --all-targets --all-features --lcov --output-path target/coverage.lcov
+        run: |
+          cargo llvm-cov --all-targets --all-features --lcov --output-path target/coverage.lcov
+          cargo llvm-cov report --json --output-path target/coverage.json
 
       - name: Upload coverage evidence
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: ferric-lens-coverage
-          path: target/coverage.lcov
+          path: |
+            target/coverage.lcov
+            target/coverage.json
 
       - name: Enforce 100% coverage
         if: runner.os == 'Linux'
