@@ -164,8 +164,6 @@ fn snapshot_capabilities_reflect_complete_and_partial_syntax_and_inventory() {
         workspace_aliases: Default::default(),
         source_digests: Default::default(),
         auxiliary_targets: crate::input::AuxiliaryTargetSummary::default(),
-        workspace_aliases: crate::input::WorkspaceAliases::new(),
-        source_digests: std::collections::BTreeMap::new(),
         modules: Vec::new(),
         parse_failures: 2,
     };
