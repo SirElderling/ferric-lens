@@ -40,6 +40,9 @@ jobs:
       - name: Test
         run: cargo test --all-targets --all-features
 
+      - name: Test release-acceptance tooling
+        run: python3 -m unittest tools.test_perf_fixture tools.test_perf_acceptance
+
       - name: Test coverage gate
         if: runner.os == 'Linux'
         run: python3 .github/scripts/test_check_source_coverage.py
