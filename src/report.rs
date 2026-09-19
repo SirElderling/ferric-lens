@@ -4,7 +4,9 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::model::{AnalysisResult, Finding, GateVerdict};
+use crate::model::{
+    AnalysisResult, DeltaStatus, EvidenceClass, Finding, GateVerdict, ModuleMetrics, Priority,
+};
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -83,24 +85,37 @@ pub fn html(result: &AnalysisResult) -> String {
         })
         .collect::<Vec<_>>();
 
-    let gate_html = render_findings(&gate_findings, "No gate regression was established.");
+    let gate_html = render_findings(
+        &gate_findings,
+        "No gate regression was established.",
+        &result.modules,
+    );
     let refactor_html = render_findings(
         &refactor_advisories,
         "No multi-signal refactoring candidates were established.",
+        &result.modules,
     );
     let structural_html = render_findings(
         &structural_advisories,
         "No structural advisory outliers were found in eligible populations.",
+        &result.modules,
     );
     let runtime_html = render_findings(
         &runtime_advisories,
         "No static runtime-risk candidates were found in eligible populations.",
+        &result.modules,
     );
     let build_html = render_findings(
         &build_advisories,
         "No build-efficiency candidates were found in eligible populations.",
+        &result.modules,
     );
-    let other_html = render_findings(&other_advisories, "No other advisory findings.");
+    let other_html = render_findings(
+        &other_advisories,
+        "No other advisory findings.",
+        &result.modules,
+    );
+    let triage_summary = render_triage_summary(result);
 
     let mut modules = String::new();
     let mut current_crate = String::new();
@@ -114,7 +129,11 @@ pub fn html(result: &AnalysisResult) -> String {
             modules.push_str(&escape(&current_crate));
             modules.push_str(r#"</strong></summary><div class="crate">"#);
         }
-        modules.push_str(r#"<div class="module"><code>"#);
+        let subject = module_subject(module);
+        let anchor = anchor_id("module", &subject);
+        modules.push_str(r#"<div class="module-block" id=""#);
+        modules.push_str(&anchor);
+        modules.push_str(r#""><div class="module"><code>"#);
         modules.push_str(&escape(if module.module_path.is_empty() {
             "crate root"
         } else {
@@ -210,6 +229,7 @@ pub fn html(result: &AnalysisResult) -> String {
             }
             modules.push_str("</small></div>");
         }
+        modules.push_str("</div>");
     }
     if !current_crate.is_empty() {
         modules.push_str("</div></details>");
@@ -347,8 +367,10 @@ header {{ border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transpar
 .card, article, details {{ border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: .6rem; padding: 1rem; margin: .8rem 0; }}
 article.gate {{ border-width: 2px; }}
 summary {{ cursor: pointer; }}
+.module-block {{ scroll-margin-top: 1rem; }}
 .module {{ display: flex; justify-content: space-between; gap: 1rem; padding: .35rem 0; border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent); }}
 .module span {{ text-align: right; opacity: .8; }}
+.finding-meta, .location {{ opacity: .85; }}
 .history {{ margin: -.15rem 0 .5rem; padding-left: .5rem; opacity: .8; }}
 code {{ overflow-wrap: anywhere; }}
 </style>
@@ -356,6 +378,7 @@ code {{ overflow-wrap: anywhere; }}
 <body>
 <header><h1>Ferric Lens</h1><p class="verdict">{verdict}</p><p>{reason}</p></header>
 <section class="grid">
+<div class="card"><h2>Triage</h2>{triage_summary}</div>
 <div class="card"><h2>Snapshot</h2><p><strong>Result digest</strong><br><code>{result_digest}</code></p><p><strong>Source digest</strong><br><code>{digest}</code></p><p>{source_files} source files<br>{applicable} applicable gate subjects</p></div>
 <div class="card"><h2>Baseline</h2>{baseline}</div>
 <div class="card"><h2>Profile</h2>{profile_summary}</div>
@@ -380,13 +403,67 @@ code {{ overflow-wrap: anywhere; }}
     )
 }
 
-fn render_findings(findings: &[&Finding], empty: &str) -> String {
+fn render_triage_summary(result: &AnalysisResult) -> String {
+    let active = result
+        .findings
+        .iter()
+        .filter(|finding| !finding.accepted)
+        .collect::<Vec<_>>();
+    let act_first = active
+        .iter()
+        .filter(|finding| finding.priority == Priority::ActFirst)
+        .count();
+    let investigate = active
+        .iter()
+        .filter(|finding| finding.priority == Priority::Investigate)
+        .count();
+    let observe = active
+        .iter()
+        .filter(|finding| finding.priority == Priority::Observe)
+        .count();
+    let refactors = active
+        .iter()
+        .filter(|finding| finding.rule.starts_with("refactor."))
+        .count();
+    let changed = active
+        .iter()
+        .filter(|finding| matches!(finding.delta, DeltaStatus::New | DeltaStatus::Worsened))
+        .count();
+
+    format!(
+        "<p><strong>{}</strong><br>{}<br>{}<br>{}<br>{}</p>",
+        count_phrase(act_first, "act first", "act first"),
+        count_phrase(investigate, "investigate", "investigate"),
+        count_phrase(observe, "observe", "observe"),
+        count_phrase(
+            refactors,
+            "refactoring candidate",
+            "refactoring candidates"
+        ),
+        count_phrase(changed, "new/worsened finding", "new/worsened findings")
+    )
+}
+
+fn count_phrase(count: usize, singular: &str, plural: &str) -> String {
+    format!("{count} {}", if count == 1 { singular } else { plural })
+}
+
+fn render_findings(findings: &[&Finding], empty: &str, modules: &[ModuleMetrics]) -> String {
     if findings.is_empty() {
         return format!("<p>{}</p>", escape(empty));
     }
 
+    let mut ordered = findings.to_vec();
+    ordered.sort_by(|a, b| {
+        priority_rank(&a.priority)
+            .cmp(&priority_rank(&b.priority))
+            .then_with(|| delta_rank(&a.delta).cmp(&delta_rank(&b.delta)))
+            .then_with(|| a.subject.cmp(&b.subject))
+            .then_with(|| a.rule.cmp(&b.rule))
+    });
+
     let mut html = String::new();
-    for finding in findings {
+    for finding in ordered {
         html.push_str(if finding.gate {
             r#"<article class="gate">"#
         } else {
@@ -394,14 +471,32 @@ fn render_findings(findings: &[&Finding], empty: &str) -> String {
         });
         html.push_str("<h3>");
         html.push_str(&escape(&finding.subject));
-        html.push_str("</h3><p><strong>");
-        html.push_str(&escape(&finding.rule));
+        html.push_str("</h3><p class=\"finding-meta\"><strong>");
+        html.push_str(priority_label(&finding.priority));
         html.push_str("</strong> · ");
-        html.push_str(&escape(&format!("{:?}", finding.delta).to_lowercase()));
+        html.push_str(evidence_label(&finding.evidence_class));
+        html.push_str(" · ");
+        html.push_str(delta_label(&finding.delta));
         if finding.accepted {
             html.push_str(" · accepted");
         }
-        html.push_str("</p><p><strong>Fingerprint:</strong> <code>");
+        html.push_str("</p><p><strong>");
+        html.push_str(&escape(&finding.rule));
+        html.push_str("</strong></p>");
+
+        if let Some(module) = modules
+            .iter()
+            .find(|module| module_subject(module) == finding.subject)
+        {
+            let anchor = anchor_id("module", &finding.subject);
+            html.push_str(r#"<p class="location"><strong>Source:</strong> <code>"#);
+            html.push_str(&escape(&module.path));
+            html.push_str(r#"</code> · <a href="#"#);
+            html.push_str(&anchor);
+            html.push_str(r#"">View module</a></p>"#);
+        }
+
+        html.push_str("<p><strong>Fingerprint:</strong> <code>");
         html.push_str(&escape(&finding.fingerprint));
         html.push_str("</code></p>");
         if let Some(reason) = &finding.acceptance_reason {
@@ -438,6 +533,63 @@ fn render_findings(findings: &[&Finding], empty: &str) -> String {
         html.push_str("</p></article>");
     }
     html
+}
+
+fn priority_rank(priority: &Priority) -> u8 {
+    match priority {
+        Priority::ActFirst => 0,
+        Priority::Investigate => 1,
+        Priority::Observe => 2,
+    }
+}
+
+fn delta_rank(delta: &DeltaStatus) -> u8 {
+    match delta {
+        DeltaStatus::Worsened => 0,
+        DeltaStatus::New => 1,
+        DeltaStatus::Current => 2,
+        DeltaStatus::Unchanged => 3,
+        DeltaStatus::Unknown => 4,
+    }
+}
+
+fn priority_label(priority: &Priority) -> &'static str {
+    match priority {
+        Priority::ActFirst => "Priority 1 — act first",
+        Priority::Investigate => "Priority 2 — investigate",
+        Priority::Observe => "Observe",
+    }
+}
+
+fn evidence_label(evidence: &EvidenceClass) -> &'static str {
+    match evidence {
+        EvidenceClass::Proven => "proven evidence",
+        EvidenceClass::Strong => "strong evidence",
+        EvidenceClass::Candidate => "candidate evidence",
+    }
+}
+
+fn delta_label(delta: &DeltaStatus) -> &'static str {
+    match delta {
+        DeltaStatus::Current => "current",
+        DeltaStatus::New => "new",
+        DeltaStatus::Worsened => "worsened",
+        DeltaStatus::Unchanged => "unchanged",
+        DeltaStatus::Unknown => "unknown",
+    }
+}
+
+fn module_subject(module: &ModuleMetrics) -> String {
+    if module.module_path.is_empty() {
+        module.crate_name.clone()
+    } else {
+        format!("{}::{}", module.crate_name, module.module_path)
+    }
+}
+
+fn anchor_id(prefix: &str, value: &str) -> String {
+    let digest = blake3::hash(value.as_bytes()).to_hex().to_string();
+    format!("{prefix}-{}", &digest[..16])
 }
 
 pub fn write(path: &Path, contents: &str) -> Result<(), String> {
