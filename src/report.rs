@@ -485,13 +485,22 @@ mod tests {
             features: vec!["alpha".into()],
             attached: false,
             attachment_reason: "different source".into(),
-            observations: vec![ImportedObservation {
-                subject: "src/a.rs".into(),
-                metric: "instructions".into(),
-                value: 7,
-                unit: "count".into(),
-                note: Some("<note>".into()),
-            }],
+            observations: vec![
+                ImportedObservation {
+                    subject: "src/a.rs".into(),
+                    metric: "instructions".into(),
+                    value: 7,
+                    unit: "count".into(),
+                    note: Some("<note>".into()),
+                },
+                ImportedObservation {
+                    subject: "src/b.rs".into(),
+                    metric: "allocations".into(),
+                    value: 0,
+                    unit: "count".into(),
+                    note: None,
+                },
+            ],
         });
         result.modules = vec![
             ModuleMetrics {
