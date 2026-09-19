@@ -429,11 +429,11 @@ fn small_population_clear_dependency_hub_remains_an_observation() {
         .map(|index| module(index, 10, 0))
         .collect::<Vec<_>>();
 
-    for index in 1..13 {
-        modules[index].local_dependency_modules = vec!["demo::m0".into()];
+    for module in modules.iter_mut().take(13).skip(1) {
+        module.local_dependency_modules = vec!["demo::m0".into()];
     }
-    for index in 13..16 {
-        modules[index].local_dependency_modules = vec!["demo::m1".into()];
+    for module in modules.iter_mut().take(16).skip(13) {
+        module.local_dependency_modules = vec!["demo::m1".into()];
     }
 
     let finding = current_snapshot_findings(&modules)
