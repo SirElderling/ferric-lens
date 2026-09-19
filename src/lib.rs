@@ -727,3 +727,4 @@ mod tests {
             .iter()
             .any(|capability| capability.detail.as_deref() == Some("2 Rust source file(s) could not be parsed")));
     }
+}
