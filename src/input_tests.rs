@@ -2192,3 +2192,24 @@ fn target_without_resolve_features_uses_unresolved_profile_cfg() {
     assert!(sources.iter().any(|source| source.module_path == "gated"));
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn stable_snapshot_propagates_cargo_input_verification_errors() {
+    let root = temp_root();
+    let invalid = root.join("Cargo.toml");
+    fs::create_dir_all(&invalid).unwrap();
+    let snapshot = CargoInputSnapshot {
+        entries: vec![CargoInputEntry {
+            path: invalid,
+            label: "Cargo.toml".into(),
+            bytes: None,
+        }],
+        digest: "fixture".into(),
+    };
+
+    let error = super::verify_stable_inputs_snapshot(&root, &[], &snapshot).unwrap_err();
+
+    assert!(error.contains("cannot re-read Cargo input"));
+    fs::remove_dir_all(root).unwrap();
+}
