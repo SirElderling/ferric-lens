@@ -115,14 +115,7 @@ fn analyze_internal_with_ops(
     ops: &AnalysisOps,
 ) -> Result<AnalysisResult, String> {
     let profile = profile::ProfileContext::resolve(target, features)?;
-    analyze_internal_with_profile_context(
-        root,
-        base,
-        include_history,
-        evidence_path,
-        &profile,
-        ops,
-    )
+    analyze_internal_with_profile_context(root, base, include_history, evidence_path, &profile, ops)
 }
 
 fn analyze_internal_with_profile_context(
@@ -443,14 +436,8 @@ pub fn accept_finding_with_profile(
     reason: &str,
 ) -> Result<(), String> {
     let profile = profile::ProfileContext::resolve(target, features)?;
-    let result = analyze_internal_with_profile_context(
-        root,
-        base,
-        false,
-        None,
-        &profile,
-        &REAL_OPS,
-    )?;
+    let result =
+        analyze_internal_with_profile_context(root, base, false, None, &profile, &REAL_OPS)?;
     if !result
         .findings
         .iter()
