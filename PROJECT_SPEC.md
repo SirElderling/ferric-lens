@@ -95,6 +95,7 @@ The model must represent at least:
 - change relationships,
 - findings,
 - finding evidence,
+- bounded source contexts for source-locatable evidence,
 - analysis completeness,
 - imported evidence,
 - platform/configuration origin.
@@ -492,7 +493,9 @@ JavaScript is permitted only where equivalent behavior cannot reasonably be achi
 
 Browser code only explores the immutable result. It performs no analysis.
 
-V1 uses a linked hierarchy, summary tables, and native `details` disclosure. Avoid a force-directed graph engine and rendering every dependency edge into the DOM. Summarize repeated evidence, retain all findings, and link findings to compact source excerpts rather than embedding every source file. Report deterministic excerpt/display limits explicitly. Escape all repository/imported strings as untrusted content. The report must remain useful with JavaScript disabled.
+V1 uses a linked hierarchy, summary tables, and native `details` disclosure. Avoid a force-directed graph engine and rendering every dependency edge into the DOM. Summarize repeated evidence, retain all findings, and link findings to compact source excerpts rather than embedding every source file. Escape all repository/imported strings as untrusted content. The report must remain useful with JavaScript disabled.
+
+For source-locatable V1 evidence, the canonical model records the finding subject, evidence metric, repository-relative source path, exact 1-based start/end line, escaped excerpt text, and whether the excerpt was truncated. These contexts are representative evidence, not a complete listing of every occurrence. V1 retains at most three contexts per subject/evidence signal; each excerpt is limited to three source lines and 600 Unicode characters. The initial exact-span families are decision sites, clone-call syntax, resolved repository dependency imports, and reverse-dependency imports. Relationship evidence may therefore point to a dependent module where the dependency edge is observed. If no truthful syntax span exists for an evidence family, Ferric Lens keeps module/file-level navigation and must not invent a line. Source spans/excerpts are presentation evidence and are excluded from finding fingerprints and acceptance identity.
 
 ### 19.2 Integrated codebase map
 
@@ -524,7 +527,7 @@ Specialized graph or matrix views may support the codebase map but should not be
 
 JSON is a first-class machine interface.
 
-It must represent the same canonical findings as the HTML report and CI decision.
+It must represent the same canonical findings as the HTML report and CI decision. Canonical JSON also carries the bounded source-context table used by HTML so machine and human outputs refer to the same source evidence.
 
 Publish a schema version independently of the tool version. Use explicit unavailable/null states, deterministic ordering, stable string identifiers, exact integer metrics, and documented units. Runtime timings and cache statistics belong in separate diagnostic output, not canonical artifacts.
 
