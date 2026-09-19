@@ -282,6 +282,7 @@ fn inventory_from_metadata(
         .collect::<Vec<_>>();
 
     let mut package_roots = BTreeMap::<PathBuf, String>::new();
+    let mut package_root_by_id = BTreeMap::<String, PathBuf>::new();
 
     for package in &packages {
         let package_root = manifest_parent(&package.manifest_path)?;
@@ -289,16 +290,15 @@ fn inventory_from_metadata(
         if !package_root.starts_with(&metadata_root) || !package_root.starts_with(root) {
             continue;
         }
-        package_roots.insert(package_root, package.name.clone());
+        package_roots.insert(package_root.clone(), package.name.clone());
+        package_root_by_id.insert(package.id.clone(), package_root);
     }
 
     let mut raw_targets = Vec::<(String, &'static str, PathBuf, PathBuf, Vec<Dependency>)>::new();
     for package in &packages {
-        let package_root = manifest_parent(&package.manifest_path)?;
-
-        if !package_roots.contains_key(&package_root) {
+        let Some(package_root) = package_root_by_id.get(&package.id).cloned() else {
             continue;
-        }
+        };
 
         for target in &package.targets {
             let kind = if target
@@ -782,13 +782,37 @@ fn collect_rust_files(
         return Ok(());
     }
 
+    let paths = read_directory_paths(directory)?;
+    collect_rust_paths(
+        repo_root,
+        paths,
+        target_directory,
+        crate_name,
+        budget,
+        out,
+        limitations,
+    )
+}
+
+fn read_directory_paths(directory: &Path) -> Result<Vec<PathBuf>, String> {
     let entries = io_with_path(fs::read_dir(directory), "read", directory)?;
     let mut entries = collect_directory_entries(entries, directory)?;
     entries.sort_by_key(|entry| entry.file_name());
+    Ok(entries.into_iter().map(|entry| entry.path()).collect())
+}
 
-    for entry in entries {
-        let path = entry.path();
-        let file_type = io_with_path(entry.file_type(), "inspect", &path)?;
+fn collect_rust_paths(
+    repo_root: &Path,
+    paths: Vec<PathBuf>,
+    target_directory: &Path,
+    crate_name: &str,
+    budget: &mut SourceBudget,
+    out: &mut Vec<SourceFile>,
+    limitations: &mut Vec<String>,
+) -> Result<(), String> {
+    for path in paths {
+        let metadata = io_with_path(fs::symlink_metadata(&path), "inspect", &path)?;
+        let file_type = metadata.file_type();
 
         if file_type.is_symlink() {
             limitations.push(format!(
@@ -799,8 +823,7 @@ fn collect_rust_files(
         }
 
         if file_type.is_dir() {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
             if path == target_directory
                 || name == ".git"
                 || name == ".ferric-lens"
@@ -826,7 +849,6 @@ fn collect_rust_files(
             continue;
         }
 
-        let metadata = io_with_path(fs::metadata(&path), "inspect", &path)?;
         if metadata.len() > MAX_SOURCE_FILE_BYTES {
             limitations.push(format!(
                 "fallback inventory skipped {} because it exceeds the 8 MiB source limit",
