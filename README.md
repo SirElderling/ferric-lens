@@ -139,6 +139,21 @@ Static findings are not runtime profiling claims.
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
+python3 -m unittest tools.test_perf_fixture tools.test_perf_acceptance
+cargo build --release --locked
 ```
 
-GitHub Actions runs verification on GitHub-hosted Linux and macOS runners with full Git history. Each runner performs formatting, Clippy with warnings denied, all tests, a real Ferric Lens self-check against `origin/main`, and a release build.
+GitHub Actions runs verification on GitHub-hosted Linux and macOS runners with full Git history. Each runner performs formatting, Clippy with warnings denied, all tests, release-acceptance tooling tests, a real Ferric Lens self-check against `origin/main`, and a release build.
+
+A separate performance-acceptance workflow generates a deterministic 20-crate, 100,000-production-line repository with 200 fixed history commits, runs cold `analyze` and warm `check`, records sampled process-tree RSS, wall/CPU time, cache/report sizes, toolchain and hardware, and uploads the evidence. The documented engineering targets are reported but never used as correctness gates on shared CI hardware.
+
+Run the same standard fixture locally after a release build:
+
+```bash
+python3 tools/perf_acceptance.py \
+  --binary target/release/ferric-lens \
+  --mode standard \
+  --output-dir target/perf-acceptance
+```
+
+The workflow can also be dispatched with `source-10x` (1,000,000 production Rust lines) or `history-10x` (2,000 history commits after baseline). Browser DOM/open cost and private-project precision checks remain explicit release-acceptance observations rather than hidden dependencies of the tool.
