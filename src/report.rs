@@ -6,6 +6,7 @@ use std::{
 
 use crate::model::{
     AnalysisResult, DeltaStatus, EvidenceClass, Finding, GateVerdict, ModuleMetrics, Priority,
+    SourceContext,
 };
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -89,31 +90,37 @@ pub fn html(result: &AnalysisResult) -> String {
         &gate_findings,
         "No gate regression was established.",
         &result.modules,
+        &result.source_contexts,
     );
     let refactor_html = render_findings(
         &refactor_advisories,
         "No multi-signal refactoring candidates were established.",
         &result.modules,
+        &result.source_contexts,
     );
     let structural_html = render_findings(
         &structural_advisories,
         "No structural advisory outliers were found in eligible populations.",
         &result.modules,
+        &result.source_contexts,
     );
     let runtime_html = render_findings(
         &runtime_advisories,
         "No static runtime-risk candidates were found in eligible populations.",
         &result.modules,
+        &result.source_contexts,
     );
     let build_html = render_findings(
         &build_advisories,
         "No build-efficiency candidates were found in eligible populations.",
         &result.modules,
+        &result.source_contexts,
     );
     let other_html = render_findings(
         &other_advisories,
         "No other advisory findings.",
         &result.modules,
+        &result.source_contexts,
     );
     let triage_summary = render_triage_summary(result);
 
@@ -371,6 +378,9 @@ summary {{ cursor: pointer; }}
 .module {{ display: flex; justify-content: space-between; gap: 1rem; padding: .35rem 0; border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent); }}
 .module span {{ text-align: right; opacity: .8; }}
 .finding-meta, .location {{ opacity: .85; }}
+.source-evidence {{ margin: .8rem 0; }}
+.source-context {{ margin: .7rem 0; }}
+.source-context pre {{ margin: .35rem 0; padding: .7rem; overflow-x: auto; white-space: pre-wrap; background: color-mix(in srgb, currentColor 6%, transparent); border-radius: .4rem; }}
 .history {{ margin: -.15rem 0 .5rem; padding-left: .5rem; opacity: .8; }}
 code {{ overflow-wrap: anywhere; }}
 </style>
@@ -444,7 +454,12 @@ fn count_phrase(count: usize, singular: &str, plural: &str) -> String {
     format!("{count} {}", if count == 1 { singular } else { plural })
 }
 
-fn render_findings(findings: &[&Finding], empty: &str, modules: &[ModuleMetrics]) -> String {
+fn render_findings(
+    findings: &[&Finding],
+    empty: &str,
+    modules: &[ModuleMetrics],
+    source_contexts: &[SourceContext],
+) -> String {
     if findings.is_empty() {
         return format!("<p>{}</p>", escape(empty));
     }
@@ -490,6 +505,40 @@ fn render_findings(findings: &[&Finding], empty: &str, modules: &[ModuleMetrics]
             html.push_str("</code> · <a href=\"#");
             html.push_str(&anchor);
             html.push_str("\">View module</a></p>");
+        }
+
+        let evidence_metrics = finding
+            .evidence
+            .iter()
+            .map(|evidence| evidence.metric.as_str())
+            .collect::<Vec<_>>();
+        let contexts = source_contexts
+            .iter()
+            .filter(|context| {
+                context.subject == finding.subject
+                    && evidence_metrics
+                        .iter()
+                        .any(|metric| *metric == context.metric.as_str())
+            })
+            .collect::<Vec<_>>();
+        if !contexts.is_empty() {
+            html.push_str("<details class=\"source-evidence\"><summary>Source evidence (");
+            html.push_str(&contexts.len().to_string());
+            html.push_str(")</summary>");
+            for context in contexts {
+                html.push_str("<div class=\"source-context\"><p><strong>");
+                html.push_str(&escape(&context.metric));
+                html.push_str("</strong> · <code>");
+                html.push_str(&escape(&source_location_label(context)));
+                html.push_str("</code></p><pre><code>");
+                html.push_str(&escape(&context.excerpt));
+                html.push_str("</code></pre>");
+                if context.excerpt_truncated {
+                    html.push_str("<p><small>Excerpt bounded for report size; the exact source span is preserved above.</small></p>");
+                }
+                html.push_str("</div>");
+            }
+            html.push_str("</details>");
         }
 
         html.push_str("<p><strong>Fingerprint:</strong> <code>");
@@ -588,6 +637,17 @@ fn anchor_id(prefix: &str, value: &str) -> String {
     format!("{prefix}-{}", &digest[..16])
 }
 
+fn source_location_label(context: &SourceContext) -> String {
+    if context.start_line == context.end_line {
+        format!("{}:{}", context.path, context.start_line)
+    } else {
+        format!(
+            "{}:{}-{}",
+            context.path, context.start_line, context.end_line
+        )
+    }
+}
+
 pub fn write(path: &Path, contents: &str) -> Result<(), String> {
     let parent = path
         .parent()
@@ -673,6 +733,7 @@ mod tests {
             imported_evidence: None,
             capabilities: Vec::new(),
             modules: Vec::new(),
+            source_contexts: Vec::new(),
             findings: Vec::new(),
         }
     }
