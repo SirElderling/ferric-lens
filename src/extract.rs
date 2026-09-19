@@ -3,14 +3,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use quote::ToTokens;
 use syn::{
     visit::{self, Visit},
-    Attribute, BinOp, ExprBinary, ExprForLoop, ExprIf, ExprLoop, ExprMatch, ExprWhile, File, Item,
-    ItemMod, ItemUse, Macro, Pat, UseTree, Visibility,
+    Attribute, BinOp, ExprBinary, ExprForLoop, ExprIf, ExprLoop, ExprMatch, ExprMethodCall,
+    ExprWhile, File, ForeignItemFn, ImplItemFn, Item, ItemEnum, ItemFn, ItemImpl, ItemMod,
+    ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse, Macro, Pat, TraitItemFn,
+    UseTree, Visibility,
 };
 
 use crate::{
     cfg::{HostCfg, Truth},
     input::{SourceFile, WorkspaceAliases},
-    model::{ImportPath, ModuleMetrics},
+    model::{
+        FunctionFact, FunctionKind, ImportPath, ModuleMetrics, TypeFact, TypeKind,
+    },
 };
 
 pub fn extract(source: &SourceFile, cfg: &HostCfg) -> Result<ModuleMetrics, String> {
@@ -29,6 +33,10 @@ pub fn extract(source: &SourceFile, cfg: &HostCfg) -> Result<ModuleMetrics, Stri
         .imports
         .sort_by(|a, b| a.segments.cmp(&b.segments).then(a.glob.cmp(&b.glob)));
     visitor.imports.dedup();
+    visitor.functions.sort();
+    visitor.functions.dedup();
+    visitor.types.sort();
+    visitor.types.dedup();
 
     Ok(ModuleMetrics {
         crate_name: source.crate_name.clone(),
@@ -37,6 +45,9 @@ pub fn extract(source: &SourceFile, cfg: &HostCfg) -> Result<ModuleMetrics, Stri
         lines: text.lines().count(),
         decision_sites: visitor.decision_sites,
         public_items: visitor.public_items,
+        clone_calls: visitor.clone_calls,
+        functions: visitor.functions,
+        types: visitor.types,
         explicit_imports: visitor.imports,
         local_dependency_modules: Vec::new(),
         structure_digest,
@@ -51,6 +62,12 @@ struct MetricsVisitor<'cfg> {
     cfg: &'cfg HostCfg,
     decision_sites: usize,
     public_items: usize,
+    clone_calls: usize,
+    functions: Vec<FunctionFact>,
+    types: Vec<TypeFact>,
+    module_scope: Vec<String>,
+    impl_owner: Vec<String>,
+    trait_owner: Vec<(String, bool)>,
     imports: Vec<ImportPath>,
     gate_limitation: Option<String>,
 }
@@ -61,6 +78,12 @@ impl<'cfg> MetricsVisitor<'cfg> {
             cfg,
             decision_sites: 0,
             public_items: 0,
+            clone_calls: 0,
+            functions: Vec::new(),
+            types: Vec::new(),
+            module_scope: Vec::new(),
+            impl_owner: Vec::new(),
+            trait_owner: Vec::new(),
             imports: Vec::new(),
             gate_limitation: None,
         }
@@ -70,6 +93,38 @@ impl<'cfg> MetricsVisitor<'cfg> {
         if self.gate_limitation.is_none() {
             self.gate_limitation = Some(reason.to_owned());
         }
+    }
+
+    fn scoped_name(&self, name: &str) -> String {
+        if self.module_scope.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{}::{name}", self.module_scope.join("::"))
+        }
+    }
+
+    fn member_enabled(&mut self, attrs: &[Attribute]) -> bool {
+        if attrs.iter().any(|attr| attr.path().is_ident("cfg_attr")) {
+            self.limit_gate("module contains cfg_attr syntax not yet modeled");
+            return false;
+        }
+
+        match item_cfg_state(attrs, self.cfg) {
+            Truth::False => false,
+            Truth::Unknown => {
+                self.limit_gate("module contains unresolved production cfg syntax");
+                false
+            }
+            Truth::True => true,
+        }
+    }
+
+    fn push_type(&mut self, name: &str, kind: TypeKind, visibility: &Visibility) {
+        self.types.push(TypeFact {
+            name: self.scoped_name(name),
+            kind,
+            public_declared: is_public_visibility(visibility),
+        });
     }
 }
 
@@ -102,8 +157,106 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
         // V1, so retain their facts in the containing file rather than dropping
         // executable code from analysis.
         if item.content.is_some() {
+            self.module_scope.push(item.ident.to_string());
             visit::visit_item_mod(self, item);
+            self.module_scope.pop();
         }
+    }
+
+    fn visit_item_fn(&mut self, item: &'ast ItemFn) {
+        self.functions.push(FunctionFact {
+            name: self.scoped_name(&item.sig.ident.to_string()),
+            kind: FunctionKind::Function,
+            public_declared: is_public_visibility(&item.vis),
+        });
+        visit::visit_item_fn(self, item);
+    }
+
+    fn visit_item_struct(&mut self, item: &'ast ItemStruct) {
+        self.push_type(&item.ident.to_string(), TypeKind::Struct, &item.vis);
+        visit::visit_item_struct(self, item);
+    }
+
+    fn visit_item_enum(&mut self, item: &'ast ItemEnum) {
+        self.push_type(&item.ident.to_string(), TypeKind::Enum, &item.vis);
+        visit::visit_item_enum(self, item);
+    }
+
+    fn visit_item_union(&mut self, item: &'ast ItemUnion) {
+        self.push_type(&item.ident.to_string(), TypeKind::Union, &item.vis);
+        visit::visit_item_union(self, item);
+    }
+
+    fn visit_item_type(&mut self, item: &'ast ItemType) {
+        self.push_type(&item.ident.to_string(), TypeKind::TypeAlias, &item.vis);
+        visit::visit_item_type(self, item);
+    }
+
+    fn visit_item_trait_alias(&mut self, item: &'ast ItemTraitAlias) {
+        self.push_type(&item.ident.to_string(), TypeKind::TraitAlias, &item.vis);
+        visit::visit_item_trait_alias(self, item);
+    }
+
+    fn visit_item_impl(&mut self, item: &'ast ItemImpl) {
+        let owner = self.scoped_name(&item.self_ty.to_token_stream().to_string());
+        self.impl_owner.push(owner);
+        visit::visit_item_impl(self, item);
+        self.impl_owner.pop();
+    }
+
+    fn visit_impl_item_fn(&mut self, item: &'ast ImplItemFn) {
+        if !self.member_enabled(&item.attrs) {
+            return;
+        }
+        let owner = self
+            .impl_owner
+            .last()
+            .cloned()
+            .unwrap_or_else(|| self.scoped_name("<impl>"));
+        self.functions.push(FunctionFact {
+            name: format!("{owner}::{}", item.sig.ident),
+            kind: FunctionKind::Method,
+            public_declared: is_public_visibility(&item.vis),
+        });
+        visit::visit_impl_item_fn(self, item);
+    }
+
+    fn visit_item_trait(&mut self, item: &'ast ItemTrait) {
+        self.push_type(&item.ident.to_string(), TypeKind::Trait, &item.vis);
+        let owner = self.scoped_name(&item.ident.to_string());
+        self.trait_owner
+            .push((owner, is_public_visibility(&item.vis)));
+        visit::visit_item_trait(self, item);
+        self.trait_owner.pop();
+    }
+
+    fn visit_trait_item_fn(&mut self, item: &'ast TraitItemFn) {
+        if !self.member_enabled(&item.attrs) {
+            return;
+        }
+        let (owner, public_declared) = self
+            .trait_owner
+            .last()
+            .cloned()
+            .unwrap_or_else(|| (self.scoped_name("<trait>"), false));
+        self.functions.push(FunctionFact {
+            name: format!("{owner}::{}", item.sig.ident),
+            kind: FunctionKind::TraitMethod,
+            public_declared,
+        });
+        visit::visit_trait_item_fn(self, item);
+    }
+
+    fn visit_foreign_item_fn(&mut self, item: &'ast ForeignItemFn) {
+        if !self.member_enabled(&item.attrs) {
+            return;
+        }
+        self.functions.push(FunctionFact {
+            name: self.scoped_name(&item.sig.ident.to_string()),
+            kind: FunctionKind::ForeignFunction,
+            public_declared: is_public_visibility(&item.vis),
+        });
+        visit::visit_foreign_item_fn(self, item);
     }
 
     fn visit_item_use(&mut self, item: &'ast ItemUse) {
@@ -145,6 +298,13 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
             }
         }
         visit::visit_expr_match(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
+        if node.method == "clone" {
+            self.clone_calls += 1;
+        }
+        visit::visit_expr_method_call(self, node);
     }
 
     fn visit_expr_binary(&mut self, node: &'ast ExprBinary) {
@@ -219,6 +379,10 @@ fn is_public(item: &Item) -> bool {
         Item::Use(item) => &item.vis,
         _ => return false,
     };
+    is_public_visibility(visibility)
+}
+
+fn is_public_visibility(visibility: &Visibility) -> bool {
     matches!(visibility, Visibility::Public(_))
 }
 
