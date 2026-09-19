@@ -1305,3 +1305,46 @@ fn fallback_path_reader_propagates_regular_read_failures() {
     drop(listener);
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn reachable_module_propagates_injected_canonicalize_failure() {
+    let root = temp_root();
+    let source = root.join("src/lib.rs");
+    fs::write(&source, "pub fn stable() {}").unwrap();
+    let mut visited = BTreeSet::new();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    let mut budget = SourceBudget::default();
+
+    let error = super::collect_reachable_module_with_canonicalizer(
+        &root,
+        "demo",
+        &source,
+        "",
+        true,
+        None,
+        &mut visited,
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+        |_| Err("fixture canonicalize failure".into()),
+    )
+    .unwrap_err();
+
+    assert_eq!(error, "fixture canonicalize failure");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn directory_path_reader_propagates_entry_iteration_failure() {
+    let root = temp_root();
+    let entries = std::iter::once(Err::<fs::DirEntry, _>(std::io::Error::other(
+        "fixture entry iteration failure",
+    )));
+
+    let error = super::read_directory_paths_from_entries(entries, &root).unwrap_err();
+
+    assert!(error.contains("fixture entry iteration failure"));
+    fs::remove_dir_all(root).unwrap();
+}
