@@ -151,16 +151,10 @@ fn analyze_reports_output_write_failures_as_errors() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("cannot replace"));
 }
 
-
 #[test]
 fn regression_uses_exit_code_one_and_accept_can_succeed() {
     let (repo, baseline) = Repo::gate_fixture("cli-regression");
-    let check = run(&[
-        "check",
-        repo.root.to_str().unwrap(),
-        "--base",
-        &baseline,
-    ]);
+    let check = run(&["check", repo.root.to_str().unwrap(), "--base", &baseline]);
     assert_eq!(check.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&check.stdout).contains("Regression"));
 
