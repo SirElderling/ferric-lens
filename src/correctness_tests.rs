@@ -270,3 +270,19 @@ fn verify_stable_inputs() {}
         .windows(2)
         .all(|pair| (&pair[0].rule, &pair[0].subject) <= (&pair[1].rule, &pair[1].subject)));
 }
+
+#[test]
+fn explicit_correctness_scan_suppression_prevents_self_or_generated_pattern_noise() {
+    let sources = vec![source(
+        "src/generated.rs",
+        r#"
+// ferric-lens: ignore-correctness-risks
+fn generated() {
+    let record = String::from_utf8_lossy(record);
+    let output = Command::new("git").output();
+}
+"#,
+    )];
+
+    assert!(scan(&sources).findings.is_empty());
+}
