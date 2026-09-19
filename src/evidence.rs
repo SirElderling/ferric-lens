@@ -427,5 +427,4 @@ mod tests {
         assert!(error.contains("exceeds the 16 MiB limit"));
         fs::remove_file(path).unwrap();
     }
-
 }
