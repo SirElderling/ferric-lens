@@ -402,14 +402,11 @@ fn parse_history(output: &[u8]) -> Result<HistorySample, String> {
 
     if !truncated {
         if let Some(commit) = current {
-            if commits.len() < HISTORY_MAX_COMMITS {
-                if commit.paths.len() > HISTORY_MAX_COCHANGE_PATHS_PER_COMMIT {
-                    broad_commits += 1;
-                }
-                commits.push(commit);
-            } else {
-                truncated = true;
+            debug_assert!(commits.len() < HISTORY_MAX_COMMITS);
+            if commit.paths.len() > HISTORY_MAX_COCHANGE_PATHS_PER_COMMIT {
+                broad_commits += 1;
             }
+            commits.push(commit);
         }
     }
 
