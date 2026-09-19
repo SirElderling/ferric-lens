@@ -6,7 +6,7 @@ use crate::{
     model::{DeltaStatus, EvidenceClass, Finding, ModuleMetrics, Priority},
 };
 
-use super::{current_snapshot_findings, evaluate_regressions, nearest_rank_p90, sort_findings};
+use super::{current_snapshot_findings, evaluate_regressions, nearest_rank_p90, refactor_candidates, sort_findings};
 
 fn module(index: usize, decisions: usize, dependencies: usize) -> ModuleMetrics {
     ModuleMetrics {
@@ -403,4 +403,185 @@ fn unique_max_helper_handles_empty_and_singleton_inputs_without_false_concentrat
     assert_eq!(super::unique_max_above_median(&[]), None);
     assert_eq!(super::unique_max_above_median(&[7]), None);
     assert_eq!(super::unique_max_above_median(&[1, 2]), None);
+}
+
+
+fn advisory_finding(
+    rule: &str,
+    subject: &str,
+    delta: DeltaStatus,
+    evidence: Vec<crate::model::Evidence>,
+) -> Finding {
+    Finding {
+        fingerprint: String::new(),
+        rule: rule.into(),
+        subject: subject.into(),
+        identity: subject.into(),
+        configuration: String::new(),
+        evidence_class: EvidenceClass::Candidate,
+        priority: Priority::Observe,
+        delta,
+        gate: false,
+        accepted: false,
+        acceptance_reason: None,
+        summary: "supporting finding".into(),
+        direction: "inspect".into(),
+        evidence,
+    }
+}
+
+fn evidence(metric: &str, value: usize) -> crate::model::Evidence {
+    crate::model::Evidence {
+        metric: metric.into(),
+        value,
+        reference: 10,
+        population: 20,
+        baseline: None,
+        material_delta: None,
+    }
+}
+
+#[test]
+fn refactor_candidate_requires_two_independent_signal_kinds() {
+    let complexity_only = vec![advisory_finding(
+        "structure.decision_concentration",
+        "demo::engine",
+        DeltaStatus::Current,
+        vec![
+            evidence("decision_sites", 20),
+            evidence("decision_sites", 21),
+        ],
+    )];
+
+    assert!(refactor_candidates(&complexity_only).is_empty());
+
+    let corroborated = vec![
+        advisory_finding(
+            "structure.decision_concentration",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![evidence("decision_sites", 20)],
+        ),
+        advisory_finding(
+            "build.rebuild_exposure_candidate",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![evidence("reverse_repository_dependents", 15)],
+        ),
+    ];
+
+    let candidates = refactor_candidates(&corroborated);
+
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].rule, "refactor.multi_signal_candidate");
+    assert_eq!(candidates[0].subject, "demo::engine");
+    assert_eq!(candidates[0].priority, Priority::Investigate);
+    assert_eq!(candidates[0].evidence_class, EvidenceClass::Strong);
+    assert!(!candidates[0].gate);
+    assert!(candidates[0].summary.contains("2 independent signals"));
+    assert!(candidates[0].summary.contains("decision complexity"));
+    assert!(candidates[0].summary.contains("dependency surface"));
+}
+
+#[test]
+fn structural_coupled_outlier_is_already_multi_signal_refactor_evidence() {
+    let supporting = vec![advisory_finding(
+        "structure.current_coupled_outlier",
+        "demo::engine",
+        DeltaStatus::Current,
+        vec![
+            evidence("decision_sites", 20),
+            evidence("local_dependency_modules", 8),
+        ],
+    )];
+
+    let candidates = refactor_candidates(&supporting);
+
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].evidence.len(), 2);
+    assert!(candidates[0]
+        .direction
+        .contains("splitting responsibilities"));
+    assert!(candidates[0]
+        .direction
+        .contains("narrowing dependency surface"));
+}
+
+#[test]
+fn refactor_candidate_combines_support_deterministically_and_keeps_change_relevance() {
+    let supporting = vec![
+        advisory_finding(
+            "runtime.clone_syntax_outlier",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![evidence("clone_call_syntax_sites", 12)],
+        ),
+        advisory_finding(
+            "build.rebuild_exposure_candidate",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![evidence("reverse_repository_dependents", 15)],
+        ),
+        Finding {
+            delta: DeltaStatus::Worsened,
+            gate: true,
+            evidence_class: EvidenceClass::Strong,
+            priority: Priority::ActFirst,
+            ..advisory_finding(
+                "structure.coupled_complexity_growth",
+                "demo::engine",
+                DeltaStatus::Worsened,
+                vec![
+                    evidence("local_dependency_modules", 8),
+                    evidence("decision_sites", 20),
+                ],
+            )
+        },
+    ];
+
+    let first = refactor_candidates(&supporting);
+    let mut reversed = supporting;
+    reversed.reverse();
+    let second = refactor_candidates(&reversed);
+
+    assert_eq!(first, second);
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].delta, DeltaStatus::Worsened);
+    assert_eq!(
+        first[0]
+            .evidence
+            .iter()
+            .map(|item| item.metric.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "clone_call_syntax_sites",
+            "decision_sites",
+            "local_dependency_modules",
+            "reverse_repository_dependents",
+        ]
+    );
+    assert!(first[0].summary.contains("3 independent signals"));
+}
+
+#[test]
+fn refactor_synthesis_does_not_use_other_refactor_findings_as_support() {
+    let supporting = vec![
+        advisory_finding(
+            "refactor.previous_candidate",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![
+                evidence("decision_sites", 20),
+                evidence("local_dependency_modules", 8),
+            ],
+        ),
+        advisory_finding(
+            "runtime.clone_syntax_outlier",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![evidence("clone_call_syntax_sites", 12)],
+        ),
+    ];
+
+    assert!(refactor_candidates(&supporting).is_empty());
 }
