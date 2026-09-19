@@ -238,7 +238,7 @@ fn filtered(world: &World) {
     assert_eq!(finding.priority, Priority::Observe);
     assert_eq!(finding.evidence_class, EvidenceClass::Candidate);
     assert_eq!(finding.evidence[0].metric, "clone_then_mutate_sites");
-    assert!(finding.direction.contains("narrower owned subset"));
+    assert!(finding.direction.contains("filtered or changed subset"));
 }
 
 #[test]
