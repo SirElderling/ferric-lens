@@ -417,8 +417,8 @@ mod tests {
     };
 
     use super::{
-        changes_since, inspect, is_object_id, materialize_worktree, parse_history, resolve_baseline,
-        resolve_commit, sample_history, ChangeSet,
+        changes_since, inspect, is_object_id, materialize_worktree, parse_history,
+        resolve_baseline, resolve_commit, sample_history, ChangeSet,
     };
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -626,7 +626,10 @@ mod tests {
         assert!(changes.added.contains("added.rs"));
         assert!(changes.deleted.contains("delete.rs"));
         assert!(changes.modified.contains("modify.rs"));
-        assert_eq!(changes.renames.get("rename.rs").map(String::as_str), Some("renamed.rs"));
+        assert_eq!(
+            changes.renames.get("rename.rs").map(String::as_str),
+            Some("renamed.rs")
+        );
     }
 
     #[test]
@@ -707,10 +710,7 @@ mod tests {
         let sample = parse_history(&bytes).unwrap();
 
         assert!(sample.truncated);
-        assert_eq!(
-            sample.changed_path_records,
-            super::HISTORY_MAX_PATH_RECORDS
-        );
+        assert_eq!(sample.changed_path_records, super::HISTORY_MAX_PATH_RECORDS);
     }
 
     #[test]
@@ -726,7 +726,10 @@ mod tests {
         let repo = Repo::new("origin-head");
         repo.write("tracked.txt", "one");
         let head = repo.commit("first");
-        git(&repo.root, &["update-ref", "refs/remotes/origin/main", &head]);
+        git(
+            &repo.root,
+            &["update-ref", "refs/remotes/origin/main", &head],
+        );
         git(
             &repo.root,
             &[
@@ -742,5 +745,4 @@ mod tests {
             .iter()
             .any(|(candidate, explicit)| candidate == "origin/main" && !explicit));
     }
-
 }
