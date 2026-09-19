@@ -933,6 +933,135 @@ mod tests {
         assert!(rendered.contains("struct · public"));
     }
 
+
+    #[test]
+    fn report_exposes_human_triage_labels_summary_and_module_navigation() {
+        use crate::model::{
+            DeltaStatus, EvidenceClass, Finding, ModuleMetrics, Priority,
+        };
+
+        let mut result = minimal_result();
+        result.modules = vec![ModuleMetrics {
+            crate_name: "demo".into(),
+            module_path: "engine".into(),
+            path: "src/engine.rs".into(),
+            lines: 42,
+            decision_sites: 9,
+            public_items: 1,
+            clone_calls: 0,
+            functions: Vec::new(),
+            types: Vec::new(),
+            explicit_imports: Vec::new(),
+            local_dependency_modules: Vec::new(),
+            structure_digest: "engine".into(),
+            parse_complete: true,
+            gate_complete: true,
+            limitation: None,
+            history: None,
+        }];
+        result.findings = vec![
+            Finding {
+                fingerprint: "refactor".into(),
+                rule: "refactor.multi_signal_candidate".into(),
+                subject: "demo::engine".into(),
+                identity: "demo::engine".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::Investigate,
+                delta: DeltaStatus::Worsened,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "corroborated".into(),
+                direction: "inspect boundary".into(),
+                evidence: Vec::new(),
+            },
+            Finding {
+                fingerprint: "observe".into(),
+                rule: "runtime.clone_syntax_outlier".into(),
+                subject: "demo::engine".into(),
+                identity: "demo::engine".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "observe".into(),
+                direction: "measure".into(),
+                evidence: Vec::new(),
+            },
+        ];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("<h2>Triage</h2>"));
+        assert!(rendered.contains("1 investigate"));
+        assert!(rendered.contains("1 observe"));
+        assert!(rendered.contains("1 refactoring candidate"));
+        assert!(rendered.contains("1 new/worsened finding"));
+        assert!(rendered.contains("Priority 2 — investigate"));
+        assert!(rendered.contains("strong evidence"));
+        assert!(rendered.contains("worsened"));
+        assert!(rendered.contains("src/engine.rs"));
+        assert!(rendered.contains(">View module</a>"));
+        assert!(rendered.contains("id=\"module-"));
+        assert!(rendered.contains("href=\"#module-"));
+    }
+
+    #[test]
+    fn human_report_orders_priority_then_change_relevance_without_mutating_result() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        let mut result = minimal_result();
+        for (fingerprint, subject, priority, delta) in [
+            ("observe", "demo::observe", Priority::Observe, DeltaStatus::Current),
+            (
+                "investigate-current",
+                "demo::investigate-current",
+                Priority::Investigate,
+                DeltaStatus::Current,
+            ),
+            (
+                "investigate-worsened",
+                "demo::investigate-worsened",
+                Priority::Investigate,
+                DeltaStatus::Worsened,
+            ),
+            ("act", "demo::act", Priority::ActFirst, DeltaStatus::New),
+        ] {
+            result.findings.push(Finding {
+                fingerprint: fingerprint.into(),
+                rule: "structure.test".into(),
+                subject: subject.into(),
+                identity: subject.into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority,
+                delta,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "candidate".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            });
+        }
+        let original = result.findings.clone();
+
+        let rendered = html(&result);
+
+        let act = rendered.find("demo::act").unwrap();
+        let worsened = rendered.find("demo::investigate-worsened").unwrap();
+        let investigate = rendered.find("demo::investigate-current").unwrap();
+        let observe = rendered.find("demo::observe").unwrap();
+        assert!(act < worsened);
+        assert!(worsened < investigate);
+        assert!(investigate < observe);
+        assert_eq!(result.findings, original);
+    }
+
     #[test]
     fn write_reports_parent_creation_failure() {
         use std::fs;
