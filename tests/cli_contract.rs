@@ -153,7 +153,7 @@ fn analyze_reports_output_write_failures_as_errors() {
 
 #[test]
 fn regression_uses_exit_code_one_and_accept_can_succeed() {
-    let (repo, baseline) = Repo::gate_fixture("cli-regression");
+    let (repo, baseline) = gate_fixture("cli-regression");
     let check = run(&["check", repo.root.to_str().unwrap(), "--base", &baseline]);
     assert_eq!(check.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&check.stdout).contains("Regression"));
@@ -180,4 +180,46 @@ fn regression_uses_exit_code_one_and_accept_can_succeed() {
 
     assert!(accepted.status.success());
     assert!(String::from_utf8_lossy(&accepted.stdout).contains("accepted finding"));
+}
+
+
+fn gate_fixture(name: &str) -> (Repo, String) {
+    let repo = Repo::new(name);
+    let declarations = (0..20)
+        .map(|index| format!("mod m{index};"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    repo.write("src/lib.rs", &declarations);
+    for index in 0..20 {
+        let (decisions, dependencies) = match index {
+            0 => (12, 4),
+            1..=16 => (10, 3),
+            _ => (15, 5),
+        };
+        repo.write(
+            &format!("src/m{index}.rs"),
+            &gate_module_source(index, decisions, dependencies),
+        );
+    }
+    repo.commit("baseline");
+    let baseline = support::git(&repo.root, &["rev-parse", "HEAD"]);
+    repo.write("src/m0.rs", &gate_module_source(0, 18, 7));
+    repo.commit("regression");
+    (repo, baseline)
+}
+
+fn gate_module_source(index: usize, decisions: usize, dependencies: usize) -> String {
+    let mut source = String::new();
+    for dependency in 1..=dependencies {
+        let target = (index + dependency) % 20;
+        if target != index {
+            source.push_str(&format!("use crate::m{target};\n"));
+        }
+    }
+    source.push_str("fn measured(value: bool) {\n");
+    for _ in 0..decisions {
+        source.push_str("    if value {}\n");
+    }
+    source.push_str("}\n");
+    source
 }
