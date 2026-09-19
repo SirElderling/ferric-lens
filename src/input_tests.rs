@@ -984,7 +984,6 @@ fn fallback_inventory_reports_unreadable_root_shape() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn metadata_inventory_failure_falls_back_without_claiming_completeness() {
     let root = temp_root();
@@ -1007,8 +1006,7 @@ fn metadata_inventory_failure_falls_back_without_claiming_completeness() {
         workspace_root: root.to_string_lossy().into_owned(),
     };
 
-    let (_, aliases, complete, detail) =
-        acquire_inventory(&root, Ok(metadata), None).unwrap();
+    let (_, aliases, complete, detail) = acquire_inventory(&root, Ok(metadata), None).unwrap();
 
     assert!(aliases.is_empty());
     assert!(!complete);
@@ -1032,12 +1030,7 @@ fn final_inventory_deduplicates_sources_and_hashes_workspace_aliases() {
         BTreeMap::from([("shared".into(), "shared".into())]),
     )]);
 
-    let inventory = finalize_inventory((
-        vec![source.clone(), source],
-        aliases.clone(),
-        true,
-        None,
-    ));
+    let inventory = finalize_inventory((vec![source.clone(), source], aliases.clone(), true, None));
     let without_aliases = finalize_inventory((
         inventory.sources.clone(),
         WorkspaceAliases::new(),
@@ -1113,8 +1106,7 @@ fn metadata_inventory_skips_external_packages_invalid_targets_and_non_workspace_
         workspace_root: root.to_string_lossy().into_owned(),
     };
 
-    let (sources, aliases, limitations) =
-        inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert_eq!(sources.len(), 1);
     assert_eq!(sources[0].relative_path, "src/lib.rs");
@@ -1228,11 +1220,7 @@ fn nested_module_read_errors_propagate_through_inline_and_file_discovery() {
 
 #[test]
 fn module_cfg_discovery_covers_malformed_and_true_cfg_paths() {
-    use crate::{
-        cfg::HostCfg,
-        model::AnalysisProfile,
-        profile::ProfileContext,
-    };
+    use crate::{cfg::HostCfg, model::AnalysisProfile, profile::ProfileContext};
 
     let root = temp_root();
     fs::write(
