@@ -651,12 +651,8 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
         } else if actionable_findings.is_empty() {
             html.push_str("<p>This module has contextual observations, but Ferric Lens has not established that action is needed. Use the explorer only for background or follow-up measurement.</p><p>");
         } else {
-            html.push_str("<p>Start with the finding");
-            if actionable_findings.len() != 1 {
-                html.push('s');
-            }
             html.push_str(
-                " above. This explorer shows structural context for the affected area.</p><p>",
+                "<p>Start with the relevant findings above. This explorer shows structural context for the affected area.</p><p>",
             );
             for (index, finding) in module_findings.iter().enumerate() {
                 if index > 0 {
