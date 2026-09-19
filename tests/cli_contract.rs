@@ -236,7 +236,6 @@ fn gate_module_source(index: usize, decisions: usize, dependencies: usize) -> St
     source
 }
 
-
 #[test]
 fn analyze_reports_html_write_failures_after_json_succeeds() {
     let repo = Repo::baseline("html-write-error");
