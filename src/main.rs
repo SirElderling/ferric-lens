@@ -107,12 +107,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 evidence.as_deref(),
             )?;
             let (json, html) = analyze_artifact_paths(ai, json, html);
-            if let Some(path) = json {
-                report::write(&path, &report::json(&result))?;
-            }
-            if let Some(path) = html {
-                report::write(&path, &report::html(&result))?;
-            }
+            write_analyze_artifacts(&result, json.as_deref(), html.as_deref())?;
             print!("{}", output_text(&result, ai));
             Ok(exit_code(&result.verdict))
         }
@@ -173,6 +168,20 @@ fn analyze_artifact_paths(
     }
 }
 
+fn write_analyze_artifacts(
+    result: &ferric_lens::model::AnalysisResult,
+    json: Option<&std::path::Path>,
+    html: Option<&std::path::Path>,
+) -> Result<(), String> {
+    if let Some(path) = json {
+        report::write(path, &report::json(result))?;
+    }
+    if let Some(path) = html {
+        report::write(path, &report::html(result))?;
+    }
+    Ok(())
+}
+
 fn output_text(result: &ferric_lens::model::AnalysisResult, ai: bool) -> String {
     if ai {
         format!("{}\n", report::ai_json(result))
@@ -198,7 +207,7 @@ mod tests {
         AnalysisProfile, AnalysisResult, ArchitectureSummary, GateVerdict, Snapshot,
     };
 
-    use super::{analyze_artifact_paths, output_text, Cli, Command};
+    use super::{analyze_artifact_paths, output_text, write_analyze_artifacts, Cli, Command};
 
     fn result() -> AnalysisResult {
         AnalysisResult {
@@ -255,6 +264,26 @@ mod tests {
         let (json, html) = analyze_artifact_paths(false, None, None);
         assert_eq!(json, Some(PathBuf::from("ferric-lens.json")));
         assert_eq!(html, Some(PathBuf::from("ferric-lens-report.html")));
+    }
+
+    #[test]
+    fn analyze_artifact_writer_covers_explicit_and_stdout_only_paths() {
+        let result = result();
+        let root = std::env::temp_dir().join(format!(
+            "ferric-lens-main-artifacts-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let json = root.join("result.json");
+        let html = root.join("result.html");
+
+        write_analyze_artifacts(&result, Some(&json), Some(&html)).unwrap();
+        assert!(json.is_file());
+        assert!(html.is_file());
+
+        write_analyze_artifacts(&result, None, None).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
