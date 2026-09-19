@@ -8,12 +8,12 @@ The product contract is defined in [VISION.md](VISION.md), [PROJECT_SPEC.md](PRO
 
 Ferric Lens currently:
 
-- inventories production Rust sources from Cargo library/binary target roots and follows reachable `mod` declarations, with an explicit partial-coverage fallback,
+- inventories production Rust sources from Cargo library/binary target roots, follows reachable `mod` declarations, and resolves literal `#[path = "..."]` module overrides while keeping unsupported path forms explicitly incomplete,
 - excludes orphan `.rs` files from Cargo-backed production analysis and keeps same-named library/binary targets distinct,
 - parses Rust syntax without compiling or executing the target project,
 - measures module decision sites, declared public items, explicit imports, and resolvable local dependency breadth,
 - identifies advisory current-snapshot structural outliers,
-- synthesizes first-class refactoring candidates when at least two independent deterministic signal kinds corroborate the same module, with evidence and a bounded structural direction rather than a generated redesign,
+- synthesizes first-class refactoring candidates from compatible structural signals, while keeping candidate-only corroboration at Observe and refusing to treat raw `.clone()` concentration as architectural proof,
 - renders a human-first HTML report led by **What needs attention**, with plain-language consequences, next investigation steps, source evidence, and technical rule IDs kept secondary,
 - resolves a Git target and analyzes the unique merge base under the same rules as the current tree,
 - conservatively matches modules by stable identity, Git rename, then unique normalized structure,
