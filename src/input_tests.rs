@@ -2193,7 +2193,6 @@ fn target_without_resolve_features_uses_unresolved_profile_cfg() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn stable_snapshot_propagates_cargo_input_verification_errors() {
     let root = temp_root();
