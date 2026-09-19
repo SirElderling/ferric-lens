@@ -1,4 +1,6 @@
 // ferric-lens: ignore-correctness-risks
+use syn::{spanned::Spanned, Item};
+
 use crate::{
     input::SourceFile,
     model::{DeltaStatus, Evidence, EvidenceClass, Finding, Priority, SourceContext},
@@ -17,15 +19,31 @@ struct Match {
     excerpt: String,
 }
 
-const CARGO_NO_DEPS: &str = concat!("--no", "-deps");
-const FEATURE_KEY_BRANCH: &str = concat!("key == ", "\"feature\"");
-const SYMBOLIC_TARGET_IDENTITY: &str = concat!("target={target_", "label};features=");
-const SYMBOLIC_PROFILE_TARGET: &str = concat!("profile.", "target");
-const ROOT_ONLY_CARGO_LOOP: &str = concat!("for name in [\"Cargo.", "toml\", \"Cargo.lock\"]");
-const WORKSPACE_MANIFEST_PATH: &str = concat!("package.", "manifest_path");
-const GIT_COMMAND: &str = concat!("Command::new(", "\"git\")");
-const LOSSY_RECORD: &str = concat!("String::from_utf8_lossy(", "record)");
-const LOSSY_PATH: &str = concat!("String::from_utf8_lossy(", "path)");
+#[derive(Debug, Clone)]
+struct FunctionRegion {
+    path: String,
+    name: String,
+    start_line: usize,
+    lines: Vec<String>,
+}
+
+impl FunctionRegion {
+    fn contains(&self, needle: &str) -> bool {
+        self.lines.iter().any(|line| line.contains(needle))
+    }
+
+    fn first_match(&self, predicate: impl Fn(&str) -> bool) -> Option<Match> {
+        self.lines
+            .iter()
+            .enumerate()
+            .find(|(_, line)| predicate(line))
+            .map(|(offset, line)| Match {
+                path: self.path.clone(),
+                line: self.start_line + offset,
+                excerpt: line.trim().to_owned(),
+            })
+    }
+}
 
 const SUPPRESSION_DIRECTIVE: &str = "ferric-lens: ignore-correctness-risks";
 
@@ -55,10 +73,11 @@ pub fn scan(sources: &[SourceFile]) -> CorrectnessScan {
 }
 
 fn detect_cargo_feature_resolution(sources: &[SourceFile], scan: &mut CorrectnessScan) {
-    let no_deps = matches(sources, CARGO_NO_DEPS);
-    let feature_branch = matches(sources, FEATURE_KEY_BRANCH);
-    let explicit_features = matches(sources, "explicit_features");
-    if no_deps.is_empty() || feature_branch.is_empty() || explicit_features.is_empty() {
+    let no_deps = matches_where(sources, |line| line.contains("--no-deps"));
+    let feature_branch = matches_where(sources, |line| {
+        line.contains(""feature"") && (line.contains("contains(") || line.contains(".contains("))
+    });
+    if no_deps.is_empty() || feature_branch.is_empty() {
         return;
     }
 
@@ -82,9 +101,17 @@ fn detect_cargo_feature_resolution(sources: &[SourceFile], scan: &mut Correctnes
 }
 
 fn detect_symbolic_target_identity(sources: &[SourceFile], scan: &mut CorrectnessScan) {
-    let symbolic = matches(sources, SYMBOLIC_TARGET_IDENTITY);
-    let symbolic_match = matches(sources, SYMBOLIC_PROFILE_TARGET);
-    let resolved = matches(sources, "resolved_target");
+    let resolved = matches_where(sources, |line| line.contains("resolved_target"));
+    let symbolic = matches_where(sources, |line| {
+        line.contains("format!")
+            && line.contains("target={")
+            && !line.contains("resolved_target")
+    });
+    let symbolic_match = matches_where(sources, |line| {
+        line.contains("==")
+            && line.contains(".target")
+            && !line.contains(".resolved_target")
+    });
     if symbolic.is_empty() || symbolic_match.is_empty() || resolved.is_empty() {
         return;
     }
@@ -95,8 +122,8 @@ fn detect_symbolic_target_identity(sources: &[SourceFile], scan: &mut Correctnes
         "repository",
         EvidenceClass::Strong,
         Priority::ActFirst,
-        "Machine configuration identity uses the symbolic host label instead of the resolved target",
-        "use the resolved target triple in persistent finding/acceptance identity and in imported-evidence configuration matching; keep the symbolic host label only for display",
+        "Machine configuration identity uses a symbolic target label instead of the resolved target",
+        "use the resolved target triple in persistent finding/acceptance identity and in imported-evidence configuration matching; keep symbolic labels such as host only for display",
         vec![
             evidence("symbolic_target_identity_sites", symbolic.len()),
             evidence("symbolic_target_match_sites", symbolic_match.len()),
@@ -109,19 +136,28 @@ fn detect_symbolic_target_identity(sources: &[SourceFile], scan: &mut Correctnes
 }
 
 fn detect_stdout_mode_artifacts(sources: &[SourceFile], scan: &mut CorrectnessScan) {
+    const MODES: [&str; 5] = ["ai", "stdout", "compact", "machine", "json_only"];
+
     for source in sources {
         let Ok(text) = std::str::from_utf8(&source.bytes) else {
             continue;
         };
         let lines = text.lines().collect::<Vec<_>>();
         for (index, line) in lines.iter().enumerate() {
-            if !line.contains("output_text(&result, ai)") {
+            if !(line.contains("print!(") || line.contains("println!(")) {
                 continue;
             }
-            let start = index.saturating_sub(12);
+            let start = index.saturating_sub(14);
             let window = &lines[start..=index];
+            let Some(mode) = MODES
+                .iter()
+                .find(|mode| window.iter().any(|line| contains_ident(line, mode)))
+            else {
+                continue;
+            };
             let guarded = window.iter().any(|line| {
-                line.contains("if ai") || line.contains("if !ai") || line.contains("if ! ai")
+                line.contains("if")
+                    && contains_ident(line, mode)
             });
             if guarded {
                 continue;
@@ -130,7 +166,9 @@ fn detect_stdout_mode_artifacts(sources: &[SourceFile], scan: &mut CorrectnessSc
                 .iter()
                 .enumerate()
                 .filter(|(_, line)| {
-                    line.contains("report::write(&json") || line.contains("report::write(&html")
+                    line.contains("::write(")
+                        || line.contains(".write(")
+                        || line.contains("::create(")
                 })
                 .map(|(offset, line)| Match {
                     path: source.relative_path.clone(),
@@ -159,12 +197,54 @@ fn detect_stdout_mode_artifacts(sources: &[SourceFile], scan: &mut CorrectnessSc
 }
 
 fn detect_workspace_manifest_snapshot_gap(sources: &[SourceFile], scan: &mut CorrectnessScan) {
-    let root_only = matches(sources, ROOT_ONLY_CARGO_LOOP);
-    let member_manifest = matches(sources, WORKSPACE_MANIFEST_PATH);
-    let verifier = matches(sources, "verify_stable_inputs");
-    if root_only.is_empty() || member_manifest.is_empty() || verifier.is_empty() {
+    let functions = function_regions(sources);
+    let root_only = functions
+        .iter()
+        .filter(|function| {
+            function.contains("Cargo.toml")
+                && function.contains("Cargo.lock")
+                && !function.contains("manifest_path")
+        })
+        .collect::<Vec<_>>();
+    let member_reads = functions
+        .iter()
+        .filter_map(|function| {
+            if function.contains("manifest_path")
+                && (function.contains("fs::read") || function.contains("read("))
+            {
+                function.first_match(|line| line.contains("manifest_path"))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut verifier_refs = Vec::new();
+    for verifier in functions.iter().filter(|function| {
+        let name = function.name.to_ascii_lowercase();
+        name.contains("verify") || name.contains("stable") || name.contains("check")
+    }) {
+        for root_function in &root_only {
+            if verifier.contains(&format!("{}(", root_function.name)) {
+                if let Some(found) =
+                    verifier.first_match(|line| line.contains(&format!("{}(", root_function.name)))
+                {
+                    verifier_refs.push(found);
+                }
+            }
+        }
+    }
+
+    if root_only.is_empty() || member_reads.is_empty() || verifier_refs.is_empty() {
         return;
     }
+
+    let root_matches = root_only
+        .iter()
+        .filter_map(|function| {
+            function.first_match(|line| line.contains("Cargo.toml") && line.contains("Cargo.lock"))
+        })
+        .collect::<Vec<_>>();
 
     push_finding(
         scan,
@@ -175,12 +255,12 @@ fn detect_workspace_manifest_snapshot_gap(sources: &[SourceFile], scan: &mut Cor
         "Snapshot stability verification does not cover all workspace manifests used during analysis",
         "capture the complete set of workspace-member manifests used by Cargo metadata, include them in the initial Cargo-input digest, and verify the same files again before publishing the snapshot",
         vec![
-            evidence("root_only_cargo_input_sites", root_only.len()),
-            evidence("workspace_manifest_read_sites", member_manifest.len()),
+            evidence("root_only_cargo_input_sites", root_matches.len()),
+            evidence("workspace_manifest_read_sites", member_reads.len()),
         ],
         vec![
-            ("root_only_cargo_input_sites", root_only),
-            ("workspace_manifest_read_sites", member_manifest),
+            ("root_only_cargo_input_sites", root_matches),
+            ("workspace_manifest_read_sites", member_reads),
         ],
     );
 }
@@ -191,11 +271,15 @@ fn detect_lossy_git_paths(sources: &[SourceFile], scan: &mut CorrectnessScan) {
         let Ok(text) = std::str::from_utf8(&source.bytes) else {
             continue;
         };
-        if !text.contains(GIT_COMMAND) {
+        let git_path_stream = text.contains("Command::new("git")") && text.contains(""-z"");
+        if !git_path_stream {
             continue;
         }
         for (index, line) in text.lines().enumerate() {
-            if line.contains(LOSSY_RECORD) || line.contains(LOSSY_PATH) {
+            let path_like = ["path", "record", "entry", "name"]
+                .iter()
+                .any(|word| contains_ident(line, word));
+            if line.contains("from_utf8_lossy") && path_like {
                 lossy.push(Match {
                     path: source.relative_path.clone(),
                     line: index + 1,
@@ -221,14 +305,17 @@ fn detect_lossy_git_paths(sources: &[SourceFile], scan: &mut CorrectnessScan) {
     );
 }
 
-fn matches(sources: &[SourceFile], needle: &str) -> Vec<Match> {
+fn matches_where(
+    sources: &[SourceFile],
+    predicate: impl Fn(&str) -> bool,
+) -> Vec<Match> {
     let mut out = Vec::new();
     for source in sources {
         let Ok(text) = std::str::from_utf8(&source.bytes) else {
             continue;
         };
         for (index, line) in text.lines().enumerate() {
-            if line.contains(needle) {
+            if predicate(line) {
                 out.push(Match {
                     path: source.relative_path.clone(),
                     line: index + 1,
@@ -238,6 +325,51 @@ fn matches(sources: &[SourceFile], needle: &str) -> Vec<Match> {
         }
     }
     out
+}
+
+fn function_regions(sources: &[SourceFile]) -> Vec<FunctionRegion> {
+    let mut out = Vec::new();
+    for source in sources {
+        let Ok(text) = std::str::from_utf8(&source.bytes) else {
+            continue;
+        };
+        let Ok(file) = syn::parse_file(text) else {
+            continue;
+        };
+        let source_lines = text.lines().collect::<Vec<_>>();
+        for item in file.items {
+            let Item::Fn(function) = item else {
+                continue;
+            };
+            let start = function.span().start().line.max(1);
+            let end = function.span().end().line.max(start);
+            let lines = source_lines
+                .get(start - 1..end.min(source_lines.len()))
+                .unwrap_or(&[])
+                .iter()
+                .map(|line| (*line).to_owned())
+                .collect();
+            out.push(FunctionRegion {
+                path: source.relative_path.clone(),
+                name: function.sig.ident.to_string(),
+                start_line: start,
+                lines,
+            });
+        }
+    }
+    out
+}
+
+fn contains_ident(line: &str, ident: &str) -> bool {
+    line.match_indices(ident).any(|(start, _)| {
+        let before = line[..start].chars().next_back();
+        let after = line[start + ident.len()..].chars().next();
+        !before.is_some_and(is_ident_char) && !after.is_some_and(is_ident_char)
+    })
+}
+
+fn is_ident_char(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 fn evidence(metric: &str, value: usize) -> Evidence {
