@@ -608,17 +608,28 @@ fn rebind_advisory_baseline(
             let previous = &baseline[baseline_index];
             let previous_subject = display_subject(&previous.crate_name, &previous.module_path);
             finding.identity = previous_subject.clone();
-            let existed_at_baseline = baseline_findings.iter().any(|baseline_finding| {
+            let prior_finding = baseline_findings.iter().find(|baseline_finding| {
                 baseline_finding.rule == finding.rule
                     && baseline_finding.subject == previous_subject
             });
-            finding.delta = if existed_at_baseline {
+            let worsened = advisory_evidence_materially_worsened(
+                finding,
+                prior_finding,
+                previous,
+                &previous_subject,
+                baseline,
+            );
+            finding.delta = if worsened {
+                model::DeltaStatus::Worsened
+            } else if prior_finding.is_some() {
                 model::DeltaStatus::Unchanged
             } else {
-                model::DeltaStatus::Worsened
+                model::DeltaStatus::Unknown
             };
-            if finding.delta == model::DeltaStatus::Unchanged
-                && finding.priority == model::Priority::Investigate
+            if matches!(
+                finding.delta,
+                model::DeltaStatus::Unchanged | model::DeltaStatus::Unknown
+            ) && finding.priority == model::Priority::Investigate
             {
                 finding.priority = model::Priority::Observe;
             }
@@ -631,6 +642,77 @@ fn rebind_advisory_baseline(
             model::DeltaStatus::Unknown
         };
     }
+}
+
+fn advisory_evidence_materially_worsened(
+    current: &model::Finding,
+    prior: Option<&model::Finding>,
+    previous_module: &ModuleMetrics,
+    previous_subject: &str,
+    baseline: &[ModuleMetrics],
+) -> bool {
+    current.evidence.iter().any(|evidence| {
+        let baseline_value = prior
+            .and_then(|finding| {
+                finding
+                    .evidence
+                    .iter()
+                    .find(|item| item.metric == evidence.metric)
+                    .map(|item| item.value)
+            })
+            .or_else(|| {
+                advisory_baseline_metric_value(
+                    &evidence.metric,
+                    previous_module,
+                    previous_subject,
+                    baseline,
+                )
+            });
+
+        baseline_value.is_some_and(|baseline_value| {
+            advisory_growth_is_material(&evidence.metric, baseline_value, evidence.value)
+        })
+    })
+}
+
+fn advisory_baseline_metric_value(
+    metric: &str,
+    module: &ModuleMetrics,
+    subject: &str,
+    baseline: &[ModuleMetrics],
+) -> Option<usize> {
+    match metric {
+        "decision_sites" => Some(module.decision_sites),
+        "local_dependency_modules" => Some(module.local_dependency_modules.len()),
+        "clone_call_syntax_sites" => Some(module.clone_calls),
+        "reverse_repository_dependents" => Some(
+            baseline
+                .iter()
+                .filter(|candidate| {
+                    candidate
+                        .local_dependency_modules
+                        .iter()
+                        .any(|dependency| dependency == subject)
+                })
+                .count(),
+        ),
+        _ => None,
+    }
+}
+
+fn advisory_growth_is_material(metric: &str, baseline: usize, current: usize) -> bool {
+    if current <= baseline {
+        return false;
+    }
+
+    let minimum = match metric {
+        "decision_sites" => 3,
+        "local_dependency_modules"
+        | "clone_call_syntax_sites"
+        | "reverse_repository_dependents" => 2,
+        _ => 1,
+    };
+    current.saturating_sub(baseline) >= baseline.div_ceil(4).max(minimum)
 }
 
 fn display_subject(crate_name: &str, module_path: &str) -> String {
