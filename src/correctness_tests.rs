@@ -185,6 +185,83 @@ fn run() {
 }
 
 #[test]
+fn detects_clone_used_directly_as_for_loop_iterator() {
+    let sources = vec![source(
+        "src/history_query.rs",
+        r#"
+fn replay(population: &Population) {
+    for cohort in population.cohorts.clone() {
+        consume(cohort);
+    }
+}
+"#,
+    )];
+
+    let scan = scan(&sources);
+    let finding = scan
+        .findings
+        .iter()
+        .find(|finding| finding.rule == "runtime.clone_for_iteration_candidate")
+        .expect("clone-for-iteration candidate");
+
+    assert_eq!(finding.priority, Priority::Observe);
+    assert_eq!(finding.evidence_class, EvidenceClass::Candidate);
+    assert_eq!(finding.subject, "demo::src::history_query");
+    assert_eq!(finding.evidence[0].metric, "clone_for_iteration_sites");
+    assert_eq!(finding.evidence[0].value, 1);
+    assert!(scan.source_contexts.iter().any(|context| {
+        context.metric == "clone_for_iteration_sites"
+            && context.excerpt.contains("population.cohorts.clone()")
+    }));
+}
+
+#[test]
+fn detects_clone_used_as_mutable_working_copy() {
+    let sources = vec![source(
+        "src/render/history.rs",
+        r#"
+fn filtered(world: &World) {
+    let mut selected = world.clone();
+    selected.events.retain(|event| event.year > 10);
+    render(&selected);
+}
+"#,
+    )];
+
+    let scan = scan(&sources);
+    let finding = scan
+        .findings
+        .iter()
+        .find(|finding| finding.rule == "runtime.clone_then_mutate_candidate")
+        .expect("clone-then-mutate candidate");
+
+    assert_eq!(finding.priority, Priority::Observe);
+    assert_eq!(finding.evidence_class, EvidenceClass::Candidate);
+    assert_eq!(finding.evidence[0].metric, "clone_then_mutate_sites");
+    assert!(finding.direction.contains("narrower owned subset"));
+}
+
+#[test]
+fn ordinary_owned_output_clones_do_not_emit_runtime_copy_findings() {
+    let sources = vec![source(
+        "src/render.rs",
+        r#"
+fn detail(value: &Person) -> Detail {
+    Detail {
+        name: value.name.clone(),
+        description: value.description.clone(),
+    }
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule.starts_with("runtime.clone")));
+}
+
+#[test]
 fn clean_patterns_do_not_emit_correctness_findings() {
     let sources = vec![
         source(
