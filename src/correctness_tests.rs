@@ -252,8 +252,11 @@ fn cargo_input_digest() {
 }
 fn cargo_resolution_identity(package: &Package) {
     let manifest = PathBuf::from(&package.manifest_path);
+    let bytes = fs::read(&manifest)?;
 }
-fn verify_stable_inputs() {}
+fn verify_stable_inputs() {
+    cargo_input_digest();
+}
 "#,
         ),
         source(
