@@ -191,6 +191,8 @@ Observe
 
 Every priority must be explainable from the finding evidence.
 
+When a reliable baseline correspondence exists, advisory current-snapshot findings are attributed as `new`, `worsened`, `unchanged`, or `unknown` before refactor synthesis. Pre-existing unchanged advisory debt must not remain Priority 2 solely because it is structurally unusual; it is demoted to Observe unless separate current evidence justifies higher urgency.
+
 ### 7.3 Deterministic correctness risks
 
 Ferric Lens is not a general correctness linter, but V1 may emit a small family of source-backed correctness-risk findings when all of the following hold:
