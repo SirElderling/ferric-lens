@@ -6,7 +6,7 @@ use std::{
 };
 
 use serde::Deserialize;
-use syn::{Attribute, Item, ItemMod};
+use syn::{Attribute, Expr, ExprLit, Item, ItemMod, Lit, Meta};
 
 use crate::{
     cfg::{HostCfg, Truth},
@@ -1041,6 +1041,7 @@ fn collect_canonical_module(
         &syntax.items,
         module_path,
         &module_dir,
+        parent,
         cfg,
         visited,
         budget,
@@ -1056,6 +1057,7 @@ fn discover_child_modules(
     items: &[Item],
     parent_module: &str,
     module_dir: &Path,
+    source_dir: &Path,
     cfg: Option<&HostCfg>,
     visited: &mut BTreeSet<PathBuf>,
     budget: &mut SourceBudget,
@@ -1091,22 +1093,31 @@ fn discover_child_modules(
             Truth::True => {}
         }
 
-        if module.attrs.iter().any(|attr| attr.path().is_ident("path")) {
-            limitations.push(format!(
-                "{crate_name}: module {} uses #[path] and reachability is incomplete",
-                child_module_path(parent_module, module)
-            ));
-            continue;
-        }
-
         let child_path = child_module_path(parent_module, module);
+        let explicit_path = match literal_module_path(module) {
+            Ok(path) => path,
+            Err(reason) => {
+                limitations.push(format!(
+                    "{crate_name}: module {child_path} has unsupported #[path]: {reason}"
+                ));
+                continue;
+            }
+        };
+
         if let Some((_, inline_items)) = &module.content {
+            if explicit_path.is_some() {
+                limitations.push(format!(
+                    "{crate_name}: inline module {child_path} uses #[path] and reachability is incomplete"
+                ));
+                continue;
+            }
             let inline_dir = module_dir.join(module.ident.to_string());
             discover_child_modules(
                 repo_root,
                 crate_name,
                 inline_items,
                 &child_path,
+                &inline_dir,
                 &inline_dir,
                 cfg,
                 visited,
@@ -1117,26 +1128,30 @@ fn discover_child_modules(
             continue;
         }
 
-        let ident = module.ident.to_string();
-        let flat = module_dir.join(format!("{ident}.rs"));
-        let nested = module_dir.join(&ident).join("mod.rs");
-        let flat_exists = flat.is_file() || flat.is_symlink();
-        let nested_exists = nested.is_file() || nested.is_symlink();
+        let source = if let Some(explicit_path) = explicit_path {
+            source_dir.join(explicit_path)
+        } else {
+            let ident = module.ident.to_string();
+            let flat = module_dir.join(format!("{ident}.rs"));
+            let nested = module_dir.join(&ident).join("mod.rs");
+            let flat_exists = flat.is_file() || flat.is_symlink();
+            let nested_exists = nested.is_file() || nested.is_symlink();
 
-        let source = match (flat_exists, nested_exists) {
-            (true, false) => flat,
-            (false, true) => nested,
-            (false, false) => {
-                limitations.push(format!(
-                    "{crate_name}: module {child_path} has no discoverable source file"
-                ));
-                continue;
-            }
-            (true, true) => {
-                limitations.push(format!(
-                    "{crate_name}: module {child_path} has ambiguous source files"
-                ));
-                continue;
+            match (flat_exists, nested_exists) {
+                (true, false) => flat,
+                (false, true) => nested,
+                (false, false) => {
+                    limitations.push(format!(
+                        "{crate_name}: module {child_path} has no discoverable source file"
+                    ));
+                    continue;
+                }
+                (true, true) => {
+                    limitations.push(format!(
+                        "{crate_name}: module {child_path} has ambiguous source files"
+                    ));
+                    continue;
+                }
             }
         };
 
@@ -1155,6 +1170,30 @@ fn discover_child_modules(
     }
 
     Ok(())
+}
+
+fn literal_module_path(module: &ItemMod) -> Result<Option<PathBuf>, &'static str> {
+    let mut attrs = module
+        .attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("path"));
+    let Some(attr) = attrs.next() else {
+        return Ok(None);
+    };
+    if attrs.next().is_some() {
+        return Err("multiple path attributes");
+    }
+
+    match &attr.meta {
+        Meta::NameValue(value) => match &value.value {
+            Expr::Lit(ExprLit {
+                lit: Lit::Str(path),
+                ..
+            }) if !path.value().is_empty() => Ok(Some(PathBuf::from(path.value()))),
+            _ => Err("path value is not a non-empty string literal"),
+        },
+        _ => Err("path attribute is not name-value syntax"),
+    }
 }
 
 fn child_module_path(parent: &str, module: &ItemMod) -> String {
