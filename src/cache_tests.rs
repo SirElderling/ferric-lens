@@ -259,3 +259,43 @@ fn atomic_write_reports_temporary_write_failure() {
     assert!(result.unwrap_err().contains("cannot write"));
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn try_store_reports_atomic_replacement_failure() {
+    let root = temp_root();
+    let cache = RawFactCache::new(&root);
+    let source = source("src/engine.rs");
+    fs::create_dir_all(&cache.directory).unwrap();
+    let destination = cache
+        .directory
+        .join(format!("{}.json", super::key(&source, "profile")));
+    fs::create_dir_all(&destination).unwrap();
+
+    let error = cache
+        .try_store(&source, "profile", &module("src/engine.rs"))
+        .unwrap_err();
+
+    assert!(error.contains("cannot replace cache entry"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn eviction_ignores_entries_whose_metadata_cannot_be_read() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_root();
+    let cache = RawFactCache::new(&root);
+    fs::create_dir_all(&cache.directory).unwrap();
+    symlink(
+        cache.directory.join("missing-target"),
+        cache.directory.join("dangling.json"),
+    )
+    .unwrap();
+
+    cache.evict_if_needed();
+
+    assert!(cache.directory.join("dangling.json").exists());
+    fs::remove_dir_all(root).unwrap();
+}
