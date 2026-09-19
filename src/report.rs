@@ -1900,11 +1900,26 @@ mod tests {
                 "cargo_metadata_no_deps_sites",
                 "Cargo metadata calls without resolve graph",
             ),
-            ("cfg_feature_resolution_sites", "Feature cfg resolution sites"),
-            ("symbolic_target_identity_sites", "Symbolic target identity sites"),
-            ("symbolic_target_match_sites", "Symbolic target comparison sites"),
-            ("unconditional_output_write_sites", "Unconditional output writes"),
-            ("root_only_cargo_input_sites", "Root-only Cargo input digests"),
+            (
+                "cfg_feature_resolution_sites",
+                "Feature cfg resolution sites",
+            ),
+            (
+                "symbolic_target_identity_sites",
+                "Symbolic target identity sites",
+            ),
+            (
+                "symbolic_target_match_sites",
+                "Symbolic target comparison sites",
+            ),
+            (
+                "unconditional_output_write_sites",
+                "Unconditional output writes",
+            ),
+            (
+                "root_only_cargo_input_sites",
+                "Root-only Cargo input digests",
+            ),
             ("workspace_manifest_read_sites", "Workspace manifest reads"),
             ("lossy_git_path_decode_sites", "Lossy Git path decodes"),
         ] {
