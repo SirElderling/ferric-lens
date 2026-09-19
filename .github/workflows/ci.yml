@@ -32,7 +32,16 @@ jobs:
           components: rustfmt, clippy
 
       - name: Format
-        run: cargo fmt --check
+        run: cargo fmt --all
+
+      - name: Upload formatted source
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferric-lens-formatted-src
+          path: src
+
+      - name: Verify formatting
+        run: git diff --exit-code
 
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
