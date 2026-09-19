@@ -19,7 +19,7 @@ pub mod profile;
 pub mod report;
 pub mod rules;
 
-use std::{collections::BTreeSet, path::Path};
+use std::{collections::{BTreeMap, BTreeSet}, path::Path};
 
 use model::{
     AnalysisResult, BaselineContext, Capability, CapabilityStatus, GateVerdict, ModuleMetrics,
@@ -33,6 +33,8 @@ struct SnapshotAnalysis {
     cargo_input_digest: String,
     cargo_resolution_digest: Option<String>,
     auxiliary_targets: input::AuxiliaryTargetSummary,
+    workspace_aliases: input::WorkspaceAliases,
+    source_digests: BTreeMap<String, String>,
     modules: Vec<ModuleMetrics>,
     parse_failures: usize,
 }
@@ -182,6 +184,7 @@ fn analyze_internal_with_profile_context(
                 detail: Some(error.clone()),
             });
             capabilities.sort_by(|a, b| a.name.cmp(&b.name));
+            let source_contexts = finding_source_contexts(root, &current, &findings, profile)?;
             return Ok(AnalysisResult {
                 schema_version: 1,
                 tool_version: env!("CARGO_PKG_VERSION").into(),
@@ -196,6 +199,7 @@ fn analyze_internal_with_profile_context(
                 imported_evidence: imported_evidence.clone(),
                 capabilities,
                 modules: current.modules,
+                source_contexts,
                 findings,
             });
         }
@@ -238,6 +242,7 @@ fn analyze_internal_with_profile_context(
                 detail: Some(error.clone()),
             });
             capabilities.sort_by(|a, b| a.name.cmp(&b.name));
+            let source_contexts = finding_source_contexts(root, &current, &findings, profile)?;
             return Ok(AnalysisResult {
                 schema_version: 1,
                 tool_version: env!("CARGO_PKG_VERSION").into(),
@@ -398,6 +403,7 @@ fn analyze_internal_with_profile_context(
     };
 
     capabilities.sort_by(|a, b| a.name.cmp(&b.name));
+    let source_contexts = finding_source_contexts(root, &current, &findings, profile)?;
 
     Ok(AnalysisResult {
         schema_version: 1,
@@ -419,6 +425,7 @@ fn analyze_internal_with_profile_context(
         imported_evidence,
         capabilities,
         modules: current.modules,
+        source_contexts,
         findings,
     })
 }
@@ -459,6 +466,22 @@ pub fn accept_finding_with_profile(
         fingerprint,
         reason,
         &result.snapshot.content_digest,
+    )
+}
+
+fn finding_source_contexts(
+    root: &Path,
+    snapshot: &SnapshotAnalysis,
+    findings: &[model::Finding],
+    profile: &profile::ProfileContext,
+) -> Result<Vec<model::SourceContext>, String> {
+    extract::source_contexts_for_findings(
+        root,
+        &snapshot.modules,
+        &snapshot.workspace_aliases,
+        &snapshot.source_digests,
+        findings,
+        &profile.cfg,
     )
 }
 
@@ -563,6 +586,17 @@ fn analyze_snapshot(
     profile: &profile::ProfileContext,
 ) -> Result<SnapshotAnalysis, String> {
     let inventory = input::inventory_with_profile(root, profile)?;
+    let source_digests = inventory
+        .sources
+        .iter()
+        .map(|source| {
+            (
+                source.relative_path.clone(),
+                blake3::hash(&source.bytes).to_hex().to_string(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let workspace_aliases = inventory.workspace_aliases.clone();
     let fact_cache = cache::RawFactCache::new(cache_root);
     let mut modules = Vec::with_capacity(inventory.sources.len());
     let mut parse_failures = 0usize;
@@ -593,7 +627,7 @@ fn analyze_snapshot(
     modules.sort_by(|a, b| {
         (&a.crate_name, &a.module_path, &a.path).cmp(&(&b.crate_name, &b.module_path, &b.path))
     });
-    extract::resolve_workspace_dependencies(&mut modules, &inventory.workspace_aliases);
+    extract::resolve_workspace_dependencies(&mut modules, &workspace_aliases);
 
     Ok(SnapshotAnalysis {
         content_digest: inventory.content_digest,
@@ -602,6 +636,8 @@ fn analyze_snapshot(
         cargo_input_digest: inventory.cargo_input_digest,
         cargo_resolution_digest: inventory.cargo_resolution_digest,
         auxiliary_targets: inventory.auxiliary_targets,
+        workspace_aliases,
+        source_digests,
         modules,
         parse_failures,
     })
