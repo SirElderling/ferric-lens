@@ -507,7 +507,7 @@ For source-locatable V1 evidence, the canonical model records the finding subjec
 
 Repository structure is a secondary drill-down surface, not the report's primary answer.
 
-The explorer exists to answer: **"A finding pointed me here; what is this area connected to and what does it contain?"** It should therefore rank modules with active findings first and label every module explicitly as either worth investigating or currently without an identified concern.
+The explorer exists to answer: **"A finding pointed me here; what is this area connected to and what does it contain?"** It should therefore rank modules with actionable findings first. Modules with only lower-confidence observations must be labelled as contextual observations with no action established; modules with neither must be labelled as having no currently identified concern.
 
 For each module, compact structural metrics may be shown for context, but the UI must state that metrics are not problems by themselves. Dependencies, functions, types, and history context should remain collapsed until the user asks for them. A module with no active finding must not visually imply that a high raw count is a defect.
 
@@ -517,7 +517,7 @@ Findings and explorer entries must cross-link where possible so users can move f
 
 Canonical JSON is the complete machine interface. It must represent the same canonical findings as the HTML report and CI decision and carries the bounded source-context table used by HTML so machine and human outputs refer to the same source evidence.
 
-Ferric Lens may additionally expose a compact deterministic AI/agent view derived only from the canonical result. V1 exposes it with `--ai` on `analyze` and `check`. That view is intentionally selective: verdict/reason, canonical result digest, active findings, priority/evidence/delta, plain-language meaning, core evidence, exact source contexts where available, recommended next investigation step, rule identity, and non-complete analysis limitations. It omits raw module/function/type inventory, accepted findings from the active action list, and capabilities that are fully complete. It must not recompute semantics independently or change the command exit code.
+Ferric Lens may additionally expose a compact deterministic AI/agent view derived only from the canonical result. V1 exposes it with `--ai` on `analyze` and `check`. That view is intentionally selective: verdict/reason, canonical result digest, actionable `findings`, secondary `observations`, priority/evidence/delta, plain-language meaning, core evidence, exact source contexts where available, recommended next investigation step, rule identity, and non-complete analysis limitations. `Observe` priority must never be mixed into the actionable `findings` collection. The view omits raw module/function/type inventory, accepted findings from the active action list, and capabilities that are fully complete. It must not recompute semantics independently or change the command exit code.
 
 `--ai` changes stdout presentation only. When normal JSON/HTML paths are requested, those artifacts retain their standard full/canonical behavior.
 
@@ -636,3 +636,8 @@ Ferric Lens v1 is successful when a developer can point it at a Rust repository 
 - what Ferric Lens could and could not analyze.
 
 The tool should reduce the effort required to optimize and maintain Rust codebases without replacing engineering judgment.
+
+
+### Small-cohort noise control
+
+For descriptive small-cohort concentration observations, being the unique maximum is insufficient. The leading value must also be materially separated from the runner-up: the lead must be at least half of the runner-up value, with a minimum absolute gap of two. The reported comparison reference is the runner-up. This is a noise-control heuristic for descriptive observations only; it does not alter the 20-module p90 gate semantics.
