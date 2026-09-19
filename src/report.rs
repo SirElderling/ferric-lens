@@ -1616,10 +1616,7 @@ mod tests {
             "unavailable"
         );
         assert_eq!(super::verdict_label(&GateVerdict::Pass), "PASS");
-        assert_eq!(
-            super::verdict_label(&GateVerdict::Regression),
-            "REGRESSION"
-        );
+        assert_eq!(super::verdict_label(&GateVerdict::Regression), "REGRESSION");
         assert_eq!(
             super::verdict_label(&GateVerdict::Inconclusive),
             "INCONCLUSIVE"
@@ -1647,10 +1644,7 @@ mod tests {
             super::finding_path(&finding, &[], &contexts),
             "src/context.rs"
         );
-        assert_eq!(
-            super::finding_path(&finding, &[], &[]),
-            "demo::missing"
-        );
+        assert_eq!(super::finding_path(&finding, &[], &[]), "demo::missing");
 
         let mut result = minimal_result();
         result.capabilities = vec![
@@ -1670,8 +1664,7 @@ mod tests {
                 detail: None,
             },
         ];
-        let value: serde_json::Value =
-            serde_json::from_str(&super::ai_json(&result)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&super::ai_json(&result)).unwrap();
         assert_eq!(value["analysis_limits"].as_array().unwrap().len(), 2);
         assert_eq!(value["analysis_limits"][0]["status"], "partial");
         assert_eq!(value["analysis_limits"][1]["status"], "unavailable");
