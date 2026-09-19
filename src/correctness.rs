@@ -142,7 +142,10 @@ fn detect_contextual_copy_risks(sources: &[SourceFile], scan: &mut CorrectnessSc
             let end = (index + 13).min(lines.len());
             let prefix = format!("{name}.");
             let mutated = lines[index + 1..end].iter().any(|candidate| {
-                candidate.contains(&prefix)
+                let Some((_, after_root)) = candidate.split_once(&prefix) else {
+                    return false;
+                };
+                after_root.contains('.')
                     && MUTATING_METHODS
                         .iter()
                         .any(|method| candidate.contains(method))
@@ -163,8 +166,8 @@ fn detect_contextual_copy_risks(sources: &[SourceFile], scan: &mut CorrectnessSc
                 &subject,
                 EvidenceClass::Candidate,
                 Priority::Observe,
-                "A cloned value is immediately used as a mutable working copy",
-                "inspect whether the operation can work on borrowed data, a narrower owned subset, or an iterator/filter pipeline before copying the whole value",
+                "A cloned aggregate is followed by mutation of one of its nested fields",
+                "inspect whether the operation can borrow the original aggregate and build only the filtered or changed subset instead of copying the whole value",
                 vec![evidence(
                     "clone_then_mutate_sites",
                     clone_then_mutate.len(),
