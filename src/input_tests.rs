@@ -561,7 +561,7 @@ fn module_discovery_reports_cfg_path_missing_and_ambiguous_sources() {
     for expected in [
         "uses cfg_attr",
         "unresolved cfg reachability",
-        "uses #[path]",
+        "custom.rs is unavailable",
         "has no discoverable source file",
         "has ambiguous source files",
     ] {
