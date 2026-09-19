@@ -171,25 +171,33 @@ fn accept_rejects_unknown_finding_fingerprints() {
     assert!(error.contains("not present in the current analysis"));
 }
 
-
 #[test]
 fn analyze_wrapper_returns_a_useful_inconclusive_report_without_an_automatic_baseline() {
     let repo = Repo::baseline("analyze-wrapper");
 
     let result = ferric_lens::analyze(&repo.root).unwrap();
 
-    assert_eq!(result.verdict, ferric_lens::model::GateVerdict::Inconclusive);
+    assert_eq!(
+        result.verdict,
+        ferric_lens::model::GateVerdict::Inconclusive
+    );
     assert!(!result.modules.is_empty());
 }
 
 #[test]
 fn full_analysis_enriches_changed_production_paths_with_history() {
     let repo = Repo::baseline("history-enrichment");
-    repo.write("src/stable.rs", "pub fn stable() -> usize { if true { 2 } else { 1 } }");
+    repo.write(
+        "src/stable.rs",
+        "pub fn stable() -> usize { if true { 2 } else { 1 } }",
+    );
 
     let result = ferric_lens::analyze_with_base(&repo.root, Some("HEAD")).unwrap();
 
-    let history = result.history.as_ref().expect("history should be collected");
+    let history = result
+        .history
+        .as_ref()
+        .expect("history should be collected");
     assert!(history.sampled_commits >= 1);
     let module = result
         .modules
