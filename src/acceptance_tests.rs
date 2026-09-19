@@ -247,3 +247,29 @@ fn atomic_write_reports_temporary_write_failure() {
     assert!(result.unwrap_err().contains("cannot write"));
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn record_propagates_inventory_and_existing_acceptance_errors() {
+    let profile = ProfileContext::resolve(None, &[]).unwrap();
+    let missing = std::env::temp_dir().join(format!(
+        "ferric-lens-acceptance-missing-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&missing);
+    assert!(record(&missing, &profile, "fingerprint", "reason", "digest")
+        .unwrap_err()
+        .contains("cannot resolve"));
+
+    let root = temp_root();
+    let digest = crate::input::inventory_with_profile(&root, &profile)
+        .unwrap()
+        .content_digest;
+    fs::create_dir_all(root.join(".ferric-lens")).unwrap();
+    fs::write(root.join(".ferric-lens/acceptances.toml"), "invalid = [").unwrap();
+
+    assert!(record(&root, &profile, "fingerprint", "reason", &digest)
+        .unwrap_err()
+        .contains("invalid acceptance file"));
+    fs::remove_dir_all(root).unwrap();
+}
