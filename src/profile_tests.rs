@@ -54,3 +54,25 @@ fn rustc_host_command_reports_spawn_errors() {
         .unwrap_err()
         .contains("could not execute rustc"));
 }
+
+
+#[test]
+fn profile_resolution_reports_invalid_explicit_targets() {
+    let error = ProfileContext::resolve(Some("ferric-lens-invalid-target"), &[]).unwrap_err();
+
+    assert!(!error.is_empty());
+}
+
+#[test]
+fn rustc_host_parse_wrapper_propagates_spawn_errors() {
+    let missing = std::env::temp_dir().join(format!(
+        "ferric-lens-host-parse-missing-cwd-{}",
+        std::process::id()
+    ));
+    let mut command = Command::new("rustc");
+    command.current_dir(missing).arg("-vV");
+
+    assert!(super::run_rustc_host_and_parse(&mut command)
+        .unwrap_err()
+        .contains("could not execute rustc"));
+}
