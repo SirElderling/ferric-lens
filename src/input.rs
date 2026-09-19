@@ -242,7 +242,6 @@ fn finalize_inventory(acquired: AcquiredInventory) -> Inventory {
     }
 }
 
-
 fn auxiliary_target_summary(metadata: &Metadata) -> AuxiliaryTargetSummary {
     let members = metadata
         .workspace_members
@@ -292,7 +291,10 @@ fn cargo_input_digest(root: &Path) -> Result<String, String> {
                 hasher.update(&[0]);
             }
             Err(error) => {
-                return Err(format!("cannot read Cargo input {}: {error}", path.display()));
+                return Err(format!(
+                    "cannot read Cargo input {}: {error}",
+                    path.display()
+                ));
             }
         }
     }
@@ -316,8 +318,9 @@ fn cargo_resolution_identity(root: &Path, metadata: &Metadata) -> Result<String,
         let Ok(relative_manifest) = manifest.strip_prefix(root) else {
             continue;
         };
-        let manifest_bytes = fs::read(&manifest)
-            .map_err(|error| format!("cannot read Cargo manifest {}: {error}", manifest.display()))?;
+        let manifest_bytes = fs::read(&manifest).map_err(|error| {
+            format!("cannot read Cargo manifest {}: {error}", manifest.display())
+        })?;
         let mut targets = package
             .targets
             .iter()
