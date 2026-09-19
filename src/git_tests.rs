@@ -482,7 +482,6 @@ fn untracked_listing_reports_non_repository_errors() {
 
     fs::remove_dir_all(root).unwrap();
 }
-
 #[test]
 fn final_history_commit_is_finished_through_the_shared_helper() {
     let mut commits = Vec::new();
