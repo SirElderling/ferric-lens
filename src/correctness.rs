@@ -23,7 +23,8 @@ pub fn scan(sources: &[SourceFile]) -> CorrectnessScan {
     detect_stdout_mode_artifacts(sources, &mut scan);
     detect_workspace_manifest_snapshot_gap(sources, &mut scan);
     detect_lossy_git_paths(sources, &mut scan);
-    scan.findings.sort_by(|a, b| (&a.rule, &a.subject).cmp(&(&b.rule, &b.subject)));
+    scan.findings
+        .sort_by(|a, b| (&a.rule, &a.subject).cmp(&(&b.rule, &b.subject)));
     scan.source_contexts.sort();
     scan.source_contexts.dedup();
     scan
