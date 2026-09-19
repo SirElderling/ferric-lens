@@ -482,3 +482,31 @@ fn untracked_listing_reports_non_repository_errors() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn final_history_commit_is_finished_through_the_shared_helper() {
+    let mut commits = Vec::new();
+    let mut broad = 0;
+    let commit = super::HistoryCommit {
+        oid: "a".repeat(40),
+        paths: vec!["src/a.rs".into()],
+    };
+
+    super::finish_history_commit(&mut commits, Some(commit), &mut broad);
+
+    assert_eq!(commits.len(), 1);
+    assert_eq!(broad, 0);
+
+    let broad_commit = super::HistoryCommit {
+        oid: "b".repeat(40),
+        paths: (0..=super::HISTORY_MAX_COCHANGE_PATHS_PER_COMMIT)
+            .map(|index| format!("src/{index}.rs"))
+            .collect(),
+    };
+    super::finish_history_commit(&mut commits, Some(broad_commit), &mut broad);
+    super::finish_history_commit(&mut commits, None, &mut broad);
+
+    assert_eq!(commits.len(), 2);
+    assert_eq!(broad, 1);
+}
