@@ -871,16 +871,30 @@ mod tests {
             decision_sites: 1,
             public_items: 2,
             clone_calls: 1,
-            functions: vec![FunctionFact {
-                name: "engine::run<&>".into(),
-                kind: FunctionKind::Function,
-                public_declared: true,
-            }],
-            types: vec![TypeFact {
-                name: "engine::State<&>".into(),
-                kind: TypeKind::Struct,
-                public_declared: false,
-            }],
+            functions: vec![
+                FunctionFact {
+                    name: "engine::run<&>".into(),
+                    kind: FunctionKind::Function,
+                    public_declared: true,
+                },
+                FunctionFact {
+                    name: "engine::helper".into(),
+                    kind: FunctionKind::Function,
+                    public_declared: false,
+                },
+            ],
+            types: vec![
+                TypeFact {
+                    name: "engine::State<&>".into(),
+                    kind: TypeKind::Struct,
+                    public_declared: false,
+                },
+                TypeFact {
+                    name: "engine::PublicState".into(),
+                    kind: TypeKind::Struct,
+                    public_declared: true,
+                },
+            ],
             explicit_imports: Vec::new(),
             local_dependency_modules: vec!["demo::model<&>".into()],
             structure_digest: "engine".into(),
@@ -894,12 +908,16 @@ mod tests {
 
         assert!(rendered.contains("<summary>Dependencies (1)</summary>"));
         assert!(rendered.contains("demo::model&lt;&amp;&gt;"));
-        assert!(rendered.contains("<summary>Functions (1)</summary>"));
+        assert!(rendered.contains("<summary>Functions (2)</summary>"));
         assert!(rendered.contains("engine::run&lt;&amp;&gt;"));
         assert!(rendered.contains("function · public"));
-        assert!(rendered.contains("<summary>Types (1)</summary>"));
+        assert!(rendered.contains("engine::helper"));
+        assert!(rendered.contains("function · private"));
+        assert!(rendered.contains("<summary>Types (2)</summary>"));
         assert!(rendered.contains("engine::State&lt;&amp;&gt;"));
         assert!(rendered.contains("struct · private"));
+        assert!(rendered.contains("engine::PublicState"));
+        assert!(rendered.contains("struct · public"));
     }
 
     #[test]
