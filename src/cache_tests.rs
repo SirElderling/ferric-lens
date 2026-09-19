@@ -225,7 +225,8 @@ fn key_changes_with_content_profile_and_schema_inputs() {
         super::key(&second, "profile")
     );
     assert_ne!(super::key(&first, "profile"), super::key(&first, "other"));
-}\n
+}
+
 #[test]
 fn atomic_write_reports_parent_creation_failure() {
     let root = temp_root();
