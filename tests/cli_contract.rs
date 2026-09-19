@@ -235,3 +235,40 @@ fn gate_module_source(index: usize, decisions: usize, dependencies: usize) -> St
     source.push_str("}\n");
     source
 }
+
+
+#[test]
+fn analyze_reports_html_write_failures_after_json_succeeds() {
+    let repo = Repo::baseline("html-write-error");
+    let json = repo.root.join("result.json");
+    let output = run(&[
+        "analyze",
+        repo.root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--json",
+        json.to_str().unwrap(),
+        "--html",
+        repo.root.to_str().unwrap(),
+    ]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(json.is_file());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot replace"));
+}
+
+#[test]
+fn check_reports_json_write_failures_as_errors() {
+    let repo = Repo::baseline("check-write-error");
+    let output = run(&[
+        "check",
+        repo.root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--json",
+        repo.root.to_str().unwrap(),
+    ]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot replace"));
+}
