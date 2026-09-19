@@ -13,6 +13,8 @@ Ferric Lens currently:
 - parses Rust syntax without compiling or executing the target project,
 - measures module decision sites, declared public items, explicit imports, and resolvable local dependency breadth,
 - identifies advisory current-snapshot structural outliers,
+- synthesizes first-class refactoring candidates when at least two independent deterministic signal kinds corroborate the same module, with evidence and a bounded structural direction rather than a generated redesign,
+- renders refactoring candidates in a dedicated HTML section alongside structural, runtime-risk, and build-efficiency findings,
 - resolves a Git target and analyzes the unique merge base under the same rules as the current tree,
 - conservatively matches modules by stable identity, Git rename, then unique normalized structure,
 - gates the documented `structure.coupled_complexity_growth` regression only when both independent signals materially worsen,
