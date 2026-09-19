@@ -1,0 +1,5 @@
+/target/
+ferric-lens.json
+ferric-lens-report.html
+.DS_Store
+.ferric-lens/cache/

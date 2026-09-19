@@ -1,6 +1,6 @@
 # Ferric Lens architecture and decision record
 
-Status: proposed for PR #1. This is a documentation design, not an implemented or benchmarked system. Behavioral requirements are in [PROJECT_SPEC.md](PROJECT_SPEC.md); product intent is in [VISION.md](VISION.md).
+Status: implemented for Ferric Lens V1 in PR #2. This document records the implemented architecture, decision rationale, deliberate V1 limits, and pre-release validation criteria. Behavioral requirements are in [PROJECT_SPEC.md](PROJECT_SPEC.md); product intent is in [VISION.md](VISION.md). Performance/resource targets and real-project precision remain release-acceptance measurements and are not implied by implementation status.
 
 ## 1. Architecture in one page
 
@@ -154,7 +154,7 @@ Accept one normalized evidence envelope with version, producer, source/configura
 
 ## 8. Validation and performance acceptance
 
-Implement behavior fixtures before enabling CI gates. The repository currently contains documentation only, so none of these runtime checks are claimed to have passed.
+Behavior fixtures, specification-derived regression tests, cross-platform CI, and a source-centric 100% production coverage gate are implemented in PR #2. Release performance acceptance remains a separate measured step: the repository now includes deterministic standard and stress fixture generation plus a non-thresholded measurement workflow, but shared-runner observations are diagnostic rather than release promises.
 
 | Property | Required verification |
 | --- | --- |
