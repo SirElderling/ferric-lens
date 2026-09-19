@@ -1,88 +1,10 @@
 //! Specification-derived regression tests for behavior that existed before
 //! Ferric Lens made TDD an explicit project contract.
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::atomic::{AtomicU64, Ordering},
-};
+mod support;
 
 use ferric_lens::{model::GateVerdict, report};
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-struct Repo {
-    root: PathBuf,
-}
-
-impl Repo {
-    fn new(name: &str) -> Self {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "ferric-lens-contract-{name}-{}-{n}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(
-            root.join("Cargo.toml"),
-            "[package]\nname='fixture'\nversion='0.1.0'\nedition='2021'\n",
-        )
-        .unwrap();
-        git(&root, &["init", "-q"]);
-        git(
-            &root,
-            &["config", "user.email", "ferric-lens@example.invalid"],
-        );
-        git(&root, &["config", "user.name", "Ferric Lens Test"]);
-        Self { root }
-    }
-
-    fn write(&self, path: &str, contents: &str) {
-        let path = self.root.join(path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(path, contents).unwrap();
-    }
-
-    fn commit(&self, message: &str) {
-        git(&self.root, &["add", "."]);
-        git(&self.root, &["commit", "-q", "-m", message]);
-    }
-}
-
-impl Drop for Repo {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
-}
-
-fn git(root: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .current_dir(root)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_owned()
-}
-
-fn baseline_repo() -> Repo {
-    let repo = Repo::new("baseline");
-    repo.write("src/lib.rs", "pub mod stable;\n");
-    repo.write("src/stable.rs", "pub fn stable() -> usize { 1 }\n");
-    repo.commit("baseline");
-    repo
-}
+use support::Repo;
 
 #[test]
 fn no_baseline_is_explicitly_inconclusive_but_still_analyzes() {
@@ -102,7 +24,7 @@ fn no_baseline_is_explicitly_inconclusive_but_still_analyzes() {
 
 #[test]
 fn unchanged_repository_passes_against_an_explicit_baseline() {
-    let repo = baseline_repo();
+    let repo = Repo::baseline("baseline");
 
     let result = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
 
@@ -113,7 +35,7 @@ fn unchanged_repository_passes_against_an_explicit_baseline() {
 
 #[test]
 fn check_and_analyze_agree_on_gate_contract() {
-    let repo = baseline_repo();
+    let repo = Repo::baseline("baseline");
 
     let check = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
     let analyze = ferric_lens::analyze_with_base(&repo.root, Some("HEAD")).unwrap();
@@ -136,7 +58,7 @@ fn check_and_analyze_agree_on_gate_contract() {
 
 #[test]
 fn outputs_are_reproducible_for_identical_inputs() {
-    let repo = baseline_repo();
+    let repo = Repo::baseline("baseline");
 
     let first = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
     let second = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
@@ -150,7 +72,7 @@ fn outputs_are_reproducible_for_identical_inputs() {
 
 #[test]
 fn json_and_html_share_one_semantic_result_digest() {
-    let repo = baseline_repo();
+    let repo = Repo::baseline("baseline");
     let result = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
 
     let json = report::json(&result).unwrap();
@@ -194,7 +116,7 @@ fn malformed_rust_is_reported_as_incomplete_not_silently_complete() {
 
 #[test]
 fn explicit_feature_selection_is_normalized_and_recorded() {
-    let repo = baseline_repo();
+    let repo = Repo::baseline("baseline");
     let features = vec!["zeta".to_owned(), "alpha".to_owned(), "alpha".to_owned()];
 
     let result =
@@ -206,7 +128,7 @@ fn explicit_feature_selection_is_normalized_and_recorded() {
 
 #[test]
 fn imported_evidence_is_optional_and_does_not_change_the_gate_verdict() {
-    let repo = baseline_repo();
+    let repo = Repo::baseline("baseline");
     let without = ferric_lens::analyze_with_base(&repo.root, Some("HEAD")).unwrap();
 
     let evidence_path = repo.root.join("evidence.json");
@@ -236,7 +158,7 @@ fn imported_evidence_is_optional_and_does_not_change_the_gate_verdict() {
 
 #[test]
 fn accept_rejects_unknown_finding_fingerprints() {
-    let repo = baseline_repo();
+    let repo = Repo::baseline("baseline");
 
     let error = ferric_lens::accept_finding_with_base(
         &repo.root,
