@@ -41,10 +41,10 @@ impl ProfileContext {
             .unwrap_or("host")
             .to_owned();
         let id = if normalized_features.is_empty() {
-            format!("target={target_label};features=default")
+            format!("target={resolved_target};features=default")
         } else {
             format!(
-                "target={target_label};features=default+{}",
+                "target={resolved_target};features=default+{}",
                 normalized_features.join(",")
             )
         };
