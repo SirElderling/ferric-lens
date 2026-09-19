@@ -242,6 +242,25 @@ fn filtered(world: &World) {
 }
 
 #[test]
+fn clone_then_mutate_does_not_flag_direct_collection_normalization() {
+    let sources = vec![source(
+        "src/input.rs",
+        r#"
+fn normalize(node: &Node) {
+    let mut features = node.features.clone();
+    features.sort();
+    features.dedup();
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_then_mutate_candidate"));
+}
+
+#[test]
 fn ordinary_owned_output_clones_do_not_emit_runtime_copy_findings() {
     let sources = vec![source(
         "src/render.rs",
