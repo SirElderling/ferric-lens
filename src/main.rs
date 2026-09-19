@@ -25,10 +25,10 @@ enum Command {
         /// Additional Cargo feature to enable; may be repeated.
         #[arg(long = "feature")]
         features: Vec<String>,
-        #[arg(long, default_value = "ferric-lens.json")]
-        json: PathBuf,
-        #[arg(long, default_value = "ferric-lens-report.html")]
-        html: PathBuf,
+        #[arg(long)]
+        json: Option<PathBuf>,
+        #[arg(long)]
+        html: Option<PathBuf>,
         /// Optional normalized local evidence envelope for report enrichment.
         #[arg(long)]
         evidence: Option<PathBuf>,
@@ -106,9 +106,13 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 &features,
                 evidence.as_deref(),
             )?;
-            let json_text = report::json(&result);
-            report::write(&json, &json_text)?;
-            report::write(&html, &report::html(&result))?;
+            let (json, html) = analyze_artifact_paths(ai, json, html);
+            if let Some(path) = json {
+                report::write(&path, &report::json(&result))?;
+            }
+            if let Some(path) = html {
+                report::write(&path, &report::html(&result))?;
+            }
             print!("{}", output_text(&result, ai));
             Ok(exit_code(&result.verdict))
         }
@@ -154,6 +158,21 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
     }
 }
 
+fn analyze_artifact_paths(
+    ai: bool,
+    json: Option<PathBuf>,
+    html: Option<PathBuf>,
+) -> (Option<PathBuf>, Option<PathBuf>) {
+    if ai {
+        (json, html)
+    } else {
+        (
+            Some(json.unwrap_or_else(|| PathBuf::from("ferric-lens.json"))),
+            Some(html.unwrap_or_else(|| PathBuf::from("ferric-lens-report.html"))),
+        )
+    }
+}
+
 fn output_text(result: &ferric_lens::model::AnalysisResult, ai: bool) -> String {
     if ai {
         format!("{}\n", report::ai_json(result))
@@ -177,7 +196,7 @@ mod tests {
         AnalysisProfile, AnalysisResult, ArchitectureSummary, GateVerdict, Snapshot,
     };
 
-    use super::{output_text, Cli, Command};
+    use super::{analyze_artifact_paths, output_text, Cli, Command};
 
     fn result() -> AnalysisResult {
         AnalysisResult {
@@ -213,6 +232,27 @@ mod tests {
             source_contexts: Vec::new(),
             findings: Vec::new(),
         }
+    }
+
+    #[test]
+    fn analyze_ai_is_stdout_only_by_default_but_honors_explicit_artifacts() {
+        let (json, html) = analyze_artifact_paths(true, None, None);
+        assert!(json.is_none());
+        assert!(html.is_none());
+
+        let explicit_json = PathBuf::from("out.json");
+        let explicit_html = PathBuf::from("out.html");
+        let (json, html) = analyze_artifact_paths(
+            true,
+            Some(explicit_json.clone()),
+            Some(explicit_html.clone()),
+        );
+        assert_eq!(json, Some(explicit_json));
+        assert_eq!(html, Some(explicit_html));
+
+        let (json, html) = analyze_artifact_paths(false, None, None);
+        assert_eq!(json, Some(PathBuf::from("ferric-lens.json")));
+        assert_eq!(html, Some(PathBuf::from("ferric-lens-report.html")));
     }
 
     #[test]
