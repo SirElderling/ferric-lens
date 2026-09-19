@@ -118,6 +118,15 @@ fn snapshot_capabilities_reflect_complete_and_partial_syntax_and_inventory() {
         content_digest: "digest".into(),
         metadata_complete: true,
         metadata_detail: None,
+        cargo_input_digest: "cargo-input".into(),
+        cargo_resolution_digest: Some("cargo-resolution".into()),
+        auxiliary_targets: crate::input::AuxiliaryTargetSummary {
+            tests: 1,
+            benches: 2,
+            examples: 3,
+            build_scripts: 4,
+            proc_macros: 5,
+        },
         modules: Vec::new(),
         parse_failures: 0,
     };
@@ -125,18 +134,48 @@ fn snapshot_capabilities_reflect_complete_and_partial_syntax_and_inventory() {
     assert!(complete_caps
         .iter()
         .all(|capability| capability.status == CapabilityStatus::Complete));
+    let resolution = complete_caps
+        .iter()
+        .find(|capability| capability.name == "head.cargo_resolution")
+        .unwrap();
+    assert!(resolution
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("cargo-resolution"));
+    let scopes = complete_caps
+        .iter()
+        .find(|capability| capability.name == "head.source_scopes")
+        .unwrap();
+    assert!(scopes
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("tests=1, benches=2, examples=3, build_scripts=4, proc_macros=5"));
 
     let partial = super::SnapshotAnalysis {
         content_digest: "digest".into(),
         metadata_complete: false,
         metadata_detail: Some("metadata unavailable".into()),
+        cargo_input_digest: "fallback-cargo-input".into(),
+        cargo_resolution_digest: None,
+        auxiliary_targets: crate::input::AuxiliaryTargetSummary::default(),
         modules: Vec::new(),
         parse_failures: 2,
     };
     let partial_caps = super::snapshot_capabilities("baseline", &partial);
-    assert!(partial_caps
-        .iter()
-        .all(|capability| capability.status == CapabilityStatus::Partial));
+    assert!(partial_caps.iter().any(|capability| {
+        capability.name == "baseline.source_inventory"
+            && capability.status == CapabilityStatus::Partial
+    }));
+    assert!(partial_caps.iter().any(|capability| {
+        capability.name == "baseline.cargo_resolution"
+            && capability.status == CapabilityStatus::Unavailable
+    }));
+    assert!(partial_caps.iter().any(|capability| {
+        capability.name == "baseline.source_scopes"
+            && capability.status == CapabilityStatus::Unavailable
+    }));
     assert!(partial_caps
         .iter()
         .any(|capability| capability.detail.as_deref()
