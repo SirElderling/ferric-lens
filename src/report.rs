@@ -568,7 +568,7 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
                 if index > 0 {
                     html.push_str(" · ");
                 }
-                html.push_str(r#"<a href="#"#);
+                html.push_str(r##"<a href="#"##);
                 html.push_str(&anchor_id("finding", &finding.fingerprint));
                 html.push_str(r#"">View finding</a>"#);
             }
