@@ -678,7 +678,9 @@ fn materialize_worktree_reports_stale_non_directory_path() {
     let _ = fs::remove_dir_all(&path);
     fs::write(&path, "blocker").unwrap();
 
-    let error = super::materialize_worktree(&repo.root, &head).err().unwrap();
+    let error = super::materialize_worktree(&repo.root, &head)
+        .err()
+        .unwrap();
 
     assert!(error.contains("cannot clear temporary baseline directory"));
     fs::remove_file(path).unwrap();
