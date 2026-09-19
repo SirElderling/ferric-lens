@@ -79,6 +79,7 @@ struct AiOutput<'a> {
     verdict_reason: &'a str,
     summary: AiSummary,
     findings: Vec<AiFinding<'a>>,
+    observations: Vec<AiFinding<'a>>,
     analysis_limits: Vec<AiLimit<'a>>,
 }
 
@@ -92,23 +93,13 @@ pub fn ai_json(result: &AnalysisResult) -> String {
     );
     let findings = active
         .iter()
-        .map(|finding| {
-            let guidance = finding_guidance(finding);
-            AiFinding {
-                priority: priority_label(&finding.priority),
-                evidence_strength: evidence_label(&finding.evidence_class),
-                delta: delta_label(&finding.delta),
-                gate: finding.gate,
-                title: guidance.title,
-                subject: &finding.subject,
-                path: finding_path(finding, &result.modules, &result.source_contexts),
-                why_care: guidance.why_care,
-                next_step: &finding.direction,
-                rule: &finding.rule,
-                evidence: &finding.evidence,
-                source_contexts: contexts_for_finding(finding, &result.source_contexts),
-            }
-        })
+        .filter(|finding| finding.priority != Priority::Observe)
+        .map(|finding| ai_finding(finding, result))
+        .collect::<Vec<_>>();
+    let observations = active
+        .iter()
+        .filter(|finding| finding.priority == Priority::Observe)
+        .map(|finding| ai_finding(finding, result))
         .collect::<Vec<_>>();
 
     let output = AiOutput {
@@ -119,6 +110,7 @@ pub fn ai_json(result: &AnalysisResult) -> String {
         verdict_reason: &result.verdict_reason,
         summary: ai_summary(result),
         findings,
+        observations,
         analysis_limits: result
             .capabilities
             .iter()
@@ -134,12 +126,30 @@ pub fn ai_json(result: &AnalysisResult) -> String {
     serde_json::to_string_pretty(&output).expect("AI output is JSON-serializable")
 }
 
+fn ai_finding<'a>(finding: &'a Finding, result: &'a AnalysisResult) -> AiFinding<'a> {
+    let guidance = finding_guidance(finding);
+    AiFinding {
+        priority: priority_label(&finding.priority),
+        evidence_strength: evidence_label(&finding.evidence_class),
+        delta: delta_label(&finding.delta),
+        gate: finding.gate,
+        title: guidance.title,
+        subject: &finding.subject,
+        path: finding_path(finding, &result.modules, &result.source_contexts),
+        why_care: guidance.why_care,
+        next_step: &finding.direction,
+        rule: &finding.rule,
+        evidence: &finding.evidence,
+        source_contexts: contexts_for_finding(finding, &result.source_contexts),
+    }
+}
+
 pub fn cli_summary(result: &AnalysisResult) -> String {
-    let active = ordered_findings(
+    let actionable = ordered_findings(
         result
             .findings
             .iter()
-            .filter(|finding| !finding.accepted)
+            .filter(|finding| !finding.accepted && finding.priority != Priority::Observe)
             .collect(),
     );
     let summary = ai_summary(result);
@@ -164,12 +174,12 @@ pub fn cli_summary(result: &AnalysisResult) -> String {
         )
     ));
 
-    if active.is_empty() {
+    if actionable.is_empty() {
         output.push_str(
             "No active finding currently has enough evidence to recommend investigation.\n",
         );
     } else {
-        for finding in active.iter().take(5) {
+        for finding in actionable.iter().take(5) {
             let guidance = finding_guidance(finding);
             let path = finding_path(finding, &result.modules, &result.source_contexts);
             output.push_str(&format!(
@@ -181,12 +191,23 @@ pub fn cli_summary(result: &AnalysisResult) -> String {
                 finding.direction
             ));
         }
-        if active.len() > 5 {
+        if actionable.len() > 5 {
             output.push_str(&format!(
                 "\n{} additional active finding(s) are available in the HTML/full JSON report.\n",
-                active.len() - 5
+                actionable.len() - 5
             ));
         }
+    }
+
+    if summary.observe > 0 {
+        output.push_str(&format!(
+            "\n{} available in the HTML or --ai output; these are contextual signals and do not currently justify action.\n",
+            count_phrase(
+                summary.observe,
+                "lower-confidence observation",
+                "lower-confidence observations"
+            )
+        ));
     }
 
     let limits = result
@@ -211,6 +232,7 @@ fn ai_summary(result: &AnalysisResult) -> AiSummary {
     AiSummary {
         areas_worth_reviewing: active
             .iter()
+            .filter(|finding| finding.priority != Priority::Observe)
             .map(|finding| finding.subject.as_str())
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
@@ -260,12 +282,12 @@ fn finding_guidance(finding: &Finding) -> FindingGuidance {
             why_care: "A disproportionate amount of branching is concentrated in this module relative to the small comparable population. That can make behavior harder to reason about even when the repository is too small for a stronger outlier claim.",
             if_ignored: "Additional branching can make future behavior changes harder to understand and test, especially if unrelated responsibilities collect in the same area.",
         },
-        "runtime.clone_syntax_outlier" => FindingGuidance {
+        "runtime.clone_syntax_outlier" | "runtime.small_population_clone_concentration" => FindingGuidance {
             title: "Repeated copying may be worth measuring",
             why_care: "This module contains unusually many observed .clone() calls. Some clones are cheap and intentional; others copy owned data, so this is a prompt to inspect what is being copied and how often the code runs.",
             if_ignored: "If the cloned values are large or this path executes frequently, unnecessary copying can consume memory bandwidth or allocation work. Ferric Lens has not established that this is happening.",
         },
-        "build.rebuild_exposure_candidate" => FindingGuidance {
+        "build.rebuild_exposure_candidate" | "build.small_population_rebuild_concentration" => FindingGuidance {
             title: "Changes here may affect many parts of the repository",
             why_care: "Many repository modules depend on this area. A frequently changing shared boundary can increase the amount of code that must be reconsidered or rebuilt after a change.",
             if_ignored: "A broad, unstable dependency boundary can gradually increase change coordination and incremental-build cost. This finding is structural evidence, not a measured compile-time claim.",
@@ -349,7 +371,14 @@ pub fn html(result: &AnalysisResult) -> String {
         result
             .findings
             .iter()
-            .filter(|finding| !finding.accepted)
+            .filter(|finding| !finding.accepted && finding.priority != Priority::Observe)
+            .collect(),
+    );
+    let observations = ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| !finding.accepted && finding.priority == Priority::Observe)
             .collect(),
     );
     let accepted_findings = ordered_findings(
@@ -362,6 +391,12 @@ pub fn html(result: &AnalysisResult) -> String {
     let active_html = render_findings(
         &active_findings,
         "No active finding currently has enough evidence to recommend investigation.",
+        &result.modules,
+        &result.source_contexts,
+    );
+    let observation_html = render_findings(
+        &observations,
+        "No lower-confidence observations were emitted.",
         &result.modules,
         &result.source_contexts,
     );
@@ -434,6 +469,12 @@ a {{ color: inherit; }}
 {active_html}
 </section>
 
+<details class="analysis-details">
+<summary><strong>Observations</strong> ({observation_count}) — weaker contextual signals that do not currently justify action</summary>
+<p class="muted">These can be useful for context or future measurement, but Ferric Lens has not established that a change is needed.</p>
+{observation_html}
+</details>
+
 <section>
 <h2>Repository overview</h2>
 {overview}
@@ -461,6 +502,7 @@ a {{ color: inherit; }}
         overview = render_repository_overview(result),
         explorer = render_repository_explorer(result),
         details = render_analysis_details(result, &result_digest),
+        observation_count = observations.len(),
         accepted_count = accepted_findings.len(),
     )
 }
@@ -544,14 +586,29 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
             .filter(|finding| finding.subject == subject)
             .copied()
             .collect::<Vec<_>>();
+        let actionable_findings = module_findings
+            .iter()
+            .copied()
+            .filter(|finding| finding.priority != Priority::Observe)
+            .collect::<Vec<_>>();
+        let observations = module_findings
+            .iter()
+            .copied()
+            .filter(|finding| finding.priority == Priority::Observe)
+            .collect::<Vec<_>>();
         let anchor = anchor_id("module", &subject);
-        let status = if module_findings.is_empty() {
-            "No issue currently identified".to_owned()
-        } else {
+        let status = if !actionable_findings.is_empty() {
             format!(
                 "Worth investigating — {}",
-                count_phrase(module_findings.len(), "finding", "findings")
+                count_phrase(actionable_findings.len(), "finding", "findings")
             )
+        } else if !observations.is_empty() {
+            format!(
+                "{} — no action established",
+                count_phrase(observations.len(), "observation", "observations")
+            )
+        } else {
+            "No issue currently identified".to_owned()
         };
 
         html.push_str(r#"<details class="explorer-module" id=""#);
@@ -566,9 +623,11 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
 
         if module_findings.is_empty() {
             html.push_str("<p>These metrics are shown for context. Ferric Lens did not find enough evidence to recommend investigating this module.</p>");
+        } else if actionable_findings.is_empty() {
+            html.push_str("<p>This module has contextual observations, but Ferric Lens has not established that action is needed. Use the explorer only for background or follow-up measurement.</p><p>");
         } else {
             html.push_str("<p>Start with the finding");
-            if module_findings.len() != 1 {
+            if actionable_findings.len() != 1 {
                 html.push('s');
             }
             html.push_str(
@@ -804,7 +863,7 @@ fn active_subjects(result: &AnalysisResult) -> std::collections::BTreeSet<&str> 
     result
         .findings
         .iter()
-        .filter(|finding| !finding.accepted)
+        .filter(|finding| !finding.accepted && finding.priority != Priority::Observe)
         .map(|finding| finding.subject.as_str())
         .collect()
 }
