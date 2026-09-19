@@ -209,3 +209,33 @@ let path = std::str::from_utf8(path)
 
     assert!(scan(&sources).findings.is_empty());
 }
+
+#[test]
+fn invalid_utf8_sources_are_ignored_by_textual_correctness_detectors() {
+    let invalid = SourceFile {
+        crate_name: "demo".into(),
+        module_path: "invalid".into(),
+        relative_path: "src/invalid.rs".into(),
+        bytes: vec![0xff, 0xfe],
+    };
+
+    assert!(scan(&[invalid]).findings.is_empty());
+}
+
+#[test]
+fn one_unconditional_write_is_not_enough_for_stdout_side_effect_finding() {
+    let sources = vec![source(
+        "src/main.rs",
+        r#"
+Analyze { ai, json } => {
+    report::write(&json, &report::json(&result))?;
+    print!("{}", output_text(&result, ai));
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "correctness.stdout_mode_unconditional_artifacts"));
+}
