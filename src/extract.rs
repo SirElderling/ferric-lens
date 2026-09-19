@@ -332,10 +332,11 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
     }
 
     fn visit_expr_match(&mut self, node: &'ast ExprMatch) {
+        // Count the branch construct once rather than treating every exhaustive
+        // arm as independent complexity. Large enum-to-label/state tables are
+        // common Rust and otherwise dominate module-level decision counts.
+        self.record_decision(node.match_token.span);
         for arm in &node.arms {
-            if !matches!(&arm.pat, Pat::Wild(_)) {
-                self.record_decision(arm.pat.span());
-            }
             if let Some((_, guard)) = &arm.guard {
                 self.record_decision(guard.span());
             }
@@ -776,8 +777,54 @@ fn push_span_contexts(
     let mut spans = spans.to_vec();
     spans.sort();
     spans.dedup();
+    spans.sort_by(|left, right| {
+        source_context_priority(metric, *right, text)
+            .cmp(&source_context_priority(metric, *left, text))
+            .then(left.cmp(right))
+    });
     for span in spans {
         contexts.push(source_context(subject, metric, path, span, text));
+    }
+}
+
+fn source_context_priority(metric: &str, span: LineSpan, text: &str) -> i32 {
+    let line = text
+        .lines()
+        .nth(span.start.saturating_sub(1))
+        .unwrap_or_default()
+        .trim();
+
+    match metric {
+        "clone_call_syntax_sites" => {
+            let mut score = 0;
+            if line.contains("let mut ") {
+                score += 80;
+            }
+            if line.starts_with("for ") || line.contains(" in ") {
+                score += 70;
+            }
+            if line.contains(".name.clone()") || line.contains("label:") {
+                score -= 40;
+            }
+            if line.contains(": self.") {
+                score -= 20;
+            }
+            score
+        }
+        "decision_sites" => {
+            if line.starts_with("if ") || line.contains(" if ") {
+                60
+            } else if line.starts_with("while ") || line.starts_with("for ") {
+                50
+            } else if line.contains("&&") || line.contains("||") {
+                40
+            } else if line.contains("=>") {
+                -20
+            } else {
+                0
+            }
+        }
+        _ => 0,
     }
 }
 
