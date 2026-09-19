@@ -99,7 +99,7 @@ pub fn refactor_candidates(findings: &[Finding]) -> Vec<Finding> {
         } else {
             EvidenceClass::Candidate
         };
-        let priority = if has_strong_support {
+        let priority = if has_strong_support && delta != DeltaStatus::Unchanged {
             Priority::Investigate
         } else {
             Priority::Observe
