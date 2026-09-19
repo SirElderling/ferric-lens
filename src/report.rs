@@ -807,9 +807,7 @@ mod tests {
 
     #[test]
     fn codebase_map_renders_dependency_function_and_type_hierarchy() {
-        use crate::model::{
-            FunctionFact, FunctionKind, ModuleMetrics, TypeFact, TypeKind,
-        };
+        use crate::model::{FunctionFact, FunctionKind, ModuleMetrics, TypeFact, TypeKind};
 
         let mut result = minimal_result();
         result.modules = vec![ModuleMetrics {
