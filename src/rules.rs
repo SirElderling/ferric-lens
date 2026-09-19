@@ -678,7 +678,8 @@ fn dominant_unique_max(values: &[usize]) -> Option<(usize, usize, usize)> {
         return None;
     }
 
-    let (&first, rest) = values.split_first()?;
+    let first = values[0];
+    let rest = &values[1..];
     let mut max = first;
     let mut max_index = 0usize;
     let mut max_count = 1usize;
