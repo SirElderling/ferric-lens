@@ -150,9 +150,10 @@ fn library_and_binary_with_same_target_name_remain_distinct() {
         }],
         workspace_members: vec![package_id],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
 
-    let (sources, aliases, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, _, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert!(limitations.is_empty());
     assert!(sources
@@ -545,7 +546,7 @@ fn module_discovery_reports_cfg_path_missing_and_ambiguous_sources() {
         &root.join("src/lib.rs"),
         "",
         true,
-        Some(&profile),
+        Some(&profile.cfg),
         &mut visited,
         &mut budget,
         &mut sources,
@@ -604,7 +605,7 @@ fn module_discovery_supports_nested_mod_rs_and_test_cfg_is_excluded_when_cfg_is_
         &root.join("src/lib.rs"),
         "",
         true,
-        Some(&profile),
+        Some(&profile.cfg),
         &mut visited,
         &mut budget,
         &mut sources,
@@ -686,9 +687,10 @@ fn workspace_metadata_builds_renamed_dependency_aliases_and_skips_non_production
         ],
         workspace_members: vec![a_id, b_id],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
 
-    let (sources, aliases, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, _, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert!(limitations.is_empty());
     assert_eq!(sources.len(), 2);
@@ -754,9 +756,10 @@ fn metadata_inventory_failure_falls_back_without_claiming_completeness() {
         }],
         workspace_members: vec![package_id],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
 
-    let (_, aliases, complete, detail) = acquire_inventory(&root, Ok(metadata), None).unwrap();
+    let (_, aliases, _, complete, detail) = acquire_inventory(&root, Ok(metadata), None).unwrap();
 
     assert!(aliases.is_empty());
     assert!(!complete);
@@ -780,10 +783,17 @@ fn final_inventory_deduplicates_sources_and_hashes_workspace_aliases() {
         BTreeMap::from([("shared".into(), "shared".into())]),
     )]);
 
-    let inventory = finalize_inventory((vec![source.clone(), source], aliases.clone(), true, None));
+    let inventory = finalize_inventory((
+        vec![source.clone(), source],
+        aliases.clone(),
+        BTreeMap::new(),
+        true,
+        None,
+    ));
     let without_aliases = finalize_inventory((
         inventory.sources.clone(),
         WorkspaceAliases::new(),
+        BTreeMap::new(),
         true,
         None,
     ));
@@ -854,9 +864,10 @@ fn metadata_inventory_skips_external_packages_invalid_targets_and_non_workspace_
         ],
         workspace_members: vec![demo_id, outside_id],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
 
-    let (sources, aliases, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, _, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert_eq!(sources.len(), 1);
     assert_eq!(sources[0].relative_path, "src/lib.rs");
@@ -878,6 +889,7 @@ fn target_collection_stops_immediately_when_budget_is_exhausted() {
         source: root.join("src/lib.rs"),
         package_root: root.clone(),
         dependencies: Vec::new(),
+        resolved_features: None,
     };
     let mut budget = SourceBudget {
         used: 0,
@@ -912,6 +924,7 @@ fn target_collection_propagates_source_read_errors() {
         source: root.join("src/broken.rs"),
         package_root: root.clone(),
         dependencies: Vec::new(),
+        resolved_features: None,
     };
     let mut budget = SourceBudget::default();
     let mut sources = Vec::new();
@@ -1000,7 +1013,7 @@ fn module_cfg_discovery_covers_malformed_and_true_cfg_paths() {
         &root.join("src/lib.rs"),
         "",
         true,
-        Some(&profile),
+        Some(&profile.cfg),
         &mut visited,
         &mut budget,
         &mut sources,
@@ -1184,6 +1197,7 @@ fn inventory_and_acquisition_propagate_fallback_io_failures() {
         }],
         workspace_members: vec!["demo-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
     assert!(super::acquire_inventory(&not_directory, Ok(bad_metadata), None).is_err());
     assert!(
@@ -1207,6 +1221,7 @@ fn metadata_inventory_rejects_manifest_without_parent() {
         }],
         workspace_members: vec!["demo-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
 
     assert!(inventory_from_metadata(&root, metadata, None)
@@ -1240,9 +1255,10 @@ fn binary_only_package_has_no_implicit_library_alias() {
         }],
         workspace_members: vec!["demo-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
 
-    let (sources, aliases, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, _, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert_eq!(sources.len(), 1);
     assert!(aliases.get("demo").unwrap().is_empty());
@@ -1407,6 +1423,7 @@ fn auxiliary_target_summary_classifies_non_production_target_kinds() {
         }],
         workspace_members: vec!["demo-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
 
     let summary = super::auxiliary_target_summary(&metadata);
@@ -1444,6 +1461,7 @@ fn cargo_resolution_identity_is_checkout_relative_and_tracks_lockfile_changes() 
             }],
             workspace_members: vec!["demo 0.1.0 (path+file:///checkout)".into()],
             workspace_root: root.to_string_lossy().into_owned(),
+            resolve: None,
         }
     }
 
@@ -1532,6 +1550,7 @@ fn cargo_resolution_identity_handles_outside_and_missing_manifests_explicitly() 
         }],
         workspace_members: vec!["outside-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
     assert!(super::cargo_resolution_identity(&root, &outside_metadata).is_ok());
 
@@ -1548,6 +1567,7 @@ fn cargo_resolution_identity_handles_outside_and_missing_manifests_explicitly() 
         }],
         workspace_members: vec!["missing-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
     assert!(super::cargo_resolution_identity(&root, &missing_metadata)
         .unwrap_err()
@@ -1617,6 +1637,7 @@ fn cargo_resolution_identity_normalizes_dependency_paths_and_ignores_outside_tar
         }],
         workspace_members: vec!["demo-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
 
     let with_dependencies = super::cargo_resolution_identity(&root, &metadata).unwrap();
@@ -1635,6 +1656,7 @@ fn cargo_resolution_identity_normalizes_dependency_paths_and_ignores_outside_tar
         }],
         workspace_members: vec!["demo-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
     let without_dependencies =
         super::cargo_resolution_identity(&root, &no_dependency_metadata).unwrap();
@@ -1753,6 +1775,7 @@ fn cargo_resolution_identity_covers_checkout_boundaries_dependencies_and_orderin
         packages: vec![second(), outside_package, first()],
         workspace_members: vec!["demo-id".into(), "second-id".into(), "outside-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
     let first_id = super::cargo_resolution_identity(&root, &metadata).unwrap();
 
@@ -1760,6 +1783,7 @@ fn cargo_resolution_identity_covers_checkout_boundaries_dependencies_and_orderin
         packages: vec![first(), second()],
         workspace_members: vec!["second-id".into(), "demo-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
     let reordered_id = super::cargo_resolution_identity(&root, &reordered).unwrap();
 
@@ -1784,6 +1808,7 @@ fn cargo_resolution_identity_reports_missing_repository_manifest() {
         }],
         workspace_members: vec!["missing-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
 
     let error = super::cargo_resolution_identity(&root, &metadata).unwrap_err();
@@ -1824,6 +1849,7 @@ fn cargo_resolution_identity_propagates_cargo_input_read_failure() {
         packages: Vec::new(),
         workspace_members: Vec::new(),
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
 
     let error = super::cargo_resolution_identity(&root, &metadata).unwrap_err();
@@ -1847,7 +1873,7 @@ fn stability_verification_propagates_cargo_input_read_failure() {
 fn inventory_assembly_propagates_resolution_and_fallback_errors() {
     let root = temp_root();
     fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
-    let digest = super::cargo_input_digest(&root).unwrap();
+    let cargo_inputs = super::cargo_input_snapshot(&root, None).unwrap();
 
     let missing_manifest = Metadata {
         packages: vec![Package {
@@ -1862,9 +1888,10 @@ fn inventory_assembly_propagates_resolution_and_fallback_errors() {
         }],
         workspace_members: vec!["missing-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
     };
     assert!(
-        super::assemble_inventory(&root, Ok(missing_manifest), None, &digest)
+        super::assemble_inventory(&root, Ok(missing_manifest), None, &cargo_inputs)
             .unwrap_err()
             .contains("cannot read Cargo manifest")
     );
@@ -1875,7 +1902,7 @@ fn inventory_assembly_propagates_resolution_and_fallback_errors() {
         &not_directory,
         Err("metadata unavailable".into()),
         None,
-        &digest,
+        &cargo_inputs,
     )
     .is_err());
 
@@ -1891,7 +1918,7 @@ fn verified_inventory_propagates_source_stability_failure() {
     )
     .unwrap();
     fs::write(root.join("src/lib.rs"), "pub fn current() {}\n").unwrap();
-    let digest = super::cargo_input_digest(&root).unwrap();
+    let cargo_inputs = super::cargo_input_snapshot(&root, None).unwrap();
     let source = SourceFile {
         crate_name: "demo".into(),
         module_path: String::new(),
@@ -1901,8 +1928,8 @@ fn verified_inventory_propagates_source_stability_failure() {
 
     let error = super::finalize_verified_inventory(
         &root,
-        (vec![source], WorkspaceAliases::new(), true, None),
-        &digest,
+        (vec![source], WorkspaceAliases::new(), BTreeMap::new(), true, None),
+        &cargo_inputs,
         None,
         super::AuxiliaryTargetSummary::default(),
     )
