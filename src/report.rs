@@ -592,11 +592,11 @@ mod tests {
             "ferric-lens-report-test-{}-nested/report.txt",
             std::process::id()
         ));
-        let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+        let _ = fs::remove_dir_all(path.parent().unwrap());
         super::write(&path, "first").unwrap();
         super::write(&path, "second").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "second");
-        let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+        let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
