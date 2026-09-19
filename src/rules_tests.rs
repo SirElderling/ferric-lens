@@ -524,8 +524,8 @@ fn refactor_candidate_requires_two_independent_signal_kinds() {
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].rule, "refactor.multi_signal_candidate");
     assert_eq!(candidates[0].subject, "demo::engine");
-    assert_eq!(candidates[0].priority, Priority::Investigate);
-    assert_eq!(candidates[0].evidence_class, EvidenceClass::Strong);
+    assert_eq!(candidates[0].priority, Priority::Observe);
+    assert_eq!(candidates[0].evidence_class, EvidenceClass::Candidate);
     assert!(!candidates[0].gate);
     assert!(candidates[0].summary.contains("2 independent signals"));
     assert!(candidates[0].summary.contains("decision complexity"));
@@ -534,20 +534,26 @@ fn refactor_candidate_requires_two_independent_signal_kinds() {
 
 #[test]
 fn structural_coupled_outlier_is_already_multi_signal_refactor_evidence() {
-    let supporting = vec![advisory_finding(
-        "structure.current_coupled_outlier",
-        "demo::engine",
-        DeltaStatus::Current,
-        vec![
-            evidence("decision_sites", 20),
-            evidence("local_dependency_modules", 8),
-        ],
-    )];
+    let supporting = vec![Finding {
+        evidence_class: EvidenceClass::Strong,
+        priority: Priority::Investigate,
+        ..advisory_finding(
+            "structure.current_coupled_outlier",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![
+                evidence("decision_sites", 20),
+                evidence("local_dependency_modules", 8),
+            ],
+        )
+    }];
 
     let candidates = refactor_candidates(&supporting);
 
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].evidence.len(), 2);
+    assert_eq!(candidates[0].evidence_class, EvidenceClass::Strong);
+    assert_eq!(candidates[0].priority, Priority::Investigate);
     assert!(candidates[0]
         .direction
         .contains("splitting responsibilities"));
@@ -745,4 +751,39 @@ fn refactor_directions_cover_each_supported_signal_pair() {
 
     assert!(super::refactor_direction(BTreeSet::new())
         .contains("investigate the corroborating evidence"));
+}
+
+#[test]
+fn clone_syntax_does_not_corroborate_refactor_synthesis() {
+    let supporting = vec![
+        advisory_finding(
+            "structure.decision_concentration",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![evidence("decision_sites", 30)],
+        ),
+        advisory_finding(
+            "runtime.clone_syntax_outlier",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![evidence("clone_call_syntax_sites", 20)],
+        ),
+    ];
+
+    assert!(refactor_candidates(&supporting).is_empty());
+}
+
+#[test]
+fn crate_roots_are_not_rebuild_exposure_candidates() {
+    let mut modules = (0..21).map(|index| module(index, 0, 0)).collect::<Vec<_>>();
+    modules[0].module_path.clear();
+    modules[0].path = "src/lib.rs".into();
+    for module in modules.iter_mut().skip(1) {
+        module.local_dependency_modules = vec!["demo".into()];
+    }
+
+    assert!(!current_snapshot_findings(&modules)
+        .iter()
+        .any(|finding| finding.rule == "build.rebuild_exposure_candidate"
+            && finding.subject == "demo"));
 }
