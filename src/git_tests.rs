@@ -779,3 +779,47 @@ fn git_path_decoding_rejects_invalid_utf8_instead_of_replacing_bytes() {
     let tree = b"100644 blob abc123\tbad\xff.rs\0";
     assert!(super::parse_tree_oids(tree).is_err());
 }
+
+
+#[test]
+fn strict_git_decoding_helpers_propagate_invalid_path_bytes() {
+    assert!(super::decode_nul_records(b"ok\0bad\xff\0", "Git path").is_err());
+    assert!(super::parse_resolved_commit_bytes("HEAD", &[0xff]).is_err());
+
+    let mut changes = ChangeSet::default();
+    changes.deleted.insert("old.rs".into());
+    changes.added.insert("new.rs".into());
+    let invalid_tree = b"100644 blob abc123\tbad\xff.rs\0";
+    assert!(super::apply_exact_rename_tree(
+        &mut changes,
+        invalid_tree,
+        &["new.rs".into()],
+        Ok("abc123\n".into())
+    )
+    .is_err());
+
+    let repo = Repo::new("invalid-change-output");
+    assert!(super::parse_change_output(
+        &repo.root,
+        "HEAD",
+        b"M\0bad\xff.rs\0",
+        Ok(Vec::new())
+    )
+    .is_err());
+}
+
+#[test]
+fn history_rejects_non_utf8_commit_and_path_records() {
+    let mut invalid_commit = b"\0\0".to_vec();
+    invalid_commit.push(0xff);
+    invalid_commit.push(0);
+    assert!(parse_history(&invalid_commit).is_err());
+
+    let oid = "1".repeat(40);
+    let mut invalid_path = b"\0\0".to_vec();
+    invalid_path.extend_from_slice(oid.as_bytes());
+    invalid_path.extend_from_slice(b"\0");
+    invalid_path.push(0xff);
+    invalid_path.push(0);
+    assert!(parse_history(&invalid_path).is_err());
+}
