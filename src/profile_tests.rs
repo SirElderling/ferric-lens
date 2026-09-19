@@ -39,4 +39,17 @@ fn rustc_host_parser_reports_empty_stderr_failure_status() {
 
     let error = parse_rustc_host_output(&output).unwrap_err();
     assert!(error.contains("failed with status"));
+}\n
+#[test]
+fn rustc_host_command_reports_spawn_errors() {
+    let missing = std::env::temp_dir().join(format!(
+        "ferric-lens-host-missing-cwd-{}",
+        std::process::id()
+    ));
+    let mut command = Command::new("rustc");
+    command.current_dir(missing).arg("-vV");
+
+    assert!(super::run_rustc_host(&mut command)
+        .unwrap_err()
+        .contains("could not execute rustc"));
 }
