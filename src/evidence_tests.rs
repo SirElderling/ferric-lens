@@ -216,4 +216,18 @@ fn rejects_oversized_import_before_reading_contents() {
 
     assert!(error.contains("exceeds the 16 MiB limit"));
     fs::remove_file(path).unwrap();
+}\n
+#[test]
+fn reports_read_error_after_metadata_succeeds() {
+    let root = std::env::temp_dir().join(format!(
+        "ferric-lens-evidence-directory-{}-{}",
+        std::process::id(),
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let error = load(&root, &snapshot(), &profile()).unwrap_err();
+
+    assert!(error.contains("cannot read evidence import"));
+    fs::remove_dir_all(root).unwrap();
 }
