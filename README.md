@@ -164,7 +164,7 @@ Ferric Lens does not expand macros or pretend mutually exclusive platform `cfg` 
 
 Static findings are not runtime profiling claims.
 
-Finding source context is representative rather than an exhaustive source dump. V1 records at most three source contexts per supported evidence signal. Each excerpt is limited to three source lines and 600 Unicode characters; truncation is explicit. Current exact-span support covers decision-site, clone-call, resolved dependency, and reverse-dependency evidence. Line/excerpt metadata is presentation evidence and does not participate in finding fingerprints or acceptance identity.
+Finding source context is representative rather than an exhaustive source dump. V1 records at most three source contexts per supported evidence signal. Each excerpt is limited to three source lines and 600 Unicode characters; truncation is explicit. Current exact-span support covers decision-site, contextual copy-risk, resolved dependency, and reverse-dependency evidence. Line/excerpt metadata is presentation evidence and does not participate in finding fingerprints or acceptance identity.
 
 ## Development
 
@@ -205,4 +205,4 @@ Ferric Lens has three intentionally different presentation surfaces built from t
 The full canonical JSON remains the lossless interface when a consumer needs every module, capability, imported observation, or structural fact.
 
 
-Small-cohort descriptive rules deliberately avoid treating "the largest value" as meaningful by itself. A unique maximum must also have a material lead over the next-highest module: at least half of the runner-up value, with a minimum absolute gap of two. The evidence reference for these observations is the runner-up rather than the median. This keeps near-ties such as 128 vs 119 decision sites or 22 vs 21 clone sites from becoming alerts simply because one module must rank first.
+Small-cohort descriptive rules deliberately avoid treating "the largest value" as meaningful by itself. A unique maximum must also have a material lead over the next-highest module: at least half of the runner-up value, with a minimum absolute gap of two. The evidence reference for these observations is the runner-up rather than the median. This keeps near-ties such as 128 vs 119 decision sites from becoming alerts simply because one module must rank first. Raw clone-frequency concentration is retained as descriptive module data rather than emitted as a finding.
