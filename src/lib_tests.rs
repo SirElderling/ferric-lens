@@ -324,6 +324,7 @@ fn baseline_analysis_failure_is_reported_as_inconclusive() {
         materialize_baseline: crate::git::materialize_worktree,
         analyze_baseline: baseline_failure,
         sample_history: crate::git::sample_history,
+        source_contexts: super::finding_source_contexts,
     };
     let result =
         super::analyze_internal_with_ops(&repo.root, Some("HEAD"), false, None, None, &[], &ops)
@@ -331,6 +332,87 @@ fn baseline_analysis_failure_is_reported_as_inconclusive() {
 
     assert_eq!(result.verdict, crate::model::GateVerdict::Inconclusive);
     assert!(result.verdict_reason.contains("baseline analysis failed"));
+}
+
+fn source_context_failure(
+    _: &Path,
+    _: &super::SnapshotAnalysis,
+    _: &[Finding],
+    _: &crate::profile::ProfileContext,
+) -> Result<Vec<crate::model::SourceContext>, String> {
+    Err("fixture source context failure".into())
+}
+
+#[test]
+fn analysis_propagates_source_context_failures_from_all_result_paths() {
+    let invalid_base = Repo::new("source-context-baseline-resolution");
+    let ops = super::AnalysisOps {
+        materialize_baseline: crate::git::materialize_worktree,
+        analyze_baseline: super::analyze_snapshot,
+        sample_history: crate::git::sample_history,
+        source_contexts: source_context_failure,
+    };
+    assert!(super::analyze_internal_with_ops(
+        &invalid_base.root,
+        Some("missing-baseline"),
+        false,
+        None,
+        None,
+        &[],
+        &ops,
+    )
+    .unwrap_err()
+    .contains("fixture source context failure"));
+
+    let materialize = Repo::new("source-context-materialize");
+    fs::write(
+        materialize.root.join(".git/worktrees"),
+        "blocks worktree directory",
+    )
+    .unwrap();
+    assert!(super::analyze_internal_with_ops(
+        &materialize.root,
+        Some("HEAD"),
+        false,
+        None,
+        None,
+        &[],
+        &ops,
+    )
+    .unwrap_err()
+    .contains("fixture source context failure"));
+
+    let baseline = Repo::new("source-context-baseline-analysis");
+    let baseline_ops = super::AnalysisOps {
+        materialize_baseline: crate::git::materialize_worktree,
+        analyze_baseline: baseline_failure,
+        sample_history: crate::git::sample_history,
+        source_contexts: source_context_failure,
+    };
+    assert!(super::analyze_internal_with_ops(
+        &baseline.root,
+        Some("HEAD"),
+        false,
+        None,
+        None,
+        &[],
+        &baseline_ops,
+    )
+    .unwrap_err()
+    .contains("fixture source context failure"));
+
+    let final_result = Repo::new("source-context-final-result");
+    assert!(super::analyze_internal_with_ops(
+        &final_result.root,
+        Some("HEAD"),
+        false,
+        None,
+        None,
+        &[],
+        &ops,
+    )
+    .unwrap_err()
+    .contains("fixture source context failure"));
 }
 
 #[test]
@@ -342,6 +424,7 @@ fn unavailable_history_degrades_capability_without_changing_gate_semantics() {
         materialize_baseline: crate::git::materialize_worktree,
         analyze_baseline: super::analyze_snapshot,
         sample_history: history_failure,
+        source_contexts: super::finding_source_contexts,
     };
     let result =
         super::analyze_internal_with_ops(&repo.root, Some("HEAD"), true, None, None, &[], &ops)
@@ -369,6 +452,7 @@ fn truncated_history_is_explicitly_partial() {
         materialize_baseline: crate::git::materialize_worktree,
         analyze_baseline: super::analyze_snapshot,
         sample_history: truncated_history,
+        source_contexts: super::finding_source_contexts,
     };
     let result =
         super::analyze_internal_with_ops(&repo.root, Some("HEAD"), true, None, None, &[], &ops)
@@ -629,6 +713,7 @@ fn analysis_propagates_change_collection_failure_after_baseline_analysis() {
         materialize_baseline: crate::git::materialize_worktree,
         analyze_baseline: baseline_then_break_git,
         sample_history: crate::git::sample_history,
+        source_contexts: super::finding_source_contexts,
     };
 
     assert!(super::analyze_internal_with_ops(
@@ -652,6 +737,7 @@ fn analysis_propagates_acceptance_corruption_between_baseline_and_finalization()
         materialize_baseline: crate::git::materialize_worktree,
         analyze_baseline: baseline_then_corrupt_acceptance,
         sample_history: crate::git::sample_history,
+        source_contexts: super::finding_source_contexts,
     };
 
     assert!(super::analyze_internal_with_ops(
