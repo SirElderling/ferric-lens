@@ -84,19 +84,32 @@ fn history_candidates_include_changed_renamed_and_finding_paths_only_when_owned(
 
 #[test]
 fn advisory_baseline_attribution_distinguishes_unchanged_worsened_new_and_unknown() {
+    let mut moved = module("demo", "moved", "src/moved.rs");
+    moved.clone_calls = 8;
     let head = vec![
-        module("demo", "moved", "src/moved.rs"),
+        moved,
         module("demo", "added", "src/added.rs"),
         module("demo", "ambiguous", "src/ambiguous.rs"),
         module("demo", "unmatched", "src/unmatched.rs"),
     ];
-    let baseline = vec![module("demo", "old", "src/old.rs")];
+    let mut old = module("demo", "old", "src/old.rs");
+    old.clone_calls = 4;
+    let baseline = vec![old];
 
     let mut unchanged = finding("structure.current_coupled_outlier", "demo::moved");
     unchanged.priority = Priority::Investigate;
+    let mut worsened_clone = finding("runtime.clone_syntax_outlier", "demo::moved");
+    worsened_clone.evidence = vec![Evidence {
+        metric: "clone_call_syntax_sites".into(),
+        value: 8,
+        reference: 3,
+        population: 20,
+        baseline: None,
+        material_delta: None,
+    }];
     let mut findings = vec![
         unchanged,
-        finding("runtime.clone_syntax_outlier", "demo::moved"),
+        worsened_clone,
         finding("build.rebuild_exposure_candidate", "demo::added"),
         finding("build.rebuild_exposure_candidate", "demo::ambiguous"),
         finding("build.rebuild_exposure_candidate", "demo::unmatched"),
@@ -930,4 +943,114 @@ fn finalize_findings_propagates_acceptance_load_failure() {
     let mut findings = vec![finding("rule", "demo")];
 
     assert!(super::finalize_findings(&repo.root, "profile", &mut findings).is_err());
+}
+
+#[test]
+fn advisory_materiality_helpers_are_conservative_and_metric_aware() {
+    assert!(!super::advisory_growth_is_material("decision_sites", 10, 12));
+    assert!(super::advisory_growth_is_material("decision_sites", 10, 13));
+    assert!(!super::advisory_growth_is_material(
+        "local_dependency_modules",
+        8,
+        9
+    ));
+    assert!(super::advisory_growth_is_material(
+        "local_dependency_modules",
+        8,
+        10
+    ));
+    assert!(!super::advisory_growth_is_material(
+        "clone_call_syntax_sites",
+        4,
+        5
+    ));
+    assert!(super::advisory_growth_is_material(
+        "clone_call_syntax_sites",
+        4,
+        6
+    ));
+    assert!(super::advisory_growth_is_material(
+        "reverse_repository_dependents",
+        4,
+        6
+    ));
+    assert!(super::advisory_growth_is_material("other", 4, 5));
+    assert!(!super::advisory_growth_is_material("other", 5, 5));
+
+    let mut owner = module("demo", "owner", "src/owner.rs");
+    owner.decision_sites = 7;
+    owner.clone_calls = 3;
+    owner.local_dependency_modules = vec!["demo::dep".into(), "demo::other".into()];
+    let mut caller_a = module("demo", "caller_a", "src/caller_a.rs");
+    caller_a.local_dependency_modules = vec!["demo::owner".into()];
+    let mut caller_b = module("demo", "caller_b", "src/caller_b.rs");
+    caller_b.local_dependency_modules = vec!["demo::owner".into()];
+    let baseline = vec![owner.clone(), caller_a, caller_b];
+
+    assert_eq!(
+        super::advisory_baseline_metric_value(
+            "decision_sites",
+            &owner,
+            "demo::owner",
+            &baseline
+        ),
+        Some(7)
+    );
+    assert_eq!(
+        super::advisory_baseline_metric_value(
+            "local_dependency_modules",
+            &owner,
+            "demo::owner",
+            &baseline
+        ),
+        Some(2)
+    );
+    assert_eq!(
+        super::advisory_baseline_metric_value(
+            "clone_call_syntax_sites",
+            &owner,
+            "demo::owner",
+            &baseline
+        ),
+        Some(3)
+    );
+    assert_eq!(
+        super::advisory_baseline_metric_value(
+            "reverse_repository_dependents",
+            &owner,
+            "demo::owner",
+            &baseline
+        ),
+        Some(2)
+    );
+    assert_eq!(
+        super::advisory_baseline_metric_value("unknown", &owner, "demo::owner", &baseline),
+        None
+    );
+
+    let mut current = finding("structure.current_coupled_outlier", "demo::owner");
+    current.evidence = vec![Evidence {
+        metric: "decision_sites".into(),
+        value: 14,
+        reference: 5,
+        population: 20,
+        baseline: None,
+        material_delta: None,
+    }];
+    let mut prior = finding("structure.current_coupled_outlier", "demo::owner");
+    prior.evidence = vec![Evidence {
+        metric: "decision_sites".into(),
+        value: 7,
+        reference: 5,
+        population: 20,
+        baseline: None,
+        material_delta: None,
+    }];
+    assert!(super::advisory_evidence_materially_worsened(
+        &current,
+        Some(&prior),
+        &owner,
+        "demo::owner",
+        &baseline,
+    ));
 }
