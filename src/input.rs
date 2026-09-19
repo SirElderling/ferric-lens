@@ -759,10 +759,7 @@ fn fallback_inventory(root: &Path) -> Result<(Vec<SourceFile>, Vec<String>), Str
     Ok((sources, limitations))
 }
 
-fn collect_directory_entries<I>(
-    entries: I,
-    directory: &Path,
-) -> Result<Vec<fs::DirEntry>, String>
+fn collect_directory_entries<I>(entries: I, directory: &Path) -> Result<Vec<fs::DirEntry>, String>
 where
     I: IntoIterator<Item = std::io::Result<fs::DirEntry>>,
 {
