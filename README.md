@@ -28,6 +28,7 @@ Ferric Lens currently:
 - accepts one validated, normalized local JSON evidence envelope for full-report enrichment,
 - supports fingerprinted, reasoned finding acceptances in a tool-managed repository file,
 - keeps accepted findings visible while excluding only exact accepted gate evidence from failure,
+- embeds the same semantic result digest in JSON and HTML so mixed artifact generations are detectable,
 - publishes JSON/HTML files through atomic replacement,
 - uses exit codes `0=pass`, `1=regression`, and `2=inconclusive/error`.
 
