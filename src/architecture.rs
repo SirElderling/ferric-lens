@@ -19,9 +19,7 @@ pub fn summarize(modules: &[ModuleMetrics]) -> ArchitectureSummary {
     let mut adjacency = vec![Vec::<usize>::new(); nodes.len()];
     for module in modules.iter().filter(|module| module.parse_complete) {
         let source_name = subject(&module.crate_name, &module.module_path);
-        let Some(&source) = index.get(source_name.as_str()) else {
-            continue;
-        };
+        let source = index[source_name.as_str()];
 
         for dependency in &module.local_dependency_modules {
             let Some(&target) = index.get(dependency.as_str()) else {
