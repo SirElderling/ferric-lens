@@ -22,8 +22,7 @@ pub fn json(result: &AnalysisResult) -> Result<String, String> {
         .as_object_mut()
         .expect("analysis result serializes as a JSON object");
     object.insert("result_digest".into(), serde_json::Value::String(digest));
-    Ok(serde_json::to_string_pretty(&value)
-        .expect("analysis result JSON value is serializable"))
+    Ok(serde_json::to_string_pretty(&value).expect("analysis result JSON value is serializable"))
 }
 
 pub fn html(result: &AnalysisResult) -> String {
@@ -729,5 +728,4 @@ mod tests {
         assert!(result.unwrap_err().contains("cannot write"));
         fs::remove_dir_all(root).unwrap();
     }
-
 }
