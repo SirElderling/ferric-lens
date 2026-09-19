@@ -166,10 +166,7 @@ mod tests {
 
     #[test]
     fn rename_matching_skips_missing_conflicting_and_cross_crate_edges() {
-        let baseline = vec![
-            module("src/a.rs", "a", "a"),
-            module("src/b.rs", "b", "b"),
-        ];
+        let baseline = vec![module("src/a.rs", "a", "a"), module("src/b.rs", "b", "b")];
         let mut cross = module("src/c.rs", "c", "c");
         cross.crate_name = "other".into();
         let head = vec![
@@ -209,5 +206,4 @@ mod tests {
         assert!(matched.head_to_baseline.is_empty());
         assert!(matched.ambiguous_head.is_empty());
     }
-
 }
