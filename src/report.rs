@@ -516,9 +516,7 @@ fn render_findings(
             .iter()
             .filter(|context| {
                 context.subject == finding.subject
-                    && evidence_metrics
-                        .iter()
-                        .any(|metric| *metric == context.metric.as_str())
+                    && evidence_metrics.contains(&context.metric.as_str())
             })
             .collect::<Vec<_>>();
         if !contexts.is_empty() {
