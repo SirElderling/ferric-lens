@@ -19,8 +19,10 @@ Ferric Lens currently:
 - conservatively matches modules by stable identity, Git rename, then unique normalized structure,
 - gates the documented `structure.coupled_complexity_growth` regression only when both independent signals materially worsen,
 - evaluates standard Rust target cfg predicates for one concrete target profile per invocation,
-- supports explicit additional Cargo features without inventing a feature powerset,
-- reports unresolved custom/default-feature cfg evidence as `inconclusive` rather than pretending the gate passed,
+- resolves Cargo's enabled feature set per workspace package from the metadata resolve graph and evaluates `cfg(feature = "...")` against the package that owns the target,
+- preserves explicitly requested features when Cargo resolution is unavailable, while leaving unproven feature reachability unknown rather than inventing a feature powerset,
+- reports unresolved custom cfg evidence as `inconclusive` rather than pretending the gate passed,
+- reports five narrowly scoped deterministic correctness risks when strong source evidence establishes unsafe analysis/tooling patterns: missing Cargo feature resolution, symbolic-vs-resolved target identity, stdout modes with unconditional artifact writes, incomplete workspace-manifest snapshot verification, and lossy Git path decoding,
 - emits deterministic canonical JSON for complete machine/audit use,
 - emits a compact deterministic `--ai` JSON view for agents that keeps actionable findings, evidence, source contexts, result identity, and analysis limitations while omitting raw repository inventory,
 - emits one self-contained HTML/CSS report with no JavaScript,
@@ -79,13 +81,28 @@ cargo run -- analyze /path/to/rust/repository --base origin/main --ai
 cargo run -- check /path/to/rust/repository --base origin/main --ai
 ```
 
-`--ai` changes stdout only. It emits compact deterministic JSON containing the verdict, result digest, active findings, plain-language meaning, core evidence, exact source contexts where available, recommended next investigation step, and non-complete analysis capabilities. It intentionally omits the full module/function/type inventory and complete capability dump. The normal canonical JSON file remains the complete machine-readable record.
+`--ai` emits compact deterministic JSON on stdout containing the verdict, result digest, active findings, plain-language meaning, core evidence, exact source contexts where available, recommended next investigation step, and non-complete analysis capabilities. It intentionally omits the full module/function/type inventory and complete capability dump. In `analyze --ai`, default JSON/HTML files are not created; pass `--json <path>` and/or `--html <path>` explicitly when those artifacts are also wanted. Canonical JSON remains the complete machine-readable record.
 
 `--base` is optional. Without it, Ferric Lens tries the GitHub PR target, the local remote-default branch, then local `main`. It always compares against the unique merge base, not the moving target tip.
 
 The initial blocking rule requires a baseline crate population of at least 20 production modules with complete required evidence. Smaller crates still receive descriptive/advisory output.
 
 Full `analyze` mode samples at most 2,000 recent non-merge commits and 100,000 changed-path records for advisory history context. Commits touching more than 200 paths are excluded from co-change calculations and reported as such. History never changes the gate verdict.
+
+
+## Deterministic correctness risks
+
+Ferric Lens is not a general correctness linter. V1 includes a deliberately small correctness-risk family for source patterns where the tool can establish a strong causal link to a concrete engineering failure mode without executing the target program.
+
+Current rules cover:
+
+- Cargo metadata queried without the resolve graph while source logic independently decides feature-gated reachability,
+- persistent or imported machine configuration matched using a symbolic target label despite an available resolved target triple,
+- stdout/AI-style modes that still perform unconditional default artifact writes,
+- snapshot verification that reads workspace-member manifests but revalidates only a narrower root Cargo-input set,
+- Git NUL-delimited path streams decoded through lossy UTF-8 conversion.
+
+These findings are deterministic and source-backed, but remain advisory in V1: they do not independently fail the CI gate. Ferric Lens does not turn generic syntax such as `unwrap()`, `.clone()`, file writes, or `from_utf8_lossy()` into correctness findings without the additional contextual evidence required by the rule.
 
 ## Importing deterministic evidence
 
@@ -104,7 +121,7 @@ The V1 envelope is intentionally generic rather than vendor-specific:
   "schema_version": 1,
   "producer": {"name": "my-benchmark", "version": "1.0"},
   "source": {"content_digest": "<Ferric Lens snapshot digest>"},
-  "configuration": {"target": "host", "features": []},
+  "configuration": {"target": "x86_64-unknown-linux-gnu", "features": []},
   "observations": [
     {
       "subject": "src/engine.rs",
@@ -117,7 +134,7 @@ The V1 envelope is intentionally generic rather than vendor-specific:
 }
 ```
 
-Imports are limited to 16 MiB, require repository-relative subjects, and are sorted deterministically. Source/configuration matches are explicit: the evidence target and explicit feature list must match the active Ferric Lens profile. Mismatched evidence is retained only as unattached context.
+Imports are limited to 16 MiB, require repository-relative subjects, and are sorted deterministically. Source/configuration matches are explicit: the evidence target must match the active resolved target triple and the feature list must match the active profile. Symbolic labels such as `host` are display context, not machine configuration identity. Mismatched evidence is retained only as unattached context.
 
 Imported evidence is advisory in V1. It never changes the `check` gate verdict and Ferric Lens never invokes the producing tool automatically.
 
@@ -143,7 +160,7 @@ An acceptance does not suppress a rule broadly. Material evidence changes produc
 
 ## Evidence limits
 
-Ferric Lens does not expand macros or pretend mutually exclusive platform `cfg` branches coexist. Standard target cfg predicates are evaluated from the selected target's stable `rustc --print cfg` output. Explicitly requested features can satisfy matching `cfg(feature = "...")`; unselected feature cfg remains unknown because default/transitive feature activation is not inferred from source alone. A changed gate subject or required baseline population affected by unsupported evidence makes the relevant gate inconclusive.
+Ferric Lens does not expand macros or pretend mutually exclusive platform `cfg` branches coexist. Standard target cfg predicates are evaluated from the selected target's stable `rustc --print cfg` output. When Cargo metadata resolution is available, enabled features are evaluated per workspace package, including default and transitive activation represented by Cargo's resolve graph. If that graph is unavailable, explicitly requested features remain usable but unproven feature reachability stays unknown. A changed gate subject or required baseline population affected by unsupported evidence makes the relevant gate inconclusive.
 
 Static findings are not runtime profiling claims.
 
