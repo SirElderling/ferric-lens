@@ -692,8 +692,7 @@ pub fn source_contexts_for_findings(
         (&left.subject, &left.metric)
             .cmp(&(&right.subject, &right.metric))
             .then(
-                source_context_display_priority(right)
-                    .cmp(&source_context_display_priority(left)),
+                source_context_display_priority(right).cmp(&source_context_display_priority(left)),
             )
             .then(left.cmp(right))
     });
