@@ -1717,6 +1717,10 @@ mod tests {
                 "A collection is cloned just to iterate it",
             ),
             (
+                "runtime.clone_then_mutate_candidate",
+                "A cloned aggregate is changed through one of its fields",
+            ),
+            (
                 "build.rebuild_exposure_candidate",
                 "Changes here may affect many parts of the repository",
             ),
