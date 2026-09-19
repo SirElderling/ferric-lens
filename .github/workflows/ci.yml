@@ -42,7 +42,7 @@ jobs:
 
       - name: Test coverage gate
         if: runner.os == 'Linux'
-        run: python3 -m unittest .github/scripts/test_check_source_coverage.py
+        run: python3 .github/scripts/test_check_source_coverage.py
 
       - name: Install coverage tooling
         if: runner.os == 'Linux'
