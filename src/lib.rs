@@ -291,11 +291,14 @@ fn analyze_internal_with_profile_context(
         &changes,
         &correspondence,
     );
-    rebind_advisory_identities(
+    let baseline_advisories = rules::current_snapshot_findings(&baseline_snapshot.modules);
+    rebind_advisory_baseline(
         &mut findings,
         &current.modules,
         &baseline_snapshot.modules,
         &correspondence,
+        &baseline_advisories,
+        &changes,
     );
 
     if !current.metadata_complete {
@@ -577,26 +580,56 @@ fn history_candidates(
     candidates
 }
 
-fn rebind_advisory_identities(
+fn rebind_advisory_baseline(
     findings: &mut [model::Finding],
     head: &[ModuleMetrics],
     baseline: &[ModuleMetrics],
     correspondence: &compare::Correspondence,
+    baseline_findings: &[model::Finding],
+    changes: &git::ChangeSet,
 ) {
-    for finding in findings
-        .iter_mut()
-        .filter(|finding| finding.rule == "structure.current_coupled_outlier")
-    {
-        let Some((head_index, _)) = head.iter().enumerate().find(|(_, module)| {
+    for finding in findings.iter_mut().filter(|finding| {
+        finding.delta == model::DeltaStatus::Current
+            && !finding.rule.starts_with("correctness.")
+            && !finding.rule.starts_with("refactor.")
+    }) {
+        let Some((head_index, head_module)) = head.iter().enumerate().find(|(_, module)| {
             display_subject(&module.crate_name, &module.module_path) == finding.subject
         }) else {
             continue;
         };
-        let Some(&baseline_index) = correspondence.head_to_baseline.get(&head_index) else {
+
+        if correspondence.ambiguous_head.contains(&head_index) {
+            finding.delta = model::DeltaStatus::Unknown;
             continue;
+        }
+
+        if let Some(&baseline_index) = correspondence.head_to_baseline.get(&head_index) {
+            let previous = &baseline[baseline_index];
+            let previous_subject = display_subject(&previous.crate_name, &previous.module_path);
+            finding.identity = previous_subject.clone();
+            let existed_at_baseline = baseline_findings.iter().any(|baseline_finding| {
+                baseline_finding.rule == finding.rule
+                    && baseline_finding.subject == previous_subject
+            });
+            finding.delta = if existed_at_baseline {
+                model::DeltaStatus::Unchanged
+            } else {
+                model::DeltaStatus::Worsened
+            };
+            if finding.delta == model::DeltaStatus::Unchanged
+                && finding.priority == model::Priority::Investigate
+            {
+                finding.priority = model::Priority::Observe;
+            }
+            continue;
+        }
+
+        finding.delta = if changes.added.contains(&head_module.path) {
+            model::DeltaStatus::New
+        } else {
+            model::DeltaStatus::Unknown
         };
-        let previous = &baseline[baseline_index];
-        finding.identity = display_subject(&previous.crate_name, &previous.module_path);
     }
 }
 
