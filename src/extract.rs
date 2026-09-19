@@ -667,11 +667,7 @@ mod tests {
         )
         .unwrap();
         assert!(!cfg_attr.gate_complete);
-        assert!(cfg_attr
-            .limitation
-            .as_deref()
-            .unwrap()
-            .contains("cfg_attr"));
+        assert!(cfg_attr.limitation.as_deref().unwrap().contains("cfg_attr"));
 
         let malformed = extract(&source("#[cfg()] fn configured() {}"), &host()).unwrap();
         assert!(!malformed.gate_complete);
@@ -739,11 +735,7 @@ mod tests {
 
     #[test]
     fn flattens_renamed_imports_without_using_the_alias_as_identity() {
-        let metrics = extract(
-            &source("use crate::model::Thing as LocalThing;"),
-            &host(),
-        )
-        .unwrap();
+        let metrics = extract(&source("use crate::model::Thing as LocalThing;"), &host()).unwrap();
 
         assert_eq!(metrics.explicit_imports.len(), 1);
         assert_eq!(
@@ -813,8 +805,10 @@ mod tests {
         ));
 
         assert!(super::resolve_in_crate("a", &["external".into()], &known["demo"]).is_none());
-        assert!(super::resolve_absolute(&["a".into(), "b".into(), "Thing".into()], &known["demo"])
-            .is_some());
+        assert!(
+            super::resolve_absolute(&["a".into(), "b".into(), "Thing".into()], &known["demo"])
+                .is_some()
+        );
         assert!(super::longest_module_prefix(
             vec!["missing".into()],
             &BTreeSet::from(["known".to_owned()])
@@ -864,14 +858,10 @@ mod tests {
             segments: vec!["crate".into(), "other".into()],
             glob: false,
         }];
-        let mut modules = vec![
-            incomplete,
-            extracted("demo", "other", "src/other.rs", ""),
-        ];
+        let mut modules = vec![incomplete, extracted("demo", "other", "src/other.rs", "")];
 
         resolve_workspace_dependencies(&mut modules, &WorkspaceAliases::new());
 
         assert!(modules[0].local_dependency_modules.is_empty());
     }
-
 }
