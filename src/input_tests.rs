@@ -8,7 +8,8 @@ use std::{
 use super::{
     acquire_inventory, collect_reachable_module, collect_rust_files, collect_target_roots,
     finalize_inventory, inventory_from_metadata, module_path_from_relative, rust_name, Dependency,
-    Metadata, Package, SourceBudget, SourceFile, Target, TargetRoot, WorkspaceAliases,
+    Metadata, Package, Resolve, ResolveNode, SourceBudget, SourceFile, Target, TargetRoot,
+    WorkspaceAliases,
     MAX_SNAPSHOT_SOURCE_BYTES,
 };
 
@@ -1936,5 +1937,139 @@ fn verified_inventory_propagates_source_stability_failure() {
     .unwrap_err();
 
     assert!(error.contains("changed during analysis"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn resolved_cargo_features_are_applied_per_workspace_package() {
+    use crate::{cfg::HostCfg, model::AnalysisProfile, profile::ProfileContext};
+
+    let root = temp_root();
+    let a = root.join("crates/a");
+    let b = root.join("crates/b");
+    for package in [&a, &b] {
+        fs::create_dir_all(package.join("src")).unwrap();
+        fs::write(
+            package.join("Cargo.toml"),
+            "[package]\nname='fixture'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            package.join("src/lib.rs"),
+            "#[cfg(feature = \"enabled\")] mod gated;\npub fn root() {}\n",
+        )
+        .unwrap();
+        fs::write(package.join("src/gated.rs"), "pub fn gated() {}\n").unwrap();
+    }
+
+    let a_id = "a-id".to_owned();
+    let b_id = "b-id".to_owned();
+    let metadata = Metadata {
+        packages: vec![
+            Package {
+                name: "a".into(),
+                id: a_id.clone(),
+                manifest_path: a.join("Cargo.toml").to_string_lossy().into_owned(),
+                targets: vec![Target {
+                    name: "a".into(),
+                    kind: vec!["lib".into()],
+                    src_path: a.join("src/lib.rs").to_string_lossy().into_owned(),
+                }],
+                dependencies: Vec::new(),
+            },
+            Package {
+                name: "b".into(),
+                id: b_id.clone(),
+                manifest_path: b.join("Cargo.toml").to_string_lossy().into_owned(),
+                targets: vec![Target {
+                    name: "b".into(),
+                    kind: vec!["lib".into()],
+                    src_path: b.join("src/lib.rs").to_string_lossy().into_owned(),
+                }],
+                dependencies: Vec::new(),
+            },
+        ],
+        workspace_members: vec![a_id.clone(), b_id.clone()],
+        workspace_root: root.to_string_lossy().into_owned(),
+        resolve: Some(Resolve {
+            nodes: vec![
+                ResolveNode {
+                    id: a_id,
+                    features: vec!["default".into(), "enabled".into()],
+                },
+                ResolveNode {
+                    id: b_id,
+                    features: vec!["default".into()],
+                },
+            ],
+        }),
+    };
+    let profile = ProfileContext {
+        public: AnalysisProfile {
+            id: "fixture".into(),
+            target: "host".into(),
+            resolved_target: "x86_64-unknown-linux-gnu".into(),
+            features: Vec::new(),
+            target_cfg: Vec::new(),
+        },
+        cfg: HostCfg::test(&["unix", "target_os=\"linux\""]),
+    };
+
+    let (sources, _, resolved, limitations) =
+        inventory_from_metadata(&root, metadata, Some(&profile)).unwrap();
+
+    assert!(limitations.is_empty());
+    assert_eq!(
+        resolved.get("a").unwrap(),
+        &vec!["default".to_owned(), "enabled".to_owned()]
+    );
+    assert_eq!(resolved.get("b").unwrap(), &vec!["default".to_owned()]);
+    assert!(sources
+        .iter()
+        .any(|source| source.crate_name == "a" && source.module_path == "gated"));
+    assert!(!sources
+        .iter()
+        .any(|source| source.crate_name == "b" && source.module_path == "gated"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_member_manifest_change_invalidates_captured_cargo_snapshot() {
+    let root = temp_root();
+    let member = root.join("crates/member");
+    fs::create_dir_all(&member).unwrap();
+    fs::write(root.join("Cargo.toml"), "[workspace]\nmembers=['crates/member']\n").unwrap();
+    fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
+    fs::write(
+        member.join("Cargo.toml"),
+        "[package]\nname='member'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+
+    let member_id = "member-id".to_owned();
+    let metadata = Metadata {
+        packages: vec![Package {
+            name: "member".into(),
+            id: member_id.clone(),
+            manifest_path: member.join("Cargo.toml").to_string_lossy().into_owned(),
+            targets: Vec::new(),
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec![member_id],
+        workspace_root: root.to_string_lossy().into_owned(),
+        resolve: None,
+    };
+    let snapshot = super::cargo_input_snapshot(&root, Some(&metadata)).unwrap();
+
+    fs::write(
+        member.join("Cargo.toml"),
+        "[package]\nname='member'\nversion='0.2.0'\n",
+    )
+    .unwrap();
+
+    let error = super::verify_cargo_inputs(&snapshot).unwrap_err();
+    assert!(error.contains("crates/member/Cargo.toml changed during analysis"));
+
     fs::remove_dir_all(root).unwrap();
 }
