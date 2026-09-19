@@ -44,9 +44,20 @@ jobs:
         if: runner.os == 'Linux'
         uses: taiki-e/install-action@cargo-llvm-cov
 
+      - name: Measure coverage
+        if: runner.os == 'Linux'
+        run: cargo llvm-cov --all-targets --all-features --lcov --output-path target/coverage.lcov
+
+      - name: Upload coverage evidence
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferric-lens-coverage
+          path: target/coverage.lcov
+
       - name: Enforce 100% coverage
         if: runner.os == 'Linux'
-        run: cargo llvm-cov --all-targets --all-features --fail-under-lines 100 --fail-under-regions 100 --fail-under-functions 100
+        run: cargo llvm-cov report --fail-under-lines 100 --fail-under-regions 100 --fail-under-functions 100
 
       - name: End-to-end check
         run: cargo run --locked -- check . --base origin/main --json target/ferric-lens-self-check.json
