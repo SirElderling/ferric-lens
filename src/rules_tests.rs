@@ -319,9 +319,7 @@ fn runtime_clone_syntax_outlier_is_candidate_only() {
 
 #[test]
 fn build_reverse_dependency_outlier_is_candidate_only() {
-    let mut modules = (0..20)
-        .map(|index| module(index, 0, 0))
-        .collect::<Vec<_>>();
+    let mut modules = (0..20).map(|index| module(index, 0, 0)).collect::<Vec<_>>();
     for module in modules.iter_mut().skip(1) {
         module.local_dependency_modules = vec!["demo::m0".into()];
     }
