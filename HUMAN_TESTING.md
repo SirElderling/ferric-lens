@@ -121,6 +121,6 @@ Also compare the compact agent output with the same run:
 /path/to/ferric-lens analyze /path/to/project --base origin/main --ai
 ```
 
-Verify that it contains the active actionable findings, evidence, source contexts, next steps, result digest, and relevant analysis limitations, while omitting the full repository inventory. The full canonical JSON remains the reference if anything needs deeper inspection.
+Verify that actionable `Act first` / `Investigate` items appear under `findings`, lower-confidence `Observe` signals appear separately under `observations`, and neither group loses its evidence, source contexts, next steps, result digest, or relevant analysis limitations. Confirm that an observation does not inflate the "areas worth reviewing" count. The full canonical JSON remains the reference if anything needs deeper inspection.
 
 After that, run the documented 10x source/history stress fixtures, browser DOM/open measurement, and recorded release-environment performance acceptance.
