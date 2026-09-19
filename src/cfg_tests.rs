@@ -211,4 +211,20 @@ fn missing_known_value_cfg_is_false_while_missing_custom_value_is_unknown() {
         cfg.evaluate(&parse_quote!(custom_value = "x")),
         Truth::Unknown
     );
+}\n
+#[test]
+fn rustc_cfg_command_and_parser_report_spawn_and_utf8_errors() {
+    let missing = std::env::temp_dir().join(format!(
+        "ferric-lens-cfg-missing-cwd-{}",
+        std::process::id()
+    ));
+    let mut command = std::process::Command::new("rustc");
+    command.current_dir(missing).args(["--print", "cfg"]);
+    assert!(super::run_rustc_cfg(&mut command)
+        .unwrap_err()
+        .contains("could not execute"));
+
+    assert!(super::parse_rustc_cfg(&[0xff])
+        .unwrap_err()
+        .contains("not UTF-8"));
 }
