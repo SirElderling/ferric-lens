@@ -12,9 +12,7 @@ use syn::{
 use crate::{
     cfg::{HostCfg, Truth},
     input::{SourceFile, WorkspaceAliases},
-    model::{
-        FunctionFact, FunctionKind, ImportPath, ModuleMetrics, TypeFact, TypeKind,
-    },
+    model::{FunctionFact, FunctionKind, ImportPath, ModuleMetrics, TypeFact, TypeKind},
 };
 
 pub fn extract(source: &SourceFile, cfg: &HostCfg) -> Result<ModuleMetrics, String> {
