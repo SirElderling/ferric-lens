@@ -359,4 +359,123 @@ mod tests {
             Truth::Unknown
         );
     }
+
+    #[test]
+    fn detects_host_cfg_and_rejects_an_invalid_target() {
+        let detected = HostCfg::detect().unwrap();
+        assert!(!detected.digest().is_empty());
+        assert!(!detected.canonical_lines().is_empty());
+
+        let error =
+            HostCfg::detect_for_target(Some("ferric-lens-invalid-target"), &[]).unwrap_err();
+        assert!(!error.is_empty());
+    }
+
+    #[test]
+    fn unavailable_cfg_never_invents_non_test_truth() {
+        let cfg = HostCfg::unavailable();
+        assert_eq!(cfg.digest(), "cfg-unavailable");
+        assert!(cfg.canonical_lines().is_empty());
+        assert_eq!(cfg.evaluate(&parse_quote!(test)), Truth::False);
+        assert_eq!(cfg.evaluate(&parse_quote!(unix)), Truth::Unknown);
+    }
+
+    #[test]
+    fn malformed_or_semantically_unknown_meta_is_unknown() {
+        let cfg = linux();
+
+        assert_eq!(cfg.evaluate(&parse_quote!(foo::bar)), Truth::Unknown);
+        assert_eq!(
+            cfg.evaluate(&parse_quote!(foo::bar = "value")),
+            Truth::Unknown
+        );
+        assert_eq!(cfg.evaluate(&parse_quote!(feature = SOME)), Truth::Unknown);
+        assert_eq!(
+            cfg.evaluate(&parse_quote!(target_os = SOME)),
+            Truth::Unknown
+        );
+        assert_eq!(cfg.evaluate(&parse_quote!(foo::bar(unix))), Truth::Unknown);
+
+        let malformed: syn::Meta = syn::parse_str("all(@)").unwrap();
+        assert_eq!(cfg.evaluate(&malformed), Truth::Unknown);
+        assert_eq!(cfg.evaluate(&parse_quote!(xor(unix))), Truth::Unknown);
+        assert_eq!(cfg.evaluate(&parse_quote!(not(unix, windows))), Truth::Unknown);
+    }
+
+    #[test]
+    fn boolean_cfg_operators_cover_true_false_and_unknown_paths() {
+        let cfg = linux();
+
+        assert_eq!(
+            cfg.evaluate(&parse_quote!(all(unix, windows))),
+            Truth::False
+        );
+        assert_eq!(
+            cfg.evaluate(&parse_quote!(all(unix, my_custom_cfg))),
+            Truth::Unknown
+        );
+        assert_eq!(
+            cfg.evaluate(&parse_quote!(any(windows, unix))),
+            Truth::True
+        );
+        assert_eq!(
+            cfg.evaluate(&parse_quote!(not(my_custom_cfg))),
+            Truth::Unknown
+        );
+    }
+
+    #[test]
+    fn parses_cfg_lines_canonically_and_rejects_unquoted_values() {
+        let cfg = HostCfg::from_lines([
+            "",
+            "unix",
+            "target_os=\"linux\"",
+            "target_feature=\"sse2\"",
+            "target_feature=\"avx\"",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cfg.canonical_lines(),
+            [
+                "target_feature=\"avx\"",
+                "target_feature=\"sse2\"",
+                "target_os=\"linux\"",
+                "unix",
+            ]
+        );
+        assert!(HostCfg::from_lines(["target_os=linux"]).is_err());
+    }
+
+    #[test]
+    fn recognizes_every_builtin_cfg_family() {
+        for key in [
+            "unix",
+            "windows",
+            "debug_assertions",
+            "proc_macro",
+            "target_thread_local",
+            "doctest",
+        ] {
+            assert!(super::is_known_bare_cfg(key));
+        }
+        assert!(!super::is_known_bare_cfg("custom"));
+
+        for key in [
+            "target_arch",
+            "target_endian",
+            "target_env",
+            "target_family",
+            "target_feature",
+            "target_has_atomic",
+            "target_os",
+            "target_pointer_width",
+            "target_vendor",
+            "panic",
+        ] {
+            assert!(super::is_known_value_cfg(key));
+        }
+        assert!(!super::is_known_value_cfg("custom"));
+    }
+
 }
