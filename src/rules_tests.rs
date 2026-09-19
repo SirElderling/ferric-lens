@@ -587,3 +587,99 @@ fn refactor_synthesis_does_not_use_other_refactor_findings_as_support() {
 
     assert!(refactor_candidates(&supporting).is_empty());
 }
+
+
+#[test]
+fn refactor_candidate_preserves_only_unambiguous_prior_identity() {
+    let mut moved = advisory_finding(
+        "structure.current_coupled_outlier",
+        "demo::renamed",
+        DeltaStatus::Current,
+        vec![
+            evidence("decision_sites", 20),
+            evidence("local_dependency_modules", 8),
+        ],
+    );
+    moved.identity = "demo::original".into();
+
+    let candidate = refactor_candidates(&[moved.clone()]).remove(0);
+    assert_eq!(candidate.identity, "demo::original");
+
+    let mut conflicting = advisory_finding(
+        "runtime.clone_syntax_outlier",
+        "demo::renamed",
+        DeltaStatus::Current,
+        vec![evidence("clone_call_syntax_sites", 12)],
+    );
+    conflicting.identity = "demo::other".into();
+
+    let candidate = refactor_candidates(&[moved, conflicting]).remove(0);
+    assert_eq!(candidate.identity, "demo::renamed");
+}
+
+#[test]
+fn refactor_candidate_ignores_unrecognized_metrics() {
+    let findings = vec![
+        advisory_finding(
+            "structure.decision_concentration",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![evidence("decision_sites", 20)],
+        ),
+        advisory_finding(
+            "other.public_surface",
+            "demo::engine",
+            DeltaStatus::Current,
+            vec![evidence("public_items", 12)],
+        ),
+    ];
+
+    assert!(refactor_candidates(&findings).is_empty());
+}
+
+#[test]
+fn refactor_delta_preserves_new_unchanged_and_unknown_states() {
+    let new = advisory_finding(
+        "structure.test",
+        "demo::engine",
+        DeltaStatus::New,
+        Vec::new(),
+    );
+    let unchanged = advisory_finding(
+        "structure.test",
+        "demo::engine",
+        DeltaStatus::Unchanged,
+        Vec::new(),
+    );
+    let unknown = advisory_finding(
+        "structure.test",
+        "demo::engine",
+        DeltaStatus::Unknown,
+        Vec::new(),
+    );
+
+    assert_eq!(super::refactor_delta(&[&new]), DeltaStatus::New);
+    assert_eq!(
+        super::refactor_delta(&[&unchanged]),
+        DeltaStatus::Unchanged
+    );
+    assert_eq!(super::refactor_delta(&[&unknown]), DeltaStatus::Unknown);
+}
+
+#[test]
+fn refactor_directions_cover_each_supported_signal_pair() {
+    assert!(super::refactor_direction(BTreeSet::from([
+        "decision_complexity",
+        "copying_runtime_risk",
+    ]))
+    .contains("complex orchestration"));
+
+    assert!(super::refactor_direction(BTreeSet::from([
+        "dependency_surface",
+        "copying_runtime_risk",
+    ]))
+    .contains("stable dependency boundary"));
+
+    assert!(super::refactor_direction(BTreeSet::new())
+        .contains("investigate the corroborating evidence"));
+}
