@@ -241,7 +241,6 @@ fn finalize_inventory(acquired: AcquiredInventory) -> Inventory {
         auxiliary_targets: AuxiliaryTargetSummary::default(),
     }
 }
-
 fn auxiliary_target_summary(metadata: &Metadata) -> AuxiliaryTargetSummary {
     let members = metadata
         .workspace_members
