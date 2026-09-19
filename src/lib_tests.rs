@@ -294,16 +294,9 @@ fn truncated_history_is_explicitly_partial() {
         analyze_baseline: super::analyze_snapshot,
         sample_history: truncated_history,
     };
-    let result = super::analyze_internal_with_ops(
-        &repo.root,
-        Some("HEAD"),
-        true,
-        None,
-        None,
-        &[],
-        &ops,
-    )
-    .unwrap();
+    let result =
+        super::analyze_internal_with_ops(&repo.root, Some("HEAD"), true, None, None, &[], &ops)
+            .unwrap();
 
     let history = result.history.as_ref().unwrap();
     assert!(history.truncated);
