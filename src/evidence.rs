@@ -411,4 +411,21 @@ mod tests {
             .contains("invalid evidence import JSON"));
         fs::remove_file(malformed).unwrap();
     }
+
+    #[test]
+    fn rejects_oversized_import_before_reading_contents() {
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "ferric-lens-evidence-large-{}-{counter}.json",
+            std::process::id()
+        ));
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(super::MAX_IMPORT_BYTES + 1).unwrap();
+
+        let error = load(&path, &snapshot(), &profile()).unwrap_err();
+
+        assert!(error.contains("exceeds the 16 MiB limit"));
+        fs::remove_file(path).unwrap();
+    }
+
 }
