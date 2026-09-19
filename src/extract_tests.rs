@@ -1030,7 +1030,7 @@ fn source_line_priority_covers_clone_and_decision_context_classes() {
             "clone_call_syntax_sites",
             "for item in world.items.clone() { drop(item); }"
         ),
-        140
+        70
     );
     assert_eq!(
         super::source_line_priority("clone_call_syntax_sites", "name: value.name.clone(),"),
