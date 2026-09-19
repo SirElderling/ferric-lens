@@ -326,6 +326,8 @@ Allowed directions include:
 
 Ferric Lens must not generate source changes or prescribe a final architecture.
 
+V1 synthesizes `refactor.multi_signal_candidate` advisories from the deterministic signals it already owns. A candidate requires at least two independent signal kinds for the same module. The initial signal kinds are decision complexity, dependency surface/reach, and clone/copying syntax risk. Multiple observations of the same signal kind do not satisfy corroboration. The candidate carries the supporting evidence, preserves baseline change relevance and unambiguous movement identity, and provides only a bounded structural direction. It is advisory and never changes the CI gate verdict. Future deterministic history, public-surface, imported test, or measured performance evidence may extend this synthesis only with equally explicit semantics.
+
 ## 12. Runtime performance-risk analysis
 
 Ferric Lens performs static performance-risk analysis.
