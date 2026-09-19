@@ -341,3 +341,125 @@ fn finding_sort_is_gate_first_then_rule_and_subject() {
         ]
     );
 }
+
+
+#[test]
+fn public_analysis_wrappers_delegate_with_consistent_semantics() {
+    let repo = Repo::new("public-wrappers");
+
+    assert_eq!(
+        super::analyze(&repo.root).unwrap().verdict,
+        crate::model::GateVerdict::Inconclusive
+    );
+
+    let results = [
+        super::analyze_with_base(&repo.root, Some("HEAD")).unwrap(),
+        super::analyze_with_base_and_evidence(&repo.root, Some("HEAD"), None).unwrap(),
+        super::analyze_with_profile(&repo.root, Some("HEAD"), None, &[], None).unwrap(),
+        super::check_with_base(&repo.root, Some("HEAD")).unwrap(),
+        super::check_with_profile(&repo.root, Some("HEAD"), None, &[]).unwrap(),
+    ];
+    assert!(results
+        .iter()
+        .all(|result| result.verdict == crate::model::GateVerdict::Pass));
+
+    assert!(super::accept_finding_with_base(
+        &repo.root,
+        Some("HEAD"),
+        "missing",
+        "not present"
+    )
+    .unwrap_err()
+    .contains("is not present"));
+    assert!(super::accept_finding_with_profile(
+        &repo.root,
+        Some("HEAD"),
+        None,
+        &[],
+        "missing",
+        "not present"
+    )
+    .unwrap_err()
+    .contains("is not present"));
+}
+
+fn gate_module_source(index: usize, decisions: usize, dependencies: usize) -> String {
+    let mut source = String::new();
+    for dependency in 1..=dependencies {
+        let target = (index + dependency) % 20;
+        if target != index {
+            source.push_str(&format!("use crate::m{target};\n"));
+        }
+    }
+    source.push_str("fn measured(value: bool) {\n");
+    for _ in 0..decisions {
+        source.push_str("    if value {}\n");
+    }
+    source.push_str("}\n");
+    source
+}
+
+#[test]
+fn public_acceptance_wrappers_record_an_exact_current_finding() {
+    let repo = Repo::new("public-acceptance");
+    repo.write(
+        "src/lib.rs",
+        &(0..20)
+            .map(|index| format!("mod m{index};"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    for index in 0..20 {
+        let (decisions, dependencies) = match index {
+            0 => (12, 4),
+            1..=16 => (10, 3),
+            _ => (15, 5),
+        };
+        repo.write(
+            &format!("src/m{index}.rs"),
+            &gate_module_source(index, decisions, dependencies),
+        );
+    }
+    git(&repo.root, &["add", "-A"]);
+    git(&repo.root, &["commit", "-q", "-m", "gate baseline"]);
+    let baseline = git(&repo.root, &["rev-parse", "HEAD"]);
+
+    repo.write("src/m0.rs", &gate_module_source(0, 18, 7));
+    let first = super::check_with_base(&repo.root, Some(&baseline)).unwrap();
+    let fingerprint = first
+        .findings
+        .iter()
+        .find(|finding| finding.gate)
+        .unwrap()
+        .fingerprint
+        .clone();
+
+    super::accept_finding_with_base(
+        &repo.root,
+        Some(&baseline),
+        &fingerprint,
+        "intentional unit boundary",
+    )
+    .unwrap();
+    super::accept_finding_with_profile(
+        &repo.root,
+        Some(&baseline),
+        None,
+        &[],
+        &fingerprint,
+        "intentional unit boundary via profile",
+    )
+    .unwrap();
+
+    let accepted = super::check_with_base(&repo.root, Some(&baseline)).unwrap();
+    let finding = accepted
+        .findings
+        .iter()
+        .find(|finding| finding.fingerprint == fingerprint)
+        .unwrap();
+    assert!(finding.accepted);
+    assert_eq!(
+        finding.acceptance_reason.as_deref(),
+        Some("intentional unit boundary via profile")
+    );
+}
