@@ -1493,20 +1493,63 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(value["format"], "ferric_lens_ai");
-        assert_eq!(value["findings"].as_array().unwrap().len(), 1);
+        assert!(value["findings"].as_array().unwrap().is_empty());
+        assert_eq!(value["observations"].as_array().unwrap().len(), 1);
         assert_eq!(
-            value["findings"][0]["title"],
+            value["observations"][0]["title"],
             "Repeated copying may be worth measuring"
         );
-        assert_eq!(value["findings"][0]["path"], "src/engine.rs");
-        assert_eq!(value["findings"][0]["source_contexts"][0]["start_line"], 12);
-        assert!(value["findings"][0]["why_care"]
+        assert_eq!(value["observations"][0]["path"], "src/engine.rs");
+        assert_eq!(
+            value["observations"][0]["source_contexts"][0]["start_line"],
+            12
+        );
+        assert!(value["observations"][0]["why_care"]
             .as_str()
             .unwrap()
             .contains("copy"));
         assert!(value.get("modules").is_none());
         assert!(value.get("capabilities").is_none());
         assert_eq!(value["summary"]["accepted_findings"], 1);
+    }
+
+    #[test]
+    fn observe_findings_are_secondary_not_areas_needing_attention() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        let mut result = minimal_result();
+        result.findings = vec![Finding {
+            fingerprint: "observe".into(),
+            rule: "build.small_population_rebuild_concentration".into(),
+            subject: "demo::model".into(),
+            identity: "demo::model".into(),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Candidate,
+            priority: Priority::Observe,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "dependency hub".into(),
+            direction: "keep boundary stable".into(),
+            evidence: Vec::new(),
+        }];
+
+        let rendered = html(&result);
+        let attention = rendered
+            .split("<h2>Repository overview</h2>")
+            .next()
+            .expect("attention section");
+
+        assert!(attention.contains("0 areas worth reviewing"));
+        assert!(!attention.contains("Changes here may affect many parts of the repository"));
+        assert!(rendered.contains("<strong>Observations</strong> (1)"));
+        assert!(rendered.contains("Changes here may affect many parts of the repository"));
+
+        let cli = super::cli_summary(&result);
+        assert!(cli.contains("0 areas worth reviewing"));
+        assert!(cli.contains("1 lower-confidence observation"));
+        assert!(!cli.contains("Changes here may affect many parts of the repository"));
     }
 
     #[test]
