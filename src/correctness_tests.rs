@@ -408,3 +408,23 @@ fn command_error() {
         .iter()
         .any(|finding| finding.rule == "correctness.lossy_git_path_decoding"));
 }
+
+
+#[test]
+fn ordinary_printing_without_compact_mode_does_not_trigger_stdout_side_effect_risk() {
+    let sources = vec![source(
+        "src/cli.rs",
+        r#"
+fn run() {
+    artifact::write(&json, serialize(&result));
+    artifact::write(&html, render(&result));
+    println!("{}", human_output(&result));
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "correctness.stdout_mode_unconditional_artifacts"));
+}
