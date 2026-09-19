@@ -618,9 +618,7 @@ mod tests {
 
     #[test]
     fn renders_inconclusive_attached_evidence_multiple_crates_and_complete_history() {
-        use crate::model::{
-            HistoryEvidence, HistorySummary, ImportedEvidence, ModuleMetrics,
-        };
+        use crate::model::{HistoryEvidence, HistorySummary, ImportedEvidence, ModuleMetrics};
 
         let mut result = minimal_result();
         result.verdict = GateVerdict::Inconclusive;
@@ -686,5 +684,4 @@ mod tests {
         assert!(!rendered.contains("Sample truncated"));
         assert!(rendered.matches("<details><summary><strong>").count() >= 2);
     }
-
 }
