@@ -1851,6 +1851,68 @@ mod tests {
     }
 
     #[test]
+    fn correctness_guidance_and_metric_labels_are_explicit() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        for (rule, title) in [
+            (
+                "correctness.cargo_feature_resolution_without_resolve",
+                "Feature-gated code may be analyzed under the wrong configuration",
+            ),
+            (
+                "correctness.symbolic_target_identity",
+                "Machine configuration identity can collide across host targets",
+            ),
+            (
+                "correctness.stdout_mode_unconditional_artifacts",
+                "A stdout-only mode still writes files",
+            ),
+            (
+                "correctness.workspace_manifest_snapshot_gap",
+                "The analyzed snapshot can mix different workspace manifest states",
+            ),
+            (
+                "correctness.lossy_git_path_decoding",
+                "Distinct repository paths can be silently collapsed",
+            ),
+        ] {
+            let finding = Finding {
+                fingerprint: String::new(),
+                rule: rule.into(),
+                subject: "repository".into(),
+                identity: "repository".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::ActFirst,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: String::new(),
+                direction: String::new(),
+                evidence: Vec::new(),
+            };
+            assert_eq!(super::finding_guidance(&finding).title, title);
+        }
+
+        for (metric, label) in [
+            (
+                "cargo_metadata_no_deps_sites",
+                "Cargo metadata calls without resolve graph",
+            ),
+            ("cfg_feature_resolution_sites", "Feature cfg resolution sites"),
+            ("symbolic_target_identity_sites", "Symbolic target identity sites"),
+            ("symbolic_target_match_sites", "Symbolic target comparison sites"),
+            ("unconditional_output_write_sites", "Unconditional output writes"),
+            ("root_only_cargo_input_sites", "Root-only Cargo input digests"),
+            ("workspace_manifest_read_sites", "Workspace manifest reads"),
+            ("lossy_git_path_decode_sites", "Lossy Git path decodes"),
+        ] {
+            assert_eq!(super::metric_label(metric), label);
+        }
+    }
+
+    #[test]
     fn write_rejects_paths_without_file_names() {
         let error = super::write(std::path::Path::new("/"), "content").unwrap_err();
         assert!(error.contains("output path has no file name"));
