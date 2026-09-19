@@ -424,7 +424,13 @@ pub fn accept_finding_with_profile(
     fingerprint: &str,
     reason: &str,
 ) -> Result<(), String> {
-    let result = check_with_profile(root, base, target, features)?;
+    let profile = profile::ProfileContext::resolve(target, features)?;
+    let result = check_with_profile(
+        root,
+        base,
+        Some(&profile.public.resolved_target),
+        &profile.public.features,
+    )?;
     if !result
         .findings
         .iter()
@@ -435,7 +441,6 @@ pub fn accept_finding_with_profile(
         ));
     }
 
-    let profile = profile::ProfileContext::resolve(target, features)?;
     acceptance::record(
         root,
         &profile,
