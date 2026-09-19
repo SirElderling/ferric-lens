@@ -9,6 +9,7 @@ pub mod architecture;
 pub mod cache;
 pub mod cfg;
 pub mod compare;
+pub mod correctness;
 pub mod evidence;
 pub mod extract;
 pub mod git;
@@ -39,6 +40,8 @@ struct SnapshotAnalysis {
     workspace_aliases: input::WorkspaceAliases,
     source_digests: BTreeMap<String, String>,
     modules: Vec<ModuleMetrics>,
+    correctness_findings: Vec<model::Finding>,
+    correctness_contexts: Vec<model::SourceContext>,
     parse_failures: usize,
 }
 
@@ -183,7 +186,8 @@ fn analyze_internal_with_profile_context(
     } else {
         None
     };
-    let mut findings = rules::current_snapshot_findings(&current.modules);
+    let mut findings = current.correctness_findings.clone();
+    findings.extend(rules::current_snapshot_findings(&current.modules));
     refresh_refactor_candidates(&mut findings);
     finalize_findings(root, &profile.public.id, &mut findings)?;
 
@@ -490,14 +494,29 @@ fn finding_source_contexts(
     findings: &[model::Finding],
     profile: &profile::ProfileContext,
 ) -> Result<Vec<model::SourceContext>, String> {
-    extract::source_contexts_for_findings(
+    let mut contexts = extract::source_contexts_for_findings(
         root,
         &snapshot.modules,
         &snapshot.workspace_aliases,
         &snapshot.source_digests,
         findings,
         &profile.cfg,
-    )
+    )?;
+    let requested = findings
+        .iter()
+        .flat_map(|finding| {
+            finding
+                .evidence
+                .iter()
+                .map(move |evidence| (finding.subject.as_str(), evidence.metric.as_str()))
+        })
+        .collect::<BTreeSet<_>>();
+    contexts.extend(snapshot.correctness_contexts.iter().filter(|context| {
+        requested.contains(&(context.subject.as_str(), context.metric.as_str()))
+    }).cloned());
+    contexts.sort();
+    contexts.dedup();
+    Ok(contexts)
 }
 
 fn refresh_refactor_candidates(findings: &mut Vec<model::Finding>) {
@@ -601,6 +620,7 @@ fn analyze_snapshot(
     profile: &profile::ProfileContext,
 ) -> Result<SnapshotAnalysis, String> {
     let inventory = input::inventory_with_profile(root, profile)?;
+    let correctness = correctness::scan(&inventory.sources);
     let source_digests = inventory
         .sources
         .iter()
@@ -654,6 +674,8 @@ fn analyze_snapshot(
         workspace_aliases,
         source_digests,
         modules,
+        correctness_findings: correctness.findings,
+        correctness_contexts: correctness.source_contexts,
         parse_failures,
     })
 }
