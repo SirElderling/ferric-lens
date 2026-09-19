@@ -241,6 +241,37 @@ fn git(root: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
 
+
+#[test]
+fn empty_unanalyzable_baseline_is_inconclusive_not_pass() {
+    let repo = Repo::new("empty-baseline");
+    fs::remove_file(repo.root.join("Cargo.toml")).unwrap();
+    fs::remove_dir_all(repo.root.join("src")).unwrap();
+    repo.write("README.md", "baseline without Rust");
+    git(&repo.root, &["add", "-A"]);
+    git(&repo.root, &["commit", "-q", "-m", "empty baseline"]);
+    let baseline = git(&repo.root, &["rev-parse", "HEAD"]);
+
+    repo.write(
+        "Cargo.toml",
+        "[package]\nname='demo'\nversion='0.1.0'\nedition='2021'\n",
+    );
+    repo.write("src/lib.rs", "pub fn current() -> usize { 1 }\n");
+
+    let result = super::analyze_with_base(&repo.root, Some(&baseline)).unwrap();
+
+    assert_eq!(result.verdict, crate::model::GateVerdict::Inconclusive);
+    assert!(result
+        .verdict_reason
+        .contains("baseline Cargo/source inventory is incomplete"));
+    let comparison = result
+        .capabilities
+        .iter()
+        .find(|capability| capability.name == "baseline_comparison")
+        .unwrap();
+    assert_eq!(comparison.status, CapabilityStatus::Partial);
+}
+
 fn baseline_failure(
     _: &Path,
     _: &Path,
