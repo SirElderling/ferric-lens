@@ -1670,3 +1670,143 @@ fn stability_verification_treats_a_disappearing_source_as_an_input_change() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn cargo_resolution_identity_covers_checkout_boundaries_dependencies_and_ordering() {
+    let root = temp_root();
+    let second_manifest = root.join("second/Cargo.toml");
+    fs::create_dir_all(second_manifest.parent().unwrap()).unwrap();
+    fs::create_dir_all(root.join("dep")).unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    fs::write(
+        &second_manifest,
+        "[package]\nname='second'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
+    fs::write(root.join("src/lib.rs"), "pub fn demo() {}\n").unwrap();
+
+    let outside = std::env::temp_dir().join(format!(
+        "ferric-lens-resolution-outside-{}-{}",
+        std::process::id(),
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("Cargo.toml"), "[package]\nname='outside'\nversion='0.1.0'\n")
+        .unwrap();
+
+    let first = Package {
+        name: "demo".into(),
+        id: "demo-id".into(),
+        manifest_path: root.join("Cargo.toml").to_string_lossy().into_owned(),
+        targets: vec![
+            Target {
+                name: "demo".into(),
+                kind: vec!["lib".into()],
+                src_path: root.join("src/lib.rs").to_string_lossy().into_owned(),
+            },
+            Target {
+                name: "outside".into(),
+                kind: vec!["bin".into()],
+                src_path: outside.join("main.rs").to_string_lossy().into_owned(),
+            },
+        ],
+        dependencies: vec![
+            super::Dependency {
+                name: "inside".into(),
+                rename: Some("renamed".into()),
+                path: Some(root.join("dep").to_string_lossy().into_owned()),
+            },
+            super::Dependency {
+                name: "outside".into(),
+                rename: None,
+                path: Some(outside.to_string_lossy().into_owned()),
+            },
+            super::Dependency {
+                name: "registry".into(),
+                rename: None,
+                path: None,
+            },
+        ],
+    };
+    let second = Package {
+        name: "second".into(),
+        id: "second-id".into(),
+        manifest_path: second_manifest.to_string_lossy().into_owned(),
+        targets: Vec::new(),
+        dependencies: Vec::new(),
+    };
+    let outside_package = Package {
+        name: "outside".into(),
+        id: "outside-id".into(),
+        manifest_path: outside.join("Cargo.toml").to_string_lossy().into_owned(),
+        targets: Vec::new(),
+        dependencies: Vec::new(),
+    };
+    let metadata = Metadata {
+        packages: vec![second.clone(), outside_package, first.clone()],
+        workspace_members: vec!["demo-id".into(), "second-id".into(), "outside-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+    let reordered = Metadata {
+        packages: vec![first, second],
+        workspace_members: vec!["second-id".into(), "demo-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+
+    let first_id = super::cargo_resolution_identity(&root, &metadata).unwrap();
+    let reordered_id = super::cargo_resolution_identity(&root, &reordered).unwrap();
+
+    assert_eq!(first_id, reordered_id);
+
+    fs::remove_dir_all(outside).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn cargo_resolution_identity_reports_missing_repository_manifest() {
+    let root = temp_root();
+    fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
+    let missing = root.join("missing/Cargo.toml");
+    let metadata = Metadata {
+        packages: vec![Package {
+            name: "missing".into(),
+            id: "missing-id".into(),
+            manifest_path: missing.to_string_lossy().into_owned(),
+            targets: Vec::new(),
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec!["missing-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+
+    let error = super::cargo_resolution_identity(&root, &metadata).unwrap_err();
+
+    assert!(error.contains("cannot read Cargo manifest"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn stability_verification_reports_source_disappearance() {
+    let root = temp_root();
+    fs::write(root.join("Cargo.toml"), "[package]\nname='demo'\nversion='0.1.0'\n").unwrap();
+    fs::write(root.join("src/lib.rs"), "pub fn stable() {}\n").unwrap();
+    let source = super::SourceFile {
+        crate_name: "demo".into(),
+        module_path: String::new(),
+        relative_path: "src/lib.rs".into(),
+        bytes: fs::read(root.join("src/lib.rs")).unwrap(),
+    };
+    let cargo_digest = super::cargo_input_digest(&root).unwrap();
+    fs::remove_file(root.join("src/lib.rs")).unwrap();
+
+    let error = super::verify_stable_inputs(&root, &[source], &cargo_digest).unwrap_err();
+
+    assert!(error.contains("changed during analysis"));
+    fs::remove_dir_all(root).unwrap();
+}
