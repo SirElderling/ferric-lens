@@ -202,6 +202,25 @@ pub fn changes_since(root: &Path, merge_base: &str) -> Result<ChangeSet, String>
         }
     }
 
+    let untracked = git_bytes(
+        root,
+        [
+            OsStr::new("ls-files"),
+            OsStr::new("--others"),
+            OsStr::new("--exclude-standard"),
+            OsStr::new("-z"),
+            OsStr::new("--"),
+        ],
+    )?;
+    for path in untracked
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        changes
+            .added
+            .insert(String::from_utf8_lossy(path).into_owned());
+    }
+
     Ok(changes)
 }
 
@@ -396,13 +415,21 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    let args = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_os_string())
+        .collect::<Vec<_>>();
     let output = Command::new("git")
         .current_dir(root)
-        .args(args)
+        .args(&args)
         .output()
         .map_err(|error| format!("could not execute git: {error}"))?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        if stderr.is_empty() {
+            return Err(format!("git command failed with status {}", output.status));
+        }
+        return Err(stderr);
     }
     Ok(output.stdout)
 }
