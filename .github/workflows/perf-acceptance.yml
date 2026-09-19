@@ -1,0 +1,73 @@
+name: Performance acceptance
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "tools/perf_fixture.py"
+      - "tools/perf_acceptance.py"
+      - ".github/workflows/perf-acceptance.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Fixture mode
+        required: true
+        default: standard
+        type: choice
+        options:
+          - standard
+          - source-10x
+          - history-10x
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-acceptance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: Linux / ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'standard' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Run performance acceptance
+        env:
+          PERF_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'standard' }}
+        run: |
+          python3 tools/perf_acceptance.py             --binary target/release/ferric-lens             --mode "$PERF_MODE"             --output-dir target/perf-acceptance
+
+      - name: Publish target observations
+        if: always()
+        run: |
+          if test -f target/perf-acceptance/performance-acceptance.json; then
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("target/perf-acceptance/performance-acceptance.json")
+          result = json.loads(path.read_text())
+          print(json.dumps(result.get("engineering_target_observations", {}), indent=2))
+          PY
+          fi
+
+      - name: Upload performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferric-lens-performance-${{ github.run_id }}
+          path: target/perf-acceptance/
+          if-no-files-found: warn
