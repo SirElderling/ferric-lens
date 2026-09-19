@@ -23,6 +23,7 @@ Ferric Lens currently:
 - reports unresolved custom/default-feature cfg evidence as `inconclusive` rather than pretending the gate passed,
 - emits deterministic JSON,
 - emits one self-contained HTML/CSS report with no JavaScript,
+- attaches deterministic source evidence to supported findings: repository-relative path, exact 1-based line span, and a bounded escaped excerpt, while retaining module navigation when no truthful syntax span exists,
 - reuses content-addressed raw syntax facts through a disposable 256 MiB repository cache,
 - enriches full `analyze` reports with bounded recent churn and co-change evidence,
 - keeps `check` on the fast core path without optional history or imported evidence,
@@ -134,6 +135,8 @@ An acceptance does not suppress a rule broadly. Material evidence changes produc
 Ferric Lens does not expand macros or pretend mutually exclusive platform `cfg` branches coexist. Standard target cfg predicates are evaluated from the selected target's stable `rustc --print cfg` output. Explicitly requested features can satisfy matching `cfg(feature = "...")`; unselected feature cfg remains unknown because default/transitive feature activation is not inferred from source alone. A changed gate subject or required baseline population affected by unsupported evidence makes the relevant gate inconclusive.
 
 Static findings are not runtime profiling claims.
+
+Finding source context is representative rather than an exhaustive source dump. V1 records at most three source contexts per supported evidence signal. Each excerpt is limited to three source lines and 600 Unicode characters; truncation is explicit. Current exact-span support covers decision-site, clone-call, resolved dependency, and reverse-dependency evidence. Line/excerpt metadata is presentation evidence and does not participate in finding fingerprints or acceptance identity.
 
 ## Development
 
