@@ -47,12 +47,19 @@ struct AnalysisOps {
     analyze_baseline:
         fn(&Path, &Path, &profile::ProfileContext) -> Result<SnapshotAnalysis, String>,
     sample_history: fn(&Path) -> Result<git::HistorySample, String>,
+    source_contexts: fn(
+        &Path,
+        &SnapshotAnalysis,
+        &[model::Finding],
+        &profile::ProfileContext,
+    ) -> Result<Vec<model::SourceContext>, String>,
 }
 
 const REAL_OPS: AnalysisOps = AnalysisOps {
     materialize_baseline: git::materialize_worktree,
     analyze_baseline: analyze_snapshot,
     sample_history: git::sample_history,
+    source_contexts: finding_source_contexts,
 };
 
 pub fn analyze(root: &Path) -> Result<AnalysisResult, String> {
@@ -187,7 +194,7 @@ fn analyze_internal_with_profile_context(
                 detail: Some(error.clone()),
             });
             capabilities.sort_by(|a, b| a.name.cmp(&b.name));
-            let source_contexts = finding_source_contexts(root, &current, &findings, profile)?;
+            let source_contexts = (ops.source_contexts)(root, &current, &findings, profile)?;
             return Ok(AnalysisResult {
                 schema_version: 1,
                 tool_version: env!("CARGO_PKG_VERSION").into(),
@@ -217,7 +224,7 @@ fn analyze_internal_with_profile_context(
                 detail: Some(error.clone()),
             });
             capabilities.sort_by(|a, b| a.name.cmp(&b.name));
-            let source_contexts = finding_source_contexts(root, &current, &findings, profile)?;
+            let source_contexts = (ops.source_contexts)(root, &current, &findings, profile)?;
             return Ok(AnalysisResult {
                 schema_version: 1,
                 tool_version: env!("CARGO_PKG_VERSION").into(),
@@ -247,7 +254,7 @@ fn analyze_internal_with_profile_context(
                 detail: Some(error.clone()),
             });
             capabilities.sort_by(|a, b| a.name.cmp(&b.name));
-            let source_contexts = finding_source_contexts(root, &current, &findings, profile)?;
+            let source_contexts = (ops.source_contexts)(root, &current, &findings, profile)?;
             return Ok(AnalysisResult {
                 schema_version: 1,
                 tool_version: env!("CARGO_PKG_VERSION").into(),
@@ -409,7 +416,7 @@ fn analyze_internal_with_profile_context(
     };
 
     capabilities.sort_by(|a, b| a.name.cmp(&b.name));
-    let source_contexts = finding_source_contexts(root, &current, &findings, profile)?;
+    let source_contexts = (ops.source_contexts)(root, &current, &findings, profile)?;
 
     Ok(AnalysisResult {
         schema_version: 1,
