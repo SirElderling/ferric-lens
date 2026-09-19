@@ -342,19 +342,58 @@ fn build_reverse_dependency_outlier_is_candidate_only() {
 }
 
 #[test]
-fn runtime_and_build_advisories_require_a_meaningful_population() {
-    let mut modules = (0..19).map(|index| module(index, 0, 0)).collect::<Vec<_>>();
-    modules[0].clone_calls = 99;
+fn small_population_emits_descriptive_candidates_without_gating() {
+    let mut modules = (0..10)
+        .map(|index| module(index, 10, 0))
+        .collect::<Vec<_>>();
+    modules[0].decision_sites = 40;
+    modules[0].clone_calls = 8;
     for module in modules.iter_mut().skip(1) {
         module.local_dependency_modules = vec!["demo::m0".into()];
     }
 
     let findings = current_snapshot_findings(&modules);
 
-    assert!(!findings
-        .iter()
-        .any(|finding| finding.rule.starts_with("runtime.")));
-    assert!(!findings
-        .iter()
-        .any(|finding| finding.rule.starts_with("build.")));
+    for rule in [
+        "structure.small_population_decision_concentration",
+        "runtime.small_population_clone_concentration",
+        "build.small_population_rebuild_concentration",
+    ] {
+        let finding = findings
+            .iter()
+            .find(|finding| finding.rule == rule)
+            .unwrap_or_else(|| panic!("missing descriptive finding {rule}"));
+        assert_eq!(finding.evidence_class, EvidenceClass::Candidate);
+        assert_eq!(finding.priority, Priority::Observe);
+        assert!(!finding.gate);
+        assert!(finding.summary.contains("small cohort"));
+        assert!(finding.summary.contains("not a statistical outlier"));
+        assert_eq!(finding.evidence[0].population, 10);
+    }
+}
+
+#[test]
+fn descriptive_small_population_candidates_require_four_subjects_and_a_unique_maximum() {
+    let mut tiny = (0..3)
+        .map(|index| module(index, 10, 0))
+        .collect::<Vec<_>>();
+    tiny[0].decision_sites = 99;
+    tiny[0].clone_calls = 99;
+    for module in tiny.iter_mut().skip(1) {
+        module.local_dependency_modules = vec!["demo::m0".into()];
+    }
+    assert!(current_snapshot_findings(&tiny).is_empty());
+
+    let tied = (0..10)
+        .map(|index| {
+            let mut value = module(index, 10, 0);
+            value.clone_calls = 2;
+            value
+        })
+        .collect::<Vec<_>>();
+    let findings = current_snapshot_findings(&tied);
+    assert!(!findings.iter().any(|finding| {
+        finding.rule == "structure.small_population_decision_concentration"
+            || finding.rule == "runtime.small_population_clone_concentration"
+    }));
 }
