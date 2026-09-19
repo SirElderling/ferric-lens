@@ -1354,7 +1354,6 @@ fn canonical_module_and_directory_path_helpers_propagate_supplied_errors() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn auxiliary_target_summary_classifies_non_production_target_kinds() {
     let root = temp_root();
@@ -1367,12 +1366,42 @@ fn auxiliary_target_summary_classifies_non_production_target_kinds() {
             id: "demo-id".into(),
             manifest_path: manifest.to_string_lossy().into_owned(),
             targets: vec![
-                Target { name: "demo".into(), kind: vec!["lib".into()], src_path: root.join("src/lib.rs").to_string_lossy().into_owned() },
-                Target { name: "integration".into(), kind: vec!["test".into()], src_path: root.join("tests/integration.rs").to_string_lossy().into_owned() },
-                Target { name: "bench".into(), kind: vec!["bench".into()], src_path: root.join("benches/bench.rs").to_string_lossy().into_owned() },
-                Target { name: "example".into(), kind: vec!["example".into()], src_path: root.join("examples/example.rs").to_string_lossy().into_owned() },
-                Target { name: "build-script-build".into(), kind: vec!["custom-build".into()], src_path: root.join("build.rs").to_string_lossy().into_owned() },
-                Target { name: "macro".into(), kind: vec!["proc-macro".into()], src_path: root.join("src/macro.rs").to_string_lossy().into_owned() },
+                Target {
+                    name: "demo".into(),
+                    kind: vec!["lib".into()],
+                    src_path: root.join("src/lib.rs").to_string_lossy().into_owned(),
+                },
+                Target {
+                    name: "integration".into(),
+                    kind: vec!["test".into()],
+                    src_path: root
+                        .join("tests/integration.rs")
+                        .to_string_lossy()
+                        .into_owned(),
+                },
+                Target {
+                    name: "bench".into(),
+                    kind: vec!["bench".into()],
+                    src_path: root.join("benches/bench.rs").to_string_lossy().into_owned(),
+                },
+                Target {
+                    name: "example".into(),
+                    kind: vec!["example".into()],
+                    src_path: root
+                        .join("examples/example.rs")
+                        .to_string_lossy()
+                        .into_owned(),
+                },
+                Target {
+                    name: "build-script-build".into(),
+                    kind: vec!["custom-build".into()],
+                    src_path: root.join("build.rs").to_string_lossy().into_owned(),
+                },
+                Target {
+                    name: "macro".into(),
+                    kind: vec!["proc-macro".into()],
+                    src_path: root.join("src/macro.rs").to_string_lossy().into_owned(),
+                },
             ],
             dependencies: Vec::new(),
         }],
@@ -1457,13 +1486,11 @@ fn stability_verification_detects_source_and_cargo_input_changes() {
     super::verify_stable_inputs(&root, std::slice::from_ref(&source), &cargo_digest).unwrap();
 
     fs::write(root.join("src/lib.rs"), "pub fn changed() {}\n").unwrap();
-    assert!(super::verify_stable_inputs(
-        &root,
-        std::slice::from_ref(&source),
-        &cargo_digest
-    )
-    .unwrap_err()
-    .contains("changed during analysis"));
+    assert!(
+        super::verify_stable_inputs(&root, std::slice::from_ref(&source), &cargo_digest)
+            .unwrap_err()
+            .contains("changed during analysis")
+    );
 
     fs::write(root.join("src/lib.rs"), &source.bytes).unwrap();
     fs::write(root.join("Cargo.lock"), "version = 4\n# changed\n").unwrap();
