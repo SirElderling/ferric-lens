@@ -170,6 +170,7 @@ fn analyze_internal_with_profile_context(
         None
     };
     let mut findings = rules::current_snapshot_findings(&current.modules);
+    refresh_refactor_candidates(&mut findings);
     finalize_findings(root, &profile.public.id, &mut findings)?;
 
     let baseline_selection = match git::resolve_baseline(root, base) {
@@ -296,6 +297,7 @@ fn analyze_internal_with_profile_context(
     gate.incomplete_reasons.dedup();
 
     findings.extend(gate.findings);
+    refresh_refactor_candidates(&mut findings);
     finalize_findings(root, &profile.public.id, &mut findings)?;
     sort_findings(&mut findings);
 
@@ -458,6 +460,12 @@ pub fn accept_finding_with_profile(
         reason,
         &result.snapshot.content_digest,
     )
+}
+
+fn refresh_refactor_candidates(findings: &mut Vec<model::Finding>) {
+    findings.retain(|finding| !finding.rule.starts_with("refactor."));
+    let candidates = rules::refactor_candidates(findings);
+    findings.extend(candidates);
 }
 
 fn sort_findings(findings: &mut [model::Finding]) {
