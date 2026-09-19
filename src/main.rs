@@ -170,7 +170,6 @@ fn exit_code(verdict: &GateVerdict) -> ExitCode {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use clap::Parser;
