@@ -463,7 +463,7 @@ fn runtime_clone_syntax_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
 fn build_rebuild_exposure_candidates(modules: &[ModuleMetrics]) -> Vec<Finding> {
     let eligible = modules
         .iter()
-        .filter(|module| module.parse_complete)
+        .filter(|module| module.parse_complete && !module.module_path.is_empty())
         .collect::<Vec<_>>();
     if eligible.len() < MIN_POPULATION {
         return Vec::new();
