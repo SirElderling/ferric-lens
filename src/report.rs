@@ -1634,12 +1634,16 @@ mod tests {
         }];
 
         let rendered = super::cli_summary(&result);
+        let ai: serde_json::Value = serde_json::from_str(&super::ai_json(&result)).unwrap();
 
         assert!(rendered.contains("1 area worth reviewing"));
         assert!(rendered.contains("Possible refactoring opportunity"));
         assert!(rendered.contains("Why it matters:"));
         assert!(rendered.contains("Next:"));
         assert!(!rendered.contains("refactor.multi_signal_candidate"));
+        assert_eq!(ai["findings"].as_array().unwrap().len(), 1);
+        assert!(ai["observations"].as_array().unwrap().is_empty());
+        assert_eq!(ai["findings"][0]["title"], "Possible refactoring opportunity");
     }
 
     #[test]
