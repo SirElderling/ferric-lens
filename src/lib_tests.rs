@@ -1,8 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use crate::{
     compare::Correspondence,
-    git::ChangeSet,
+    git::{ChangeSet, HistoryCommit, HistorySample},
     model::{CapabilityStatus, DeltaStatus, EvidenceClass, Finding, ModuleMetrics, Priority},
 };
 
@@ -132,4 +138,181 @@ fn snapshot_capabilities_reflect_complete_and_partial_syntax_and_inventory() {
         .iter()
         .any(|capability| capability.detail.as_deref()
             == Some("2 Rust source file(s) could not be parsed")));
+}
+
+
+static REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+struct Repo {
+    root: PathBuf,
+}
+
+impl Repo {
+    fn new(name: &str) -> Self {
+        let counter = REPO_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "ferric-lens-lib-test-{}-{counter}-{name}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname='demo'\nversion='0.1.0'\nedition='2021'\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/lib.rs"), "pub fn stable() -> usize { 1 }\n").unwrap();
+        git(&root, &["init", "-q", "-b", "main"]);
+        git(&root, &["config", "user.email", "test@example.invalid"]);
+        git(&root, &["config", "user.name", "Ferric Lens Test"]);
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-q", "-m", "baseline"]);
+        Self { root }
+    }
+
+    fn write(&self, path: &str, contents: &str) {
+        let path = self.root.join(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, contents).unwrap();
+    }
+}
+
+impl Drop for Repo {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn git(root: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+fn baseline_failure(
+    _: &Path,
+    _: &Path,
+    _: &crate::profile::ProfileContext,
+) -> Result<super::SnapshotAnalysis, String> {
+    Err("fixture baseline analysis failure".into())
+}
+
+fn history_failure(_: &Path) -> Result<HistorySample, String> {
+    Err("fixture history failure".into())
+}
+
+fn truncated_history(_: &Path) -> Result<HistorySample, String> {
+    Ok(HistorySample {
+        commits: vec![HistoryCommit {
+            oid: "a".repeat(40),
+            paths: vec!["src/lib.rs".into()],
+        }],
+        changed_path_records: 1,
+        broad_commits_excluded_from_cochange: 0,
+        truncated: true,
+    })
+}
+
+#[test]
+fn baseline_materialization_failure_is_reported_as_inconclusive() {
+    let repo = Repo::new("materialize-failure");
+    fs::write(repo.root.join(".git/worktrees"), "blocks worktree directory").unwrap();
+
+    let result = super::analyze_with_base(&repo.root, Some("HEAD")).unwrap();
+
+    assert_eq!(result.verdict, crate::model::GateVerdict::Inconclusive);
+    assert!(result
+        .verdict_reason
+        .contains("baseline materialization unavailable"));
+}
+
+#[test]
+fn baseline_analysis_failure_is_reported_as_inconclusive() {
+    let repo = Repo::new("baseline-analysis-failure");
+
+    let result = super::analyze_internal_with(
+        &repo.root,
+        Some("HEAD"),
+        false,
+        None,
+        None,
+        &[],
+        baseline_failure,
+        crate::git::sample_history,
+    )
+    .unwrap();
+
+    assert_eq!(result.verdict, crate::model::GateVerdict::Inconclusive);
+    assert!(result.verdict_reason.contains("baseline analysis failed"));
+}
+
+#[test]
+fn unavailable_history_degrades_capability_without_changing_gate_semantics() {
+    let repo = Repo::new("history-failure");
+    repo.write("src/lib.rs", "pub fn stable() -> usize { 2 }\n");
+
+    let result = super::analyze_internal_with(
+        &repo.root,
+        Some("HEAD"),
+        true,
+        None,
+        None,
+        &[],
+        super::analyze_snapshot,
+        history_failure,
+    )
+    .unwrap();
+
+    assert!(result.history.is_none());
+    let capability = result
+        .capabilities
+        .iter()
+        .find(|capability| capability.name == "history_enrichment")
+        .unwrap();
+    assert_eq!(capability.status, CapabilityStatus::Unavailable);
+    assert_eq!(capability.detail.as_deref(), Some("fixture history failure"));
+}
+
+#[test]
+fn truncated_history_is_explicitly_partial() {
+    let repo = Repo::new("history-truncated");
+    repo.write("src/lib.rs", "pub fn stable() -> usize { 2 }\n");
+
+    let result = super::analyze_internal_with(
+        &repo.root,
+        Some("HEAD"),
+        true,
+        None,
+        None,
+        &[],
+        super::analyze_snapshot,
+        truncated_history,
+    )
+    .unwrap();
+
+    let history = result.history.as_ref().unwrap();
+    assert!(history.truncated);
+    let capability = result
+        .capabilities
+        .iter()
+        .find(|capability| capability.name == "history_enrichment")
+        .unwrap();
+    assert_eq!(capability.status, CapabilityStatus::Partial);
+    assert!(capability
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("sample truncated"));
 }
