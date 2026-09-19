@@ -127,6 +127,59 @@ pub fn html(result: &AnalysisResult) -> String {
             }
         )));
         modules.push_str("</span></div>");
+
+        if !module.local_dependency_modules.is_empty() {
+            modules.push_str("<details><summary>Dependencies (");
+            modules.push_str(&module.local_dependency_modules.len().to_string());
+            modules.push_str(")</summary><ul>");
+            for dependency in &module.local_dependency_modules {
+                modules.push_str("<li><code>");
+                modules.push_str(&escape(dependency));
+                modules.push_str("</code></li>");
+            }
+            modules.push_str("</ul></details>");
+        }
+
+        if !module.functions.is_empty() {
+            modules.push_str("<details><summary>Functions (");
+            modules.push_str(&module.functions.len().to_string());
+            modules.push_str(")</summary><ul>");
+            for function in &module.functions {
+                modules.push_str("<li><code>");
+                modules.push_str(&escape(&function.name));
+                modules.push_str("</code> · ");
+                modules.push_str(&escape(&format!("{:?}", function.kind).to_lowercase()));
+                modules.push_str(" · ");
+                modules.push_str(if function.public_declared {
+                    "public"
+                } else {
+                    "private"
+                });
+                modules.push_str("</li>");
+            }
+            modules.push_str("</ul></details>");
+        }
+
+        if !module.types.is_empty() {
+            modules.push_str("<details><summary>Types (");
+            modules.push_str(&module.types.len().to_string());
+            modules.push_str(")</summary><ul>");
+            for item_type in &module.types {
+                modules.push_str("<li><code>");
+                modules.push_str(&escape(&item_type.name));
+                modules.push_str("</code> · ");
+                modules.push_str(&escape(&format!("{:?}", item_type.kind).to_lowercase()));
+                modules.push_str(" · ");
+                modules.push_str(if item_type.public_declared {
+                    "public"
+                } else {
+                    "private"
+                });
+                modules.push_str("</li>");
+            }
+            modules.push_str("</ul></details>");
+        }
+
         if let Some(history) = &module.history {
             modules.push_str(r#"<div class="history"><small>"#);
             modules.push_str(&escape(&format!(
