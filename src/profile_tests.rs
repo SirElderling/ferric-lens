@@ -55,7 +55,6 @@ fn rustc_host_command_reports_spawn_errors() {
         .contains("could not execute rustc"));
 }
 
-
 #[test]
 fn profile_resolution_reports_invalid_explicit_targets() {
     let error = ProfileContext::resolve(Some("ferric-lens-invalid-target"), &[]).unwrap_err();
