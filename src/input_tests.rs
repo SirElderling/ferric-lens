@@ -1306,7 +1306,6 @@ fn fallback_path_reader_propagates_regular_read_failures() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn reachable_module_propagates_injected_canonicalize_failure() {
     let root = temp_root();
@@ -1348,7 +1347,6 @@ fn directory_path_reader_propagates_entry_iteration_failure() {
     assert!(error.contains("fixture entry iteration failure"));
     fs::remove_dir_all(root).unwrap();
 }
-
 
 #[test]
 fn canonical_module_and_directory_path_helpers_propagate_supplied_errors() {
