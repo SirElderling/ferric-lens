@@ -769,3 +769,13 @@ fn git_text_os_propagates_native_git_failure() {
 
     assert!(super::git_text_os(&repo.root, args).is_err());
 }
+
+#[test]
+fn git_path_decoding_rejects_invalid_utf8_instead_of_replacing_bytes() {
+    let error = super::decode_git_text(&[0xff], "Git path").unwrap_err();
+    assert!(error.contains("not valid UTF-8"));
+    assert!(error.contains("analysis is incomplete"));
+
+    let tree = b"100644 blob abc123\tbad\xff.rs\0";
+    assert!(super::parse_tree_oids(tree).is_err());
+}
