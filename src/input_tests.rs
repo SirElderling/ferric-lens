@@ -1313,10 +1313,9 @@ fn directory_path_reader_propagates_entry_iteration_failure() {
         "fixture entry iteration failure",
     )));
 
-    let error = super::directory_paths_from_entries(super::collect_directory_entries(
-        entries, &root,
-    ))
-    .unwrap_err();
+    let error =
+        super::directory_paths_from_entries(super::collect_directory_entries(entries, &root))
+            .unwrap_err();
 
     assert!(error.contains("fixture entry iteration failure"));
     fs::remove_dir_all(root).unwrap();
