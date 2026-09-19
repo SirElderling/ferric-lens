@@ -1,3 +1,19 @@
+impl HostCfg {
+    pub fn test(lines: &[&str]) -> Self {
+        Self::from_lines(lines.iter().copied()).unwrap()
+    }
+
+    pub fn test_with_features(lines: &[&str], features: &[&str]) -> Self {
+        let mut cfg = Self::from_lines(lines.iter().copied()).unwrap();
+        cfg.explicit_features = features
+            .iter()
+            .map(|feature| (*feature).to_owned())
+            .collect();
+        cfg.rehash();
+        cfg
+    }
+}
+
 use syn::parse_quote;
 
 use super::{HostCfg, Truth};
