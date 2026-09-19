@@ -96,3 +96,58 @@ fn accept_rejects_unknown_fingerprint_through_cli() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("not present in the current analysis"));
 }
+
+
+#[test]
+fn analyze_accepts_explicit_profile_and_evidence_options() {
+    let repo = Repo::baseline("analyze-options");
+    let seed = ferric_lens::analyze_with_base(&repo.root, Some("HEAD")).unwrap();
+    repo.write(
+        "evidence.json",
+        &format!(
+            r#"{{"schema_version":1,"producer":{{"name":"fixture","version":"1"}},"source":{{"content_digest":"{}"}},"configuration":{{"target":"host","features":[]}},"observations":[]}}"#,
+            seed.snapshot.content_digest
+        ),
+    );
+    let json = repo.root.join("result.json");
+    let html = repo.root.join("result.html");
+    let output = run(&[
+        "analyze",
+        repo.root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--target",
+        &seed.profile.resolved_target,
+        "--feature",
+        "alpha",
+        "--evidence",
+        repo.root.join("evidence.json").to_str().unwrap(),
+        "--json",
+        json.to_str().unwrap(),
+        "--html",
+        html.to_str().unwrap(),
+    ]);
+
+    assert!(output.status.success());
+    let value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(json).unwrap()).unwrap();
+    assert_eq!(value["profile"]["features"][0], "alpha");
+}
+
+#[test]
+fn analyze_reports_output_write_failures_as_errors() {
+    let repo = Repo::baseline("write-error");
+    let output = run(&[
+        "analyze",
+        repo.root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--json",
+        repo.root.to_str().unwrap(),
+        "--html",
+        repo.root.join("report.html").to_str().unwrap(),
+    ]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot replace"));
+}
