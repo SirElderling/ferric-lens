@@ -87,8 +87,7 @@ fn detects_host_cfg_and_rejects_an_invalid_target() {
     assert!(!detected.digest().is_empty());
     assert!(!detected.canonical_lines().is_empty());
 
-    let error =
-        HostCfg::detect_for_target(Some("ferric-lens-invalid-target"), &[]).unwrap_err();
+    let error = HostCfg::detect_for_target(Some("ferric-lens-invalid-target"), &[]).unwrap_err();
     assert!(!error.is_empty());
 }
 
@@ -198,7 +197,6 @@ fn recognizes_every_builtin_cfg_family() {
     }
     assert!(!super::is_known_value_cfg("custom"));
 }
-
 
 #[test]
 fn missing_known_value_cfg_is_false_while_missing_custom_value_is_unknown() {
