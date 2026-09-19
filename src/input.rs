@@ -139,7 +139,7 @@ struct TargetRoot {
     source: PathBuf,
     package_root: PathBuf,
     dependencies: Vec<Dependency>,
-    resolved_features: Vec<String>,
+    resolved_features: Option<Vec<String>>,
 }
 
 pub fn inventory(root: &Path) -> Result<Inventory, String> {
@@ -171,7 +171,7 @@ fn assemble_inventory(
         .map(auxiliary_target_summary)
         .unwrap_or_default();
     let cargo_resolution_digest = match metadata.as_ref() {
-        Ok(metadata) => Some(cargo_resolution_identity(
+        Ok(metadata) => Some(cargo_resolution_identity_with_digest(
             root,
             metadata,
             &cargo_inputs.digest,
@@ -435,7 +435,12 @@ fn verify_cargo_inputs(expected: &CargoInputSnapshot) -> Result<(), String> {
     Ok(())
 }
 
-fn cargo_resolution_identity(
+fn cargo_resolution_identity(root: &Path, metadata: &Metadata) -> Result<String, String> {
+    let cargo_inputs = cargo_input_snapshot(root, Some(metadata))?;
+    cargo_resolution_identity_with_digest(root, metadata, &cargo_inputs.digest)
+}
+
+fn cargo_resolution_identity_with_digest(
     root: &Path,
     metadata: &Metadata,
     cargo_input_digest: &str,
@@ -737,10 +742,7 @@ fn inventory_from_metadata(
                 source,
                 package_root.to_path_buf(),
                 package.dependencies.clone(),
-                resolved_features_by_package
-                    .get(&package.id)
-                    .cloned()
-                    .unwrap_or_default(),
+                resolved_features_by_package.get(&package.id).cloned(),
             ));
         }
     }
@@ -793,7 +795,12 @@ fn inventory_from_metadata(
 
     let resolved_features_by_crate = target_roots
         .iter()
-        .map(|target| (target.id.clone(), target.resolved_features.clone()))
+        .filter_map(|target| {
+            target
+                .resolved_features
+                .as_ref()
+                .map(|features| (target.id.clone(), features.clone()))
+        })
         .collect::<BTreeMap<_, _>>();
 
     let mut aliases = WorkspaceAliases::new();
@@ -861,8 +868,13 @@ fn collect_target_roots(
             break;
         }
         let mut visited = BTreeSet::new();
-        let target_cfg =
-            profile.map(|profile| profile.cfg.with_features(&target.resolved_features));
+        let target_cfg = profile.map(|profile| {
+            target
+                .resolved_features
+                .as_ref()
+                .map(|features| profile.cfg.with_resolved_features(features))
+                .unwrap_or_else(|| profile.cfg.clone())
+        });
         collect_reachable_module(
             root,
             &target.id,
