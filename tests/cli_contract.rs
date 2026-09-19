@@ -150,3 +150,40 @@ fn analyze_reports_output_write_failures_as_errors() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("cannot replace"));
 }
+
+
+#[test]
+fn regression_uses_exit_code_one_and_accept_can_succeed() {
+    let (repo, baseline) = Repo::gate_fixture("cli-regression");
+    let check = run(&[
+        "check",
+        repo.root.to_str().unwrap(),
+        "--base",
+        &baseline,
+    ]);
+    assert_eq!(check.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("Regression"));
+
+    let result = ferric_lens::check_with_base(&repo.root, Some(&baseline)).unwrap();
+    let fingerprint = result
+        .findings
+        .iter()
+        .find(|finding| finding.gate)
+        .unwrap()
+        .fingerprint
+        .clone();
+
+    let accepted = run(&[
+        "accept",
+        &fingerprint,
+        "--reason",
+        "intentional CLI fixture",
+        "--path",
+        repo.root.to_str().unwrap(),
+        "--base",
+        &baseline,
+    ]);
+
+    assert!(accepted.status.success());
+    assert!(String::from_utf8_lossy(&accepted.stdout).contains("accepted finding"));
+}
