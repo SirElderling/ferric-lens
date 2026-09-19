@@ -311,4 +311,28 @@ fn truncated_history_is_explicitly_partial() {
         .as_deref()
         .unwrap()
         .contains("sample truncated"));
+}\n
+#[test]
+fn finding_sort_is_gate_first_then_rule_and_subject() {
+    let mut findings = vec![
+        finding("z", "demo::z"),
+        finding("a", "demo::b"),
+        finding("a", "demo::a"),
+    ];
+    findings[1].gate = true;
+    findings[2].gate = true;
+
+    super::sort_findings(&mut findings);
+
+    assert_eq!(
+        findings
+            .iter()
+            .map(|finding| (finding.gate, finding.rule.as_str(), finding.subject.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (true, "a", "demo::a"),
+            (true, "a", "demo::b"),
+            (false, "z", "demo::z"),
+        ]
+    );
 }
