@@ -1643,7 +1643,10 @@ mod tests {
         assert!(!rendered.contains("refactor.multi_signal_candidate"));
         assert_eq!(ai["findings"].as_array().unwrap().len(), 1);
         assert!(ai["observations"].as_array().unwrap().is_empty());
-        assert_eq!(ai["findings"][0]["title"], "Possible refactoring opportunity");
+        assert_eq!(
+            ai["findings"][0]["title"],
+            "Possible refactoring opportunity"
+        );
     }
 
     #[test]
