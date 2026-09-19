@@ -241,7 +241,6 @@ fn git(root: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
 
-
 #[test]
 fn empty_unanalyzable_baseline_is_inconclusive_not_pass() {
     let repo = Repo::new("empty-baseline");
