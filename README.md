@@ -14,15 +14,17 @@ Ferric Lens currently:
 - measures module decision sites, declared public items, explicit imports, and resolvable local dependency breadth,
 - identifies advisory current-snapshot structural outliers,
 - synthesizes first-class refactoring candidates when at least two independent deterministic signal kinds corroborate the same module, with evidence and a bounded structural direction rather than a generated redesign,
-- renders refactoring candidates in a dedicated HTML section alongside structural, runtime-risk, and build-efficiency findings,
+- renders a human-first HTML report led by **What needs attention**, with plain-language consequences, next investigation steps, source evidence, and technical rule IDs kept secondary,
 - resolves a Git target and analyzes the unique merge base under the same rules as the current tree,
 - conservatively matches modules by stable identity, Git rename, then unique normalized structure,
 - gates the documented `structure.coupled_complexity_growth` regression only when both independent signals materially worsen,
 - evaluates standard Rust target cfg predicates for one concrete target profile per invocation,
 - supports explicit additional Cargo features without inventing a feature powerset,
 - reports unresolved custom/default-feature cfg evidence as `inconclusive` rather than pretending the gate passed,
-- emits deterministic JSON,
+- emits deterministic canonical JSON for complete machine/audit use,
+- emits a compact deterministic `--ai` JSON view for agents that keeps actionable findings, evidence, source contexts, result identity, and analysis limitations while omitting raw repository inventory,
 - emits one self-contained HTML/CSS report with no JavaScript,
+- prints a concise human-oriented CLI summary by default rather than a raw metric dump,
 - attaches deterministic source evidence to supported findings: repository-relative path, exact 1-based line span, and a bounded escaped excerpt, while retaining module navigation when no truthful syntax span exists,
 - reuses content-addressed raw syntax facts through a disposable 256 MiB repository cache,
 - enriches full `analyze` reports with bounded recent churn and co-change evidence,
@@ -69,6 +71,15 @@ Run the CI-oriented path:
 ```bash
 cargo run -- check /path/to/rust/repository --base origin/main --json ferric-lens.json
 ```
+
+For an AI agent or another tool that wants the actionable subset without the full repository inventory, add `--ai`:
+
+```bash
+cargo run -- analyze /path/to/rust/repository --base origin/main --ai
+cargo run -- check /path/to/rust/repository --base origin/main --ai
+```
+
+`--ai` changes stdout only. It emits compact deterministic JSON containing the verdict, result digest, active findings, plain-language meaning, core evidence, exact source contexts where available, recommended next investigation step, and non-complete analysis capabilities. It intentionally omits the full module/function/type inventory and complete capability dump. The normal canonical JSON file remains the complete machine-readable record.
 
 `--base` is optional. Without it, Ferric Lens tries the GitHub PR target, the local remote-default branch, then local `main`. It always compares against the unique merge base, not the moving target tip.
 
@@ -164,3 +175,14 @@ python3 tools/perf_acceptance.py \
 The workflow can also be dispatched with `source-10x` (1,000,000 production Rust lines) or `history-10x` (2,000 history commits after baseline). Browser DOM/open cost and private-project precision checks remain explicit release-acceptance observations rather than hidden dependencies of the tool.
 
 Pull-request CI also uploads the locked release executable from each Linux/macOS runner as a human-test artifact. See [HUMAN_TESTING.md](HUMAN_TESTING.md) for the Jeko/Kronicle validation protocol and finding scorecard.
+
+
+## Output surfaces
+
+Ferric Lens has three intentionally different presentation surfaces built from the same canonical result:
+
+- **HTML for people** — starts with what deserves attention. Each finding explains what Ferric Lens noticed, why it matters, what could happen if the concern grows, what evidence supports it, what to investigate next, and where to look in source. Repository metrics without a finding are explicitly context, not warnings.
+- **Default CLI for people and CI logs** — concise verdict plus the highest-priority active findings, using the same plain-language titles and next steps as HTML.
+- **`--ai` for agents** — compact deterministic JSON with the actionable subset. Agents do not need the explanatory page layout or the full repository inventory, but they still receive evidence, source locations, rule identity, limitations, and the canonical result digest.
+
+The full canonical JSON remains the lossless interface when a consumer needs every module, capability, imported observation, or structural fact.
