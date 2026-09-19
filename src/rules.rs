@@ -16,6 +16,14 @@ pub struct GateEvaluation {
 }
 
 pub fn current_snapshot_findings(modules: &[ModuleMetrics]) -> Vec<Finding> {
+    let mut findings = structural_coupled_outliers(modules);
+    findings.extend(runtime_clone_syntax_outliers(modules));
+    findings.extend(build_rebuild_exposure_candidates(modules));
+    sort_findings(&mut findings);
+    findings
+}
+
+fn structural_coupled_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
     let mut by_crate = BTreeMap::<&str, Vec<&ModuleMetrics>>::new();
     for module in modules.iter().filter(|module| module.parse_complete) {
         by_crate.entry(&module.crate_name).or_default().push(module);
@@ -79,7 +87,116 @@ pub fn current_snapshot_findings(modules: &[ModuleMetrics]) -> Vec<Finding> {
         }
     }
 
-    sort_findings(&mut findings);
+    findings
+}
+
+fn runtime_clone_syntax_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
+    let mut by_crate = BTreeMap::<&str, Vec<&ModuleMetrics>>::new();
+    for module in modules.iter().filter(|module| module.parse_complete) {
+        by_crate.entry(&module.crate_name).or_default().push(module);
+    }
+
+    let mut findings = Vec::new();
+    for (crate_name, population) in by_crate {
+        if population.len() < MIN_POPULATION {
+            continue;
+        }
+        let values = population
+            .iter()
+            .map(|module| module.clone_calls)
+            .collect::<Vec<_>>();
+        let p90 = nearest_rank_p90(&values);
+
+        for module in population {
+            if module.clone_calls <= p90 {
+                continue;
+            }
+            let subject = subject(crate_name, &module.module_path);
+            findings.push(Finding {
+                fingerprint: String::new(),
+                rule: "runtime.clone_syntax_outlier".into(),
+                subject: subject.clone(),
+                identity: subject,
+                configuration: String::new(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "module is a repository-relative outlier for observed .clone() method-call syntax; this proves source syntax only and does not establish allocation, unnecessary copying, execution frequency, or a runtime bottleneck".into(),
+                direction: "inspect receiver types and execution frequency, then measure before changing copying or allocation behavior".into(),
+                evidence: vec![Evidence {
+                    metric: "clone_call_syntax_sites".into(),
+                    value: module.clone_calls,
+                    reference: p90,
+                    population: values.len(),
+                    baseline: None,
+                    material_delta: None,
+                }],
+            });
+        }
+    }
+    findings
+}
+
+fn build_rebuild_exposure_candidates(modules: &[ModuleMetrics]) -> Vec<Finding> {
+    let eligible = modules
+        .iter()
+        .filter(|module| module.gate_complete)
+        .collect::<Vec<_>>();
+    if eligible.len() < MIN_POPULATION {
+        return Vec::new();
+    }
+
+    let mut reverse_dependents = eligible
+        .iter()
+        .map(|module| (subject(&module.crate_name, &module.module_path), 0usize))
+        .collect::<BTreeMap<_, _>>();
+
+    for module in &eligible {
+        for dependency in &module.local_dependency_modules {
+            if let Some(count) = reverse_dependents.get_mut(dependency) {
+                *count += 1;
+            }
+        }
+    }
+
+    let values = reverse_dependents.values().copied().collect::<Vec<_>>();
+    let p90 = nearest_rank_p90(&values);
+    let mut findings = Vec::new();
+
+    for module in eligible {
+        let module_subject = subject(&module.crate_name, &module.module_path);
+        let dependents = reverse_dependents[&module_subject];
+        if dependents <= p90 {
+            continue;
+        }
+        findings.push(Finding {
+            fingerprint: String::new(),
+            rule: "build.rebuild_exposure_candidate".into(),
+            subject: module_subject.clone(),
+            identity: module_subject,
+            configuration: String::new(),
+            evidence_class: EvidenceClass::Candidate,
+            priority: Priority::Observe,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "module has unusually broad reverse repository dependency reach, indicating potential rebuild exposure; this is a structural proxy, not measured compile cost".into(),
+            direction: "inspect whether this dependency boundary can remain stable or narrower, and measure incremental build impact before optimizing it".into(),
+            evidence: vec![Evidence {
+                metric: "reverse_repository_dependents".into(),
+                value: dependents,
+                reference: p90,
+                population: values.len(),
+                baseline: None,
+                material_delta: None,
+            }],
+        });
+    }
+
     findings
 }
 
