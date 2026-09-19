@@ -1104,7 +1104,8 @@ fn fallback_recursive_directory_errors_are_propagated() {
 }\n
 #[test]
 fn metadata_helpers_report_spawn_parse_manifest_and_io_errors() {
-    let missing = temp_root().join("missing");
+    let root = temp_root();
+    let missing = root.join("missing");
     assert!(super::load_metadata(&missing, None)
         .unwrap_err()
         .contains("could not execute cargo metadata"));
@@ -1121,6 +1122,7 @@ fn metadata_helpers_report_spawn_parse_manifest_and_io_errors() {
     )
     .unwrap_err()
     .contains("cannot inspect"));
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
