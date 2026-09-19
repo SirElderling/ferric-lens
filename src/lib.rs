@@ -214,6 +214,7 @@ fn analyze_internal_with_profile_context(
                 detail: Some(error.clone()),
             });
             capabilities.sort_by(|a, b| a.name.cmp(&b.name));
+            let source_contexts = finding_source_contexts(root, &current, &findings, profile)?;
             return Ok(AnalysisResult {
                 schema_version: 1,
                 tool_version: env!("CARGO_PKG_VERSION").into(),
@@ -228,6 +229,7 @@ fn analyze_internal_with_profile_context(
                 imported_evidence: imported_evidence.clone(),
                 capabilities,
                 modules: current.modules,
+                source_contexts,
                 findings,
             });
         }
@@ -257,6 +259,7 @@ fn analyze_internal_with_profile_context(
                 imported_evidence: imported_evidence.clone(),
                 capabilities,
                 modules: current.modules,
+                source_contexts,
                 findings,
             });
         }
