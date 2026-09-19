@@ -7,9 +7,9 @@ use std::{
 
 use super::{
     acquire_inventory, collect_reachable_module, collect_rust_files, collect_target_roots,
-    finalize_inventory, inventory_from_metadata, module_path_from_relative, rust_name, Dependency,
-    CargoInputEntry, CargoInputSnapshot, Metadata, Package, Resolve, ResolveNode, SourceBudget,
-    SourceFile, Target, TargetRoot, WorkspaceAliases, MAX_SNAPSHOT_SOURCE_BYTES,
+    finalize_inventory, inventory_from_metadata, module_path_from_relative, rust_name,
+    CargoInputEntry, CargoInputSnapshot, Dependency, Metadata, Package, Resolve, ResolveNode,
+    SourceBudget, SourceFile, Target, TargetRoot, WorkspaceAliases, MAX_SNAPSHOT_SOURCE_BYTES,
 };
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -2087,7 +2087,6 @@ fn workspace_member_manifest_change_invalidates_captured_cargo_snapshot() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn cargo_input_label_falls_back_for_paths_outside_repository_root() {
     let root = temp_root();
@@ -2124,7 +2123,11 @@ fn cargo_input_reread_errors_are_reported_explicitly() {
 #[test]
 fn stable_snapshot_reports_source_disappearance_before_publication() {
     let root = temp_root();
-    fs::write(root.join("Cargo.toml"), "[package]\nname='x'\nversion='0.1.0'\n").unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname='x'\nversion='0.1.0'\n",
+    )
+    .unwrap();
     fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
     let cargo = super::cargo_input_snapshot(&root, None).unwrap();
     let source = SourceFile {
@@ -2167,10 +2170,7 @@ fn target_without_resolve_features_uses_unresolved_profile_cfg() {
             features: vec!["enabled".into()],
             target_cfg: Vec::new(),
         },
-        cfg: HostCfg::test_with_features(
-            &["unix", "target_os=\"linux\""],
-            &["enabled"],
-        ),
+        cfg: HostCfg::test_with_features(&["unix", "target_os=\"linux\""], &["enabled"]),
     };
     let mut budget = SourceBudget::default();
     let mut sources = Vec::new();
