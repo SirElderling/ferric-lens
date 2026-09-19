@@ -314,7 +314,7 @@ fn inventory_from_metadata(
             };
 
             let source = PathBuf::from(&target.src_path);
-            if !source.starts_with(package_root)
+            if !source.starts_with(&package_root)
                 || !source.starts_with(root)
                 || source.extension().and_then(|value| value.to_str()) != Some("rs")
             {
