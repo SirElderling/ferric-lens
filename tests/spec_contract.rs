@@ -257,7 +257,6 @@ fn public_analysis_surfaces_multi_signal_refactor_candidates() {
     assert!(report::json(&result).contains("refactor.multi_signal_candidate"));
 }
 
-
 #[test]
 fn findings_expose_exact_source_lines_and_bounded_excerpts() {
     let repo = Repo::new("finding-source-context");
