@@ -1018,3 +1018,44 @@ fn clone_source_context_prefers_mutable_or_iterated_aggregate_copies() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn source_line_priority_covers_clone_and_decision_context_classes() {
+    assert_eq!(
+        super::source_line_priority("clone_call_syntax_sites", "let mut copy = world.clone();"),
+        80
+    );
+    assert_eq!(
+        super::source_line_priority(
+            "clone_call_syntax_sites",
+            "for item in world.items.clone() { drop(item); }"
+        ),
+        140
+    );
+    assert_eq!(
+        super::source_line_priority("clone_call_syntax_sites", "name: value.name.clone(),"),
+        -40
+    );
+    assert_eq!(
+        super::source_line_priority("clone_call_syntax_sites", "field: self.value.clone(),"),
+        -20
+    );
+    assert_eq!(super::source_line_priority("decision_sites", "if ready {"), 60);
+    assert_eq!(
+        super::source_line_priority("decision_sites", "while ready {"),
+        50
+    );
+    assert_eq!(
+        super::source_line_priority("decision_sites", "let _ = left && right;"),
+        40
+    );
+    assert_eq!(
+        super::source_line_priority("decision_sites", "State::A => State::B,"),
+        -20
+    );
+    assert_eq!(
+        super::source_line_priority("decision_sites", "match state {"),
+        0
+    );
+    assert_eq!(super::source_line_priority("other", "if ready {"), 0);
+}
