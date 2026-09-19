@@ -64,8 +64,8 @@ fn outputs_are_reproducible_for_identical_inputs() {
     let second = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
 
     assert_eq!(
-        report::json(&first).unwrap(),
-        report::json(&second).unwrap()
+        report::json(&first),
+        report::json(&second)
     );
     assert_eq!(report::html(&first), report::html(&second));
 }
@@ -75,11 +75,11 @@ fn json_and_html_share_one_semantic_result_digest() {
     let repo = Repo::baseline("baseline");
     let result = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
 
-    let json = report::json(&result).unwrap();
+    let json = report::json(&result);
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
     let digest = value["result_digest"].as_str().unwrap();
 
-    assert_eq!(digest, report::result_digest(&result).unwrap());
+    assert_eq!(digest, report::result_digest(&result));
     assert!(report::html(&result).contains(digest));
 }
 
