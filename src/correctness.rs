@@ -183,10 +183,7 @@ fn mutable_clone_binding(line: &str) -> Option<&str> {
     let rest = trimmed.strip_prefix("let mut ")?;
     let (name, value) = rest.split_once('=')?;
     let name = name.trim();
-    if name.is_empty()
-        || !name.chars().all(is_ident_char)
-        || !value.contains(".clone()")
-    {
+    if name.is_empty() || !name.chars().all(is_ident_char) || !value.contains(".clone()") {
         return None;
     }
     Some(name)
