@@ -124,18 +124,42 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
 
     let metadata = load_metadata(&root, profile);
     let cargo_input_digest = cargo_input_digest(&root)?;
+    assemble_inventory(&root, metadata, profile, &cargo_input_digest)
+}
+
+fn assemble_inventory(
+    root: &Path,
+    metadata: Result<Metadata, String>,
+    profile: Option<&ProfileContext>,
+    cargo_input_digest: &str,
+) -> Result<Inventory, String> {
     let auxiliary_targets = metadata
         .as_ref()
         .map(auxiliary_target_summary)
         .unwrap_or_default();
-    let cargo_resolution_digest = metadata
-        .as_ref()
-        .ok()
-        .map(|metadata| cargo_resolution_identity(&root, metadata))
-        .transpose()?;
+    let cargo_resolution_digest = match metadata.as_ref() {
+        Ok(metadata) => Some(cargo_resolution_identity(root, metadata)?),
+        Err(_) => None,
+    };
 
-    let acquired = acquire_inventory(&root, metadata, profile)?;
-    verify_stable_inputs(&root, &acquired.0, &cargo_input_digest)?;
+    let acquired = acquire_inventory(root, metadata, profile)?;
+    finalize_verified_inventory(
+        root,
+        acquired,
+        cargo_input_digest,
+        cargo_resolution_digest,
+        auxiliary_targets,
+    )
+}
+
+fn finalize_verified_inventory(
+    root: &Path,
+    acquired: AcquiredInventory,
+    cargo_input_digest: &str,
+    cargo_resolution_digest: Option<String>,
+    auxiliary_targets: AuxiliaryTargetSummary,
+) -> Result<Inventory, String> {
+    verify_stable_inputs(root, &acquired.0, cargo_input_digest)?;
     let mut inventory = finalize_inventory(acquired);
     let mut hasher = blake3::Hasher::new();
     hasher.update(inventory.content_digest.as_bytes());
@@ -145,7 +169,7 @@ fn inventory_impl(root: &Path, profile: Option<&ProfileContext>) -> Result<Inven
     }
     inventory.content_digest = hasher.finalize().to_hex().to_string();
     inventory.cargo_resolution_digest = cargo_resolution_digest;
-    inventory.cargo_input_digest = cargo_input_digest;
+    inventory.cargo_input_digest = cargo_input_digest.to_owned();
     inventory.auxiliary_targets = auxiliary_targets;
     Ok(inventory)
 }
