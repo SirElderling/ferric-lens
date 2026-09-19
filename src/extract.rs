@@ -154,16 +154,12 @@ impl<'cfg> MetricsVisitor<'cfg> {
 
     fn record_decision(&mut self, span: Span) {
         self.decision_sites += 1;
-        if let Some(span) = line_span(span) {
-            self.decision_spans.push(span);
-        }
+        self.decision_spans.push(line_span(span));
     }
 
     fn record_clone(&mut self, span: Span) {
         self.clone_calls += 1;
-        if let Some(span) = line_span(span) {
-            self.clone_spans.push(span);
-        }
+        self.clone_spans.push(line_span(span));
     }
 }
 
@@ -302,13 +298,12 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
         let first = self.imports.len();
         let mut prefix = Vec::new();
         flatten_use_tree(&item.tree, &mut prefix, &mut self.imports);
-        if let Some(span) = line_span(item.span()) {
-            for import in &self.imports[first..] {
-                self.use_observations.push(UseObservation {
-                    import: import.clone(),
-                    span,
-                });
-            }
+        let span = line_span(item.span());
+        for import in &self.imports[first..] {
+            self.use_observations.push(UseObservation {
+                import: import.clone(),
+                span,
+            });
         }
     }
 
@@ -480,6 +475,35 @@ struct ContextFacts {
     use_observations: Vec<UseObservation>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SourceMetric {
+    Decisions,
+    Dependencies,
+    Clones,
+    ReverseDependents,
+}
+
+impl SourceMetric {
+    fn parse(metric: &str) -> Option<Self> {
+        match metric {
+            "decision_sites" => Some(Self::Decisions),
+            "local_dependency_modules" => Some(Self::Dependencies),
+            "clone_call_syntax_sites" => Some(Self::Clones),
+            SourceMetric::ReverseDependents => Some(Self::ReverseDependents),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Decisions => "decision_sites",
+            Self::Dependencies => "local_dependency_modules",
+            Self::Clones => "clone_call_syntax_sites",
+            Self::ReverseDependents => SourceMetric::ReverseDependents,
+        }
+    }
+}
+
 pub fn source_contexts_for_findings(
     root: &Path,
     modules: &[ModuleMetrics],
@@ -504,11 +528,11 @@ pub fn source_contexts_for_findings(
     for (subject, metrics) in &requested {
         if metrics
             .iter()
-            .any(|metric| metric != "reverse_repository_dependents")
+            .any(|metric| *metric != SourceMetric::ReverseDependents)
         {
             needed_subjects.insert(subject.clone());
         }
-        if metrics.contains("reverse_repository_dependents") {
+        if metrics.contains(&SourceMetric::ReverseDependents) {
             for module in modules.iter().filter(|module| {
                 module
                     .local_dependency_modules
@@ -540,36 +564,37 @@ pub fn source_contexts_for_findings(
     let mut contexts = Vec::new();
     for (subject, metrics) in requested {
         for metric in metrics {
-            match metric.as_str() {
-                "decision_sites" => {
+            let metric_name = metric.as_str();
+            match metric {
+                SourceMetric::Decisions => {
                     if let (Some(module), Some(facts)) =
                         (by_subject.get(&subject), facts.get(&subject))
                     {
                         push_span_contexts(
                             &mut contexts,
                             &subject,
-                            &metric,
+                            metric_name,
                             &module.path,
                             &facts.decision_spans,
                             &facts.text,
                         );
                     }
                 }
-                "clone_call_syntax_sites" => {
+                SourceMetric::Clones => {
                     if let (Some(module), Some(facts)) =
                         (by_subject.get(&subject), facts.get(&subject))
                     {
                         push_span_contexts(
                             &mut contexts,
                             &subject,
-                            &metric,
+                            metric_name,
                             &module.path,
                             &facts.clone_spans,
                             &facts.text,
                         );
                     }
                 }
-                "local_dependency_modules" => {
+                SourceMetric::Dependencies => {
                     if let (Some(module), Some(facts)) =
                         (by_subject.get(&subject), facts.get(&subject))
                     {
@@ -598,14 +623,14 @@ pub fn source_contexts_for_findings(
                         push_span_contexts(
                             &mut contexts,
                             &subject,
-                            &metric,
+                            metric_name,
                             &module.path,
                             &spans,
                             &facts.text,
                         );
                     }
                 }
-                "reverse_repository_dependents" => {
+                SourceMetric::ReverseDependents => {
                     for module in modules.iter().filter(|module| {
                         module
                             .local_dependency_modules
@@ -641,14 +666,13 @@ pub fn source_contexts_for_findings(
                         push_span_contexts(
                             &mut contexts,
                             &subject,
-                            &metric,
+                            metric_name,
                             &module.path,
                             &spans,
                             &facts.text,
                         );
                     }
                 }
-                _ => {}
             }
         }
     }
@@ -669,21 +693,17 @@ pub fn source_contexts_for_findings(
     Ok(contexts)
 }
 
-fn requested_source_contexts(findings: &[Finding]) -> BTreeMap<String, BTreeSet<String>> {
-    let mut requested = BTreeMap::<String, BTreeSet<String>>::new();
+fn requested_source_contexts(
+    findings: &[Finding],
+) -> BTreeMap<String, BTreeSet<SourceMetric>> {
+    let mut requested = BTreeMap::<String, BTreeSet<SourceMetric>>::new();
     for finding in findings {
         for evidence in &finding.evidence {
-            if matches!(
-                evidence.metric.as_str(),
-                "decision_sites"
-                    | "local_dependency_modules"
-                    | "clone_call_syntax_sites"
-                    | "reverse_repository_dependents"
-            ) {
+            if let Some(metric) = SourceMetric::parse(&evidence.metric) {
                 requested
                     .entry(finding.subject.clone())
                     .or_default()
-                    .insert(evidence.metric.clone());
+                    .insert(metric);
             }
         }
     }
@@ -795,16 +815,13 @@ fn truncate_excerpt(excerpt: &str) -> (String, bool) {
     (truncated, true)
 }
 
-fn line_span(span: Span) -> Option<LineSpan> {
+fn line_span(span: Span) -> LineSpan {
     let start = span.start();
-    if start.line == 0 {
-        return None;
-    }
     let end = span.end();
-    Some(LineSpan {
+    LineSpan {
         start: start.line,
         end: end.line.max(start.line),
-    })
+    }
 }
 
 pub fn resolve_workspace_dependencies(
