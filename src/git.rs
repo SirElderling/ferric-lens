@@ -414,7 +414,12 @@ fn parse_history(output: &[u8]) -> Result<HistorySample, String> {
             break;
         }
 
-        let path = String::from_utf8_lossy(raw).into_owned();
+        let raw_path = if commit.paths.is_empty() {
+            raw.strip_prefix(b"\n").unwrap_or(raw)
+        } else {
+            raw
+        };
+        let path = String::from_utf8_lossy(raw_path).into_owned();
         commit.paths.push(path);
         changed_path_records += 1;
     }
