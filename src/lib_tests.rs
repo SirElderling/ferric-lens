@@ -215,6 +215,11 @@ impl Repo {
         )
         .unwrap();
         fs::write(root.join("src/lib.rs"), "pub fn stable() -> usize { 1 }\n").unwrap();
+        fs::write(
+            root.join("Cargo.lock"),
+            "version = 4\n\n[[package]]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
         git(&root, &["init", "-q", "-b", "main"]);
         git(&root, &["config", "user.email", "test@example.invalid"]);
         git(&root, &["config", "user.name", "Ferric Lens Test"]);
