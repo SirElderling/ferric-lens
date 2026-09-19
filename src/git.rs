@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -47,6 +47,7 @@ pub struct HistorySample {
 const HISTORY_MAX_COMMITS: usize = 2_000;
 const HISTORY_MAX_PATH_RECORDS: usize = 100_000;
 const HISTORY_MAX_COCHANGE_PATHS_PER_COMMIT: usize = 200;
+const EXACT_RENAME_FALLBACK_LIMIT: usize = 1_000;
 
 pub struct TemporaryWorktree {
     repo_root: PathBuf,
@@ -221,7 +222,83 @@ pub fn changes_since(root: &Path, merge_base: &str) -> Result<ChangeSet, String>
             .insert(String::from_utf8_lossy(path).into_owned());
     }
 
+    detect_exact_worktree_renames(root, merge_base, &mut changes)?;
+
     Ok(changes)
+}
+
+fn detect_exact_worktree_renames(
+    root: &Path,
+    merge_base: &str,
+    changes: &mut ChangeSet,
+) -> Result<(), String> {
+    if changes.deleted.is_empty()
+        || changes.added.is_empty()
+        || changes.deleted.len() > EXACT_RENAME_FALLBACK_LIMIT
+        || changes.added.len() > EXACT_RENAME_FALLBACK_LIMIT
+    {
+        return Ok(());
+    }
+
+    let mut tree_args = vec![
+        OsStr::new("ls-tree").to_os_string(),
+        OsStr::new("-r").to_os_string(),
+        OsStr::new("-z").to_os_string(),
+        OsStr::new(merge_base).to_os_string(),
+        OsStr::new("--").to_os_string(),
+    ];
+    tree_args.extend(changes.deleted.iter().map(OsString::from));
+    let tree = git_bytes(root, tree_args)?;
+
+    let mut deleted_by_oid = BTreeMap::<String, Vec<String>>::new();
+    for record in tree.split(|byte| *byte == 0).filter(|record| !record.is_empty()) {
+        let text = String::from_utf8_lossy(record);
+        let Some((metadata, path)) = text.split_once('	') else {
+            continue;
+        };
+        let Some(oid) = metadata.split_whitespace().nth(2) else {
+            continue;
+        };
+        deleted_by_oid
+            .entry(oid.to_owned())
+            .or_default()
+            .push(path.to_owned());
+    }
+
+    let added_paths = changes.added.iter().cloned().collect::<Vec<_>>();
+    let mut hash_args = vec![
+        OsStr::new("hash-object").to_os_string(),
+        OsStr::new("--").to_os_string(),
+    ];
+    hash_args.extend(added_paths.iter().map(OsString::from));
+    let hashes = git_text_os(root, hash_args)?;
+    let hashes = hashes.lines().map(str::trim).collect::<Vec<_>>();
+    if hashes.len() != added_paths.len() {
+        return Err("git hash-object returned an unexpected number of rename candidates".into());
+    }
+
+    let mut added_by_oid = BTreeMap::<String, Vec<String>>::new();
+    for (path, oid) in added_paths.into_iter().zip(hashes) {
+        added_by_oid.entry(oid.to_owned()).or_default().push(path);
+    }
+
+    let mut exact = Vec::new();
+    for (oid, deleted) in deleted_by_oid {
+        let Some(added) = added_by_oid.get(&oid) else {
+            continue;
+        };
+        if deleted.len() == 1 && added.len() == 1 {
+            exact.push((deleted[0].clone(), added[0].clone()));
+        }
+    }
+
+    for (old, new) in exact {
+        changes.deleted.remove(&old);
+        changes.added.remove(&new);
+        changes.renames.insert(old, new);
+    }
+
+    Ok(())
 }
 
 pub fn sample_history(root: &Path) -> Result<HistorySample, String> {
@@ -406,6 +483,11 @@ fn resolve_commit(root: &Path, reference: &str) -> Result<String, String> {
 
 fn git_text<const N: usize>(root: &Path, args: [&str; N]) -> Result<String, String> {
     let args = args.map(OsStr::new);
+    let output = git_bytes(root, args)?;
+    Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+fn git_text_os(root: &Path, args: Vec<OsString>) -> Result<String, String> {
     let output = git_bytes(root, args)?;
     Ok(String::from_utf8_lossy(&output).into_owned())
 }
