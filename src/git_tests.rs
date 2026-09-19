@@ -97,7 +97,6 @@ fn parses_nul_delimited_history_records() {
     assert_eq!(sample.commits[1].paths, ["src/a.rs"]);
 }
 
-
 #[test]
 fn history_strips_only_git_separator_newline_from_first_path() {
     let first = "1".repeat(40);
