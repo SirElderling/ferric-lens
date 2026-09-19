@@ -794,3 +794,25 @@ fn dependency_hub_requires_material_separation_from_reference() {
     assert!(super::materially_above_reference(10, 5));
     assert!(super::materially_above_reference(2, 0));
 }
+
+#[test]
+fn unchanged_strong_refactor_evidence_stays_observational() {
+    let supporting = vec![Finding {
+        evidence_class: EvidenceClass::Strong,
+        priority: Priority::Observe,
+        ..advisory_finding(
+            "structure.current_coupled_outlier",
+            "demo::engine",
+            DeltaStatus::Unchanged,
+            vec![
+                evidence("decision_sites", 30),
+                evidence("local_dependency_modules", 12),
+            ],
+        )
+    }];
+
+    let candidate = refactor_candidates(&supporting).remove(0);
+    assert_eq!(candidate.evidence_class, EvidenceClass::Strong);
+    assert_eq!(candidate.delta, DeltaStatus::Unchanged);
+    assert_eq!(candidate.priority, Priority::Observe);
+}
