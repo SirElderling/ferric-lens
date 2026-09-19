@@ -780,7 +780,6 @@ fn git_path_decoding_rejects_invalid_utf8_instead_of_replacing_bytes() {
     assert!(super::parse_tree_oids(tree).is_err());
 }
 
-
 #[test]
 fn strict_git_decoding_helpers_propagate_invalid_path_bytes() {
     assert!(super::decode_nul_records(b"ok\0bad\xff\0", "Git path").is_err());
@@ -799,13 +798,9 @@ fn strict_git_decoding_helpers_propagate_invalid_path_bytes() {
     .is_err());
 
     let repo = Repo::new("invalid-change-output");
-    assert!(super::parse_change_output(
-        &repo.root,
-        "HEAD",
-        b"M\0bad\xff.rs\0",
-        Ok(Vec::new())
-    )
-    .is_err());
+    assert!(
+        super::parse_change_output(&repo.root, "HEAD", b"M\0bad\xff.rs\0", Ok(Vec::new())).is_err()
+    );
 }
 
 #[test]
