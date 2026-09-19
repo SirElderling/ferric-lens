@@ -511,6 +511,7 @@ pub fn source_contexts_for_findings(
     source_digests: &BTreeMap<String, String>,
     findings: &[Finding],
     cfg: &HostCfg,
+    resolved_features_by_crate: &BTreeMap<String, Vec<String>>,
 ) -> Result<Vec<SourceContext>, String> {
     let requested = requested_source_contexts(findings);
     if requested.is_empty() {
@@ -557,7 +558,15 @@ pub fn source_contexts_for_findings(
         };
         facts.insert(
             subject,
-            load_context_facts(root, module, expected_digest, cfg)?,
+            load_context_facts(
+                root,
+                module,
+                expected_digest,
+                &resolved_features_by_crate
+                    .get(&module.crate_name)
+                    .map(|features| cfg.with_features(features))
+                    .unwrap_or_else(|| cfg.clone()),
+            )?,
         );
     }
 
