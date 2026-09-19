@@ -7,6 +7,7 @@ use crate::{
 };
 
 const MIN_POPULATION: usize = 20;
+const MIN_DESCRIPTIVE_POPULATION: usize = 4;
 
 #[derive(Debug, Default)]
 pub struct GateEvaluation {
@@ -17,8 +18,11 @@ pub struct GateEvaluation {
 
 pub fn current_snapshot_findings(modules: &[ModuleMetrics]) -> Vec<Finding> {
     let mut findings = structural_coupled_outliers(modules);
+    findings.extend(small_population_decision_concentrations(modules));
     findings.extend(runtime_clone_syntax_outliers(modules));
+    findings.extend(small_population_clone_concentrations(modules));
     findings.extend(build_rebuild_exposure_candidates(modules));
+    findings.extend(small_population_rebuild_concentrations(modules));
     sort_findings(&mut findings);
     findings
 }
@@ -90,6 +94,161 @@ fn structural_coupled_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
     findings
 }
 
+fn small_population_decision_concentrations(modules: &[ModuleMetrics]) -> Vec<Finding> {
+    let mut by_crate = BTreeMap::<&str, Vec<&ModuleMetrics>>::new();
+    for module in modules.iter().filter(|module| module.parse_complete) {
+        by_crate.entry(&module.crate_name).or_default().push(module);
+    }
+
+    let mut findings = Vec::new();
+    for (crate_name, population) in by_crate {
+        if population.len() < MIN_DESCRIPTIVE_POPULATION || population.len() >= MIN_POPULATION {
+            continue;
+        }
+        let values = population
+            .iter()
+            .map(|module| module.decision_sites)
+            .collect::<Vec<_>>();
+        let Some((index, value, reference)) = unique_max_above_median(&values) else {
+            continue;
+        };
+        let module = population[index];
+        let module_subject = subject(crate_name, &module.module_path);
+        findings.push(Finding {
+            fingerprint: String::new(),
+            rule: "structure.small_population_decision_concentration".into(),
+            subject: module_subject.clone(),
+            identity: module_subject,
+            configuration: String::new(),
+            evidence_class: EvidenceClass::Candidate,
+            priority: Priority::Observe,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "module has the highest observed decision-site count in a small cohort; this is descriptive concentration, not a statistical outlier".into(),
+            direction: "inspect whether the module concentrates multiple responsibilities; the cohort is too small for percentile-based classification".into(),
+            evidence: vec![Evidence {
+                metric: "decision_sites".into(),
+                value,
+                reference,
+                population: values.len(),
+                baseline: None,
+                material_delta: None,
+            }],
+        });
+    }
+    findings
+}
+
+fn small_population_clone_concentrations(modules: &[ModuleMetrics]) -> Vec<Finding> {
+    let mut by_crate = BTreeMap::<&str, Vec<&ModuleMetrics>>::new();
+    for module in modules.iter().filter(|module| module.parse_complete) {
+        by_crate.entry(&module.crate_name).or_default().push(module);
+    }
+
+    let mut findings = Vec::new();
+    for (crate_name, population) in by_crate {
+        if population.len() < MIN_DESCRIPTIVE_POPULATION || population.len() >= MIN_POPULATION {
+            continue;
+        }
+        let values = population
+            .iter()
+            .map(|module| module.clone_calls)
+            .collect::<Vec<_>>();
+        let Some((index, value, reference)) = unique_max_above_median(&values) else {
+            continue;
+        };
+        if value == 0 {
+            continue;
+        }
+        let module = population[index];
+        let module_subject = subject(crate_name, &module.module_path);
+        findings.push(Finding {
+            fingerprint: String::new(),
+            rule: "runtime.small_population_clone_concentration".into(),
+            subject: module_subject.clone(),
+            identity: module_subject,
+            configuration: String::new(),
+            evidence_class: EvidenceClass::Candidate,
+            priority: Priority::Observe,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "module has the highest observed .clone() syntax count in a small cohort; this is descriptive concentration, not a statistical outlier and does not establish allocation or runtime cost".into(),
+            direction: "inspect receiver types and execution frequency, then measure before changing copying or allocation behavior".into(),
+            evidence: vec![Evidence {
+                metric: "clone_call_syntax_sites".into(),
+                value,
+                reference,
+                population: values.len(),
+                baseline: None,
+                material_delta: None,
+            }],
+        });
+    }
+    findings
+}
+
+fn small_population_rebuild_concentrations(modules: &[ModuleMetrics]) -> Vec<Finding> {
+    let eligible = modules
+        .iter()
+        .filter(|module| module.parse_complete)
+        .collect::<Vec<_>>();
+    if eligible.len() < MIN_DESCRIPTIVE_POPULATION || eligible.len() >= MIN_POPULATION {
+        return Vec::new();
+    }
+
+    let mut reverse_dependents = eligible
+        .iter()
+        .map(|module| (subject(&module.crate_name, &module.module_path), 0usize))
+        .collect::<BTreeMap<_, _>>();
+    for module in &eligible {
+        for dependency in &module.local_dependency_modules {
+            if let Some(count) = reverse_dependents.get_mut(dependency) {
+                *count += 1;
+            }
+        }
+    }
+
+    let values = eligible
+        .iter()
+        .map(|module| reverse_dependents[&subject(&module.crate_name, &module.module_path)])
+        .collect::<Vec<_>>();
+    let Some((index, value, reference)) = unique_max_above_median(&values) else {
+        return Vec::new();
+    };
+    if value == 0 {
+        return Vec::new();
+    }
+    let module = eligible[index];
+    let module_subject = subject(&module.crate_name, &module.module_path);
+    vec![Finding {
+        fingerprint: String::new(),
+        rule: "build.small_population_rebuild_concentration".into(),
+        subject: module_subject.clone(),
+        identity: module_subject,
+        configuration: String::new(),
+        evidence_class: EvidenceClass::Candidate,
+        priority: Priority::Observe,
+        delta: DeltaStatus::Current,
+        gate: false,
+        accepted: false,
+        acceptance_reason: None,
+        summary: "module has the highest observed reverse repository dependency reach in a small cohort; this is descriptive concentration, not a statistical outlier or measured compile cost".into(),
+        direction: "inspect whether this dependency boundary can remain stable or narrower, then measure incremental build impact before optimizing it".into(),
+        evidence: vec![Evidence {
+            metric: "reverse_repository_dependents".into(),
+            value,
+            reference,
+            population: values.len(),
+            baseline: None,
+            material_delta: None,
+        }],
+    }]
+}
+
 fn runtime_clone_syntax_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
     let mut by_crate = BTreeMap::<&str, Vec<&ModuleMetrics>>::new();
     for module in modules.iter().filter(|module| module.parse_complete) {
@@ -143,7 +302,7 @@ fn runtime_clone_syntax_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
 fn build_rebuild_exposure_candidates(modules: &[ModuleMetrics]) -> Vec<Finding> {
     let eligible = modules
         .iter()
-        .filter(|module| module.gate_complete)
+        .filter(|module| module.parse_complete)
         .collect::<Vec<_>>();
     if eligible.len() < MIN_POPULATION {
         return Vec::new();
@@ -366,6 +525,24 @@ fn sort_findings(findings: &mut [Finding]) {
             .cmp(&a.gate)
             .then_with(|| (&a.rule, &a.subject).cmp(&(&b.rule, &b.subject)))
     });
+}
+
+fn unique_max_above_median(values: &[usize]) -> Option<(usize, usize, usize)> {
+    if values.is_empty() {
+        return None;
+    }
+    let max = *values.iter().max()?;
+    if values.iter().filter(|value| **value == max).count() != 1 {
+        return None;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    let median = sorted[sorted.len() / 2];
+    if max <= median {
+        return None;
+    }
+    let index = values.iter().position(|value| *value == max)?;
+    Some((index, max, median))
 }
 
 fn nearest_rank_p90(values: &[usize]) -> usize {
