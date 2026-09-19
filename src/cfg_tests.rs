@@ -211,7 +211,8 @@ fn missing_known_value_cfg_is_false_while_missing_custom_value_is_unknown() {
         cfg.evaluate(&parse_quote!(custom_value = "x")),
         Truth::Unknown
     );
-}\n
+}
+
 #[test]
 fn rustc_cfg_command_and_parser_report_spawn_and_utf8_errors() {
     let missing = std::env::temp_dir().join(format!(
