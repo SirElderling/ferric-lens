@@ -157,13 +157,17 @@ pub fn changes_since(root: &Path, merge_base: &str) -> Result<ChangeSet, String>
         ],
     )?;
 
-    let records = output
-        .split(|byte| *byte == 0)
-        .filter(|record| !record.is_empty())
-        .map(|record| decode_git_text(record, "git diff path/status record"))
-        .collect::<Result<Vec<_>, _>>()?;
+    parse_change_output(root, merge_base, &output, list_untracked(root))
+}
 
-    finalize_changes(root, merge_base, &records, list_untracked(root))
+fn parse_change_output(
+    root: &Path,
+    merge_base: &str,
+    output: &[u8],
+    untracked: Result<Vec<String>, String>,
+) -> Result<ChangeSet, String> {
+    let records = decode_nul_records(output, "git diff path/status record")?;
+    finalize_changes(root, merge_base, &records, untracked)
 }
 
 fn finalize_changes(
@@ -201,8 +205,6 @@ fn detect_exact_worktree_renames(
     tree_args.extend(changes.deleted.iter().map(OsString::from));
     let tree = git_bytes(root, tree_args)?;
 
-    let deleted_by_oid = parse_tree_oids(&tree)?;
-
     let added_paths = changes.added.iter().cloned().collect::<Vec<_>>();
     let mut hash_args = vec![
         OsStr::new("hash-object").to_os_string(),
@@ -210,7 +212,17 @@ fn detect_exact_worktree_renames(
     ];
     hash_args.extend(added_paths.iter().map(OsString::from));
     let hashes = git_text_os(root, hash_args);
-    apply_exact_rename_hashes(changes, deleted_by_oid, &added_paths, hashes)
+    apply_exact_rename_tree(changes, &tree, &added_paths, hashes)
+}
+
+fn apply_exact_rename_tree(
+    changes: &mut ChangeSet,
+    tree: &[u8],
+    added_paths: &[String],
+    hashes: Result<String, String>,
+) -> Result<(), String> {
+    let deleted_by_oid = parse_tree_oids(tree)?;
+    apply_exact_rename_hashes(changes, deleted_by_oid, added_paths, hashes)
 }
 
 fn apply_exact_rename_hashes(
@@ -306,11 +318,7 @@ fn list_untracked(root: &Path) -> Result<Vec<String>, String> {
             OsStr::new("--"),
         ],
     )?;
-    output
-        .split(|byte| *byte == 0)
-        .filter(|record| !record.is_empty())
-        .map(|path| decode_git_text(path, "untracked Git path"))
-        .collect()
+    decode_nul_records(&output, "untracked Git path")
 }
 
 fn parse_tree_oids(tree: &[u8]) -> Result<BTreeMap<String, Vec<String>>, String> {
@@ -548,7 +556,11 @@ fn resolve_commit(root: &Path, reference: &str) -> Result<String, String> {
             OsStr::new(&spec),
         ],
     )?;
-    let output = decode_git_text(&output, "resolved Git commit")?;
+    parse_resolved_commit_bytes(reference, &output)
+}
+
+fn parse_resolved_commit_bytes(reference: &str, output: &[u8]) -> Result<String, String> {
+    let output = decode_git_text(output, "resolved Git commit")?;
     parse_resolved_commit(reference, &output)
 }
 
@@ -570,6 +582,14 @@ fn git_text<const N: usize>(root: &Path, args: [&str; N]) -> Result<String, Stri
 fn git_text_os(root: &Path, args: Vec<OsString>) -> Result<String, String> {
     let output = git_bytes(root, args)?;
     Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+fn decode_nul_records(bytes: &[u8], context: &str) -> Result<Vec<String>, String> {
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+        .map(|record| decode_git_text(record, context))
+        .collect()
 }
 
 fn decode_git_text(bytes: &[u8], context: &str) -> Result<String, String> {
