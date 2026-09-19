@@ -435,10 +435,9 @@ mod tests {
         use std::fs;
 
         use crate::model::{
-            AnalysisProfile, ArchitectureSummary, BaselineContext, Capability,
-            CapabilityStatus, CoChangeEvidence, DependencyCycle, Evidence, EvidenceClass, Finding,
-            HistoryEvidence, HistorySummary, ImportedEvidence, ImportedObservation, ModuleMetrics,
-            Priority,
+            AnalysisProfile, ArchitectureSummary, BaselineContext, Capability, CapabilityStatus,
+            CoChangeEvidence, DependencyCycle, Evidence, EvidenceClass, Finding, HistoryEvidence,
+            HistorySummary, ImportedEvidence, ImportedObservation, ModuleMetrics, Priority,
         };
 
         let mut result = minimal_result();
