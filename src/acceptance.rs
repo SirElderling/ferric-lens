@@ -130,7 +130,7 @@ pub fn record(
     };
 
     let text = toml::to_string_pretty(&file)
-        .map_err(|error| format!("cannot serialize acceptances: {error}"))?;
+        .expect("acceptance schema contains only TOML-serializable values");
     atomic_write(&acceptance_path(root), text.as_bytes())
 }
 
