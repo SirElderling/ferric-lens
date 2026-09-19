@@ -575,7 +575,6 @@ fn short_oid(oid: &str) -> &str {
     oid.get(..12).unwrap_or(oid)
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -583,9 +582,7 @@ mod tests {
     use crate::{
         compare::Correspondence,
         git::ChangeSet,
-        model::{
-            CapabilityStatus, DeltaStatus, EvidenceClass, Finding, ModuleMetrics, Priority,
-        },
+        model::{CapabilityStatus, DeltaStatus, EvidenceClass, Finding, ModuleMetrics, Priority},
     };
 
     fn module(crate_name: &str, module_path: &str, path: &str) -> ModuleMetrics {
@@ -666,21 +663,13 @@ mod tests {
             ambiguous_head: Default::default(),
         };
 
-        super::rebind_advisory_identities(
-            &mut findings,
-            &head,
-            &baseline,
-            &correspondence,
-        );
+        super::rebind_advisory_identities(&mut findings, &head, &baseline, &correspondence);
 
         assert_eq!(findings[0].identity, "demo::old");
         assert_eq!(findings[1].identity, "missing");
         assert_eq!(findings[2].identity, "demo::moved");
 
-        let mut no_match = vec![finding(
-            "structure.current_coupled_outlier",
-            "demo::moved",
-        )];
+        let mut no_match = vec![finding("structure.current_coupled_outlier", "demo::moved")];
         super::rebind_advisory_identities(
             &mut no_match,
             &head,
@@ -725,6 +714,7 @@ mod tests {
             .all(|capability| capability.status == CapabilityStatus::Partial));
         assert!(partial_caps
             .iter()
-            .any(|capability| capability.detail.as_deref() == Some("2 Rust source file(s) could not be parsed")));
+            .any(|capability| capability.detail.as_deref()
+                == Some("2 Rust source file(s) could not be parsed")));
     }
 }
