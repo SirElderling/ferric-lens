@@ -328,7 +328,11 @@ fn finding_sort_is_gate_first_then_rule_and_subject() {
     assert_eq!(
         findings
             .iter()
-            .map(|finding| (finding.gate, finding.rule.as_str(), finding.subject.as_str()))
+            .map(|finding| (
+                finding.gate,
+                finding.rule.as_str(),
+                finding.subject.as_str()
+            ))
             .collect::<Vec<_>>(),
         vec![
             (true, "a", "demo::a"),
