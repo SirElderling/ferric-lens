@@ -191,6 +191,8 @@ fn exit_code(verdict: &GateVerdict) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use clap::Parser;
     use ferric_lens::model::{
         AnalysisProfile, AnalysisResult, ArchitectureSummary, GateVerdict, Snapshot,
