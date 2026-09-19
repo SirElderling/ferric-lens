@@ -427,3 +427,63 @@ fn run() {
         .iter()
         .any(|finding| finding.rule == "correctness.stdout_mode_unconditional_artifacts"));
 }
+
+
+#[test]
+fn workspace_snapshot_detector_ignores_direct_cfg_test_compatibility_helpers() {
+    let sources = vec![source(
+        "src/input.rs",
+        r#"
+fn cargo_input_snapshot(package: &Package) {
+    for name in ["Cargo.toml", "Cargo.lock"] {}
+    let manifest = PathBuf::from(&package.manifest_path);
+    let bytes = fs::read(&manifest).unwrap();
+}
+
+#[cfg(test)]
+fn cargo_input_digest() {
+    for name in ["Cargo.toml", "Cargo.lock"] {}
+}
+
+#[cfg(test)]
+fn verify_stable_inputs() {
+    cargo_input_digest();
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "correctness.workspace_manifest_snapshot_gap"));
+}
+
+#[test]
+fn workspace_snapshot_detector_covers_nonmatching_and_matching_verifiers() {
+    let sources = vec![source(
+        "src/input.rs",
+        r#"
+fn cargo_input_digest() {
+    for name in ["Cargo.toml", "Cargo.lock"] {}
+}
+
+fn cargo_resolution_identity(package: &Package) {
+    let manifest = PathBuf::from(&package.manifest_path);
+    let bytes = fs::read(&manifest).unwrap();
+}
+
+fn verify_other_state() {
+    check_something_else();
+}
+
+fn verify_stable_inputs() {
+    cargo_input_digest();
+}
+"#,
+    )];
+
+    assert!(scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "correctness.workspace_manifest_snapshot_gap"));
+}
