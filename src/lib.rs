@@ -186,8 +186,7 @@ fn analyze_internal_with_ops(
         }
     };
 
-    let baseline_worktree =
-        match (ops.materialize_baseline)(root, &baseline_selection.merge_base) {
+    let baseline_worktree = match (ops.materialize_baseline)(root, &baseline_selection.merge_base) {
         Ok(worktree) => worktree,
         Err(error) => {
             capabilities.push(Capability {
@@ -215,8 +214,7 @@ fn analyze_internal_with_ops(
         }
     };
 
-    let baseline_snapshot =
-        match (ops.analyze_baseline)(baseline_worktree.path(), root, &profile) {
+    let baseline_snapshot = match (ops.analyze_baseline)(baseline_worktree.path(), root, &profile) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             capabilities.push(Capability {
