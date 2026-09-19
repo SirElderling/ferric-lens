@@ -1,7 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
+use proc_macro2::Span;
 use quote::ToTokens;
 use syn::{
+    spanned::Spanned,
     visit::{self, Visit},
     Attribute, BinOp, ExprBinary, ExprForLoop, ExprIf, ExprLoop, ExprMatch, ExprMethodCall,
     ExprWhile, File, ForeignItemFn, ImplItemFn, Item, ItemEnum, ItemFn, ItemImpl, ItemMod,
@@ -12,7 +18,10 @@ use syn::{
 use crate::{
     cfg::{HostCfg, Truth},
     input::{SourceFile, WorkspaceAliases},
-    model::{FunctionFact, FunctionKind, ImportPath, ModuleMetrics, TypeFact, TypeKind},
+    model::{
+        Finding, FunctionFact, FunctionKind, ImportPath, ModuleMetrics, SourceContext, TypeFact,
+        TypeKind,
+    },
 };
 
 pub fn extract(source: &SourceFile, cfg: &HostCfg) -> Result<ModuleMetrics, String> {
@@ -56,6 +65,18 @@ pub fn extract(source: &SourceFile, cfg: &HostCfg) -> Result<ModuleMetrics, Stri
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct LineSpan {
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Clone)]
+struct UseObservation {
+    import: ImportPath,
+    span: LineSpan,
+}
+
 struct MetricsVisitor<'cfg> {
     cfg: &'cfg HostCfg,
     decision_sites: usize,
@@ -67,6 +88,9 @@ struct MetricsVisitor<'cfg> {
     impl_owner: Vec<String>,
     trait_owner: Vec<(String, bool)>,
     imports: Vec<ImportPath>,
+    decision_spans: Vec<LineSpan>,
+    clone_spans: Vec<LineSpan>,
+    use_observations: Vec<UseObservation>,
     gate_limitation: Option<String>,
 }
 
@@ -83,6 +107,9 @@ impl<'cfg> MetricsVisitor<'cfg> {
             impl_owner: Vec::new(),
             trait_owner: Vec::new(),
             imports: Vec::new(),
+            decision_spans: Vec::new(),
+            clone_spans: Vec::new(),
+            use_observations: Vec::new(),
             gate_limitation: None,
         }
     }
@@ -123,6 +150,20 @@ impl<'cfg> MetricsVisitor<'cfg> {
             kind,
             public_declared: is_public_visibility(visibility),
         });
+    }
+
+    fn record_decision(&mut self, span: Span) {
+        self.decision_sites += 1;
+        if let Some(span) = line_span(span) {
+            self.decision_spans.push(span);
+        }
+    }
+
+    fn record_clone(&mut self, span: Span) {
+        self.clone_calls += 1;
+        if let Some(span) = line_span(span) {
+            self.clone_spans.push(span);
+        }
     }
 }
 
@@ -258,8 +299,17 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
     }
 
     fn visit_item_use(&mut self, item: &'ast ItemUse) {
+        let first = self.imports.len();
         let mut prefix = Vec::new();
         flatten_use_tree(&item.tree, &mut prefix, &mut self.imports);
+        if let Some(span) = line_span(item.span()) {
+            for import in &self.imports[first..] {
+                self.use_observations.push(UseObservation {
+                    import: import.clone(),
+                    span,
+                });
+            }
+        }
     }
 
     fn visit_macro(&mut self, _node: &'ast Macro) {
@@ -267,32 +317,32 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
     }
 
     fn visit_expr_if(&mut self, node: &'ast ExprIf) {
-        self.decision_sites += 1;
+        self.record_decision(node.if_token.span);
         visit::visit_expr_if(self, node);
     }
 
     fn visit_expr_for_loop(&mut self, node: &'ast ExprForLoop) {
-        self.decision_sites += 1;
+        self.record_decision(node.for_token.span);
         visit::visit_expr_for_loop(self, node);
     }
 
     fn visit_expr_while(&mut self, node: &'ast ExprWhile) {
-        self.decision_sites += 1;
+        self.record_decision(node.while_token.span);
         visit::visit_expr_while(self, node);
     }
 
     fn visit_expr_loop(&mut self, node: &'ast ExprLoop) {
-        self.decision_sites += 1;
+        self.record_decision(node.loop_token.span);
         visit::visit_expr_loop(self, node);
     }
 
     fn visit_expr_match(&mut self, node: &'ast ExprMatch) {
         for arm in &node.arms {
             if !matches!(&arm.pat, Pat::Wild(_)) {
-                self.decision_sites += 1;
+                self.record_decision(arm.pat.span());
             }
-            if arm.guard.is_some() {
-                self.decision_sites += 1;
+            if let Some((_, guard)) = &arm.guard {
+                self.record_decision(guard.span());
             }
         }
         visit::visit_expr_match(self, node);
@@ -300,14 +350,14 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
 
     fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
         if node.method == "clone" {
-            self.clone_calls += 1;
+            self.record_clone(node.method.span());
         }
         visit::visit_expr_method_call(self, node);
     }
 
     fn visit_expr_binary(&mut self, node: &'ast ExprBinary) {
         if matches!(node.op, BinOp::And(_) | BinOp::Or(_)) {
-            self.decision_sites += 1;
+            self.record_decision(node.op.span());
         }
         visit::visit_expr_binary(self, node);
     }
@@ -417,6 +467,340 @@ fn flatten_use_tree(tree: &UseTree, prefix: &mut Vec<String>, out: &mut Vec<Impo
             }
         }
     }
+}
+
+const MAX_CONTEXTS_PER_SIGNAL: usize = 3;
+const MAX_EXCERPT_LINES: usize = 3;
+const MAX_EXCERPT_CHARS: usize = 600;
+
+struct ContextFacts {
+    text: String,
+    decision_spans: Vec<LineSpan>,
+    clone_spans: Vec<LineSpan>,
+    use_observations: Vec<UseObservation>,
+}
+
+pub fn source_contexts_for_findings(
+    root: &Path,
+    modules: &[ModuleMetrics],
+    workspace_aliases: &WorkspaceAliases,
+    source_digests: &BTreeMap<String, String>,
+    findings: &[Finding],
+    cfg: &HostCfg,
+) -> Result<Vec<SourceContext>, String> {
+    let requested = requested_source_contexts(findings);
+    if requested.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let by_subject = modules
+        .iter()
+        .filter(|module| module.parse_complete)
+        .map(|module| (qualify(&module.crate_name, &module.module_path), module))
+        .collect::<BTreeMap<_, _>>();
+    let known_by_crate = known_modules_by_crate(modules);
+
+    let mut needed_subjects = BTreeSet::new();
+    for (subject, metrics) in &requested {
+        if metrics
+            .iter()
+            .any(|metric| metric != "reverse_repository_dependents")
+        {
+            needed_subjects.insert(subject.clone());
+        }
+        if metrics.contains("reverse_repository_dependents") {
+            for module in modules.iter().filter(|module| {
+                module
+                    .local_dependency_modules
+                    .iter()
+                    .any(|dependency| dependency == subject)
+            }) {
+                needed_subjects.insert(qualify(&module.crate_name, &module.module_path));
+            }
+        }
+    }
+
+    let mut facts = BTreeMap::new();
+    for subject in needed_subjects {
+        let Some(module) = by_subject.get(&subject) else {
+            continue;
+        };
+        let Some(expected_digest) = source_digests.get(&module.path) else {
+            return Err(format!(
+                "missing source digest while collecting finding context for {}",
+                module.path
+            ));
+        };
+        facts.insert(
+            subject,
+            load_context_facts(root, module, expected_digest, cfg)?,
+        );
+    }
+
+    let mut contexts = Vec::new();
+    for (subject, metrics) in requested {
+        for metric in metrics {
+            match metric.as_str() {
+                "decision_sites" => {
+                    if let (Some(module), Some(facts)) =
+                        (by_subject.get(&subject), facts.get(&subject))
+                    {
+                        push_span_contexts(
+                            &mut contexts,
+                            &subject,
+                            &metric,
+                            &module.path,
+                            &facts.decision_spans,
+                            &facts.text,
+                        );
+                    }
+                }
+                "clone_call_syntax_sites" => {
+                    if let (Some(module), Some(facts)) =
+                        (by_subject.get(&subject), facts.get(&subject))
+                    {
+                        push_span_contexts(
+                            &mut contexts,
+                            &subject,
+                            &metric,
+                            &module.path,
+                            &facts.clone_spans,
+                            &facts.text,
+                        );
+                    }
+                }
+                "local_dependency_modules" => {
+                    if let (Some(module), Some(facts)) =
+                        (by_subject.get(&subject), facts.get(&subject))
+                    {
+                        let aliases = workspace_aliases.get(&module.crate_name);
+                        let spans = facts
+                            .use_observations
+                            .iter()
+                            .filter_map(|observation| {
+                                if observation.import.glob {
+                                    return None;
+                                }
+                                match resolve_import(
+                                    &module.crate_name,
+                                    &module.module_path,
+                                    &observation.import.segments,
+                                    &known_by_crate,
+                                    aliases,
+                                ) {
+                                    ImportResolution::Repository(target) if target != subject => {
+                                        Some(observation.span)
+                                    }
+                                    _ => None,
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        push_span_contexts(
+                            &mut contexts,
+                            &subject,
+                            &metric,
+                            &module.path,
+                            &spans,
+                            &facts.text,
+                        );
+                    }
+                }
+                "reverse_repository_dependents" => {
+                    for module in modules.iter().filter(|module| {
+                        module
+                            .local_dependency_modules
+                            .iter()
+                            .any(|dependency| dependency == &subject)
+                    }) {
+                        let dependent = qualify(&module.crate_name, &module.module_path);
+                        let Some(facts) = facts.get(&dependent) else {
+                            continue;
+                        };
+                        let aliases = workspace_aliases.get(&module.crate_name);
+                        let spans = facts
+                            .use_observations
+                            .iter()
+                            .filter_map(|observation| {
+                                if observation.import.glob {
+                                    return None;
+                                }
+                                match resolve_import(
+                                    &module.crate_name,
+                                    &module.module_path,
+                                    &observation.import.segments,
+                                    &known_by_crate,
+                                    aliases,
+                                ) {
+                                    ImportResolution::Repository(target) if target == subject => {
+                                        Some(observation.span)
+                                    }
+                                    _ => None,
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        push_span_contexts(
+                            &mut contexts,
+                            &subject,
+                            &metric,
+                            &module.path,
+                            &spans,
+                            &facts.text,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    contexts.sort();
+    contexts.dedup();
+    let mut counts = BTreeMap::<(String, String), usize>::new();
+    contexts.retain(|context| {
+        let count = counts
+            .entry((context.subject.clone(), context.metric.clone()))
+            .or_default();
+        if *count >= MAX_CONTEXTS_PER_SIGNAL {
+            return false;
+        }
+        *count += 1;
+        true
+    });
+    Ok(contexts)
+}
+
+fn requested_source_contexts(findings: &[Finding]) -> BTreeMap<String, BTreeSet<String>> {
+    let mut requested = BTreeMap::<String, BTreeSet<String>>::new();
+    for finding in findings {
+        for evidence in &finding.evidence {
+            if matches!(
+                evidence.metric.as_str(),
+                "decision_sites"
+                    | "local_dependency_modules"
+                    | "clone_call_syntax_sites"
+                    | "reverse_repository_dependents"
+            ) {
+                requested
+                    .entry(finding.subject.clone())
+                    .or_default()
+                    .insert(evidence.metric.clone());
+            }
+        }
+    }
+    requested
+}
+
+fn known_modules_by_crate(modules: &[ModuleMetrics]) -> BTreeMap<String, BTreeSet<String>> {
+    let mut by_crate = BTreeMap::<String, BTreeSet<String>>::new();
+    for module in modules.iter().filter(|module| module.parse_complete) {
+        by_crate
+            .entry(module.crate_name.clone())
+            .or_default()
+            .insert(module.module_path.clone());
+    }
+    by_crate
+}
+
+fn load_context_facts(
+    root: &Path,
+    module: &ModuleMetrics,
+    expected_digest: &str,
+    cfg: &HostCfg,
+) -> Result<ContextFacts, String> {
+    let path = root.join(&module.path);
+    let bytes =
+        fs::read(&path).map_err(|error| format!("cannot read {} for finding context: {error}", path.display()))?;
+    let actual_digest = blake3::hash(&bytes).to_hex().to_string();
+    if actual_digest != expected_digest {
+        return Err(format!(
+            "source changed while collecting finding context: {}",
+            module.path
+        ));
+    }
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|error| format!("source is not valid UTF-8: {error}"))?
+        .to_owned();
+    let syntax: File =
+        syn::parse_file(&text).map_err(|error| format!("Rust parse failed: {error}"))?;
+    let mut visitor = MetricsVisitor::new(cfg);
+    visitor.visit_file(&syntax);
+
+    Ok(ContextFacts {
+        text,
+        decision_spans: visitor.decision_spans,
+        clone_spans: visitor.clone_spans,
+        use_observations: visitor.use_observations,
+    })
+}
+
+fn push_span_contexts(
+    contexts: &mut Vec<SourceContext>,
+    subject: &str,
+    metric: &str,
+    path: &str,
+    spans: &[LineSpan],
+    text: &str,
+) {
+    let mut spans = spans.to_vec();
+    spans.sort();
+    spans.dedup();
+    for span in spans {
+        contexts.push(source_context(subject, metric, path, span, text));
+    }
+}
+
+fn source_context(
+    subject: &str,
+    metric: &str,
+    path: &str,
+    span: LineSpan,
+    text: &str,
+) -> SourceContext {
+    let excerpt_end = span
+        .end
+        .min(span.start.saturating_add(MAX_EXCERPT_LINES - 1));
+    let excerpt = text
+        .lines()
+        .skip(span.start.saturating_sub(1))
+        .take(excerpt_end.saturating_sub(span.start) + 1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (excerpt, truncated_chars) = truncate_excerpt(&excerpt);
+
+    SourceContext {
+        subject: subject.to_owned(),
+        metric: metric.to_owned(),
+        path: path.to_owned(),
+        start_line: span.start,
+        end_line: span.end,
+        excerpt,
+        excerpt_truncated: excerpt_end < span.end || truncated_chars,
+    }
+}
+
+fn truncate_excerpt(excerpt: &str) -> (String, bool) {
+    if excerpt.chars().count() <= MAX_EXCERPT_CHARS {
+        return (excerpt.to_owned(), false);
+    }
+
+    let mut truncated = excerpt
+        .chars()
+        .take(MAX_EXCERPT_CHARS.saturating_sub(1))
+        .collect::<String>();
+    truncated.push('…');
+    (truncated, true)
+}
+
+fn line_span(span: Span) -> Option<LineSpan> {
+    let start = span.start();
+    if start.line == 0 {
+        return None;
+    }
+    let end = span.end();
+    Some(LineSpan {
+        start: start.line,
+        end: end.line.max(start.line),
+    })
 }
 
 pub fn resolve_workspace_dependencies(
