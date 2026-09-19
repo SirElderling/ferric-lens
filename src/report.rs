@@ -288,9 +288,9 @@ fn finding_guidance(finding: &Finding) -> FindingGuidance {
             if_ignored: "If the collection is large or the path runs often, the extra copy can add allocation and memory traffic. Ownership requirements may still make the clone intentional.",
         },
         "runtime.clone_then_mutate_candidate" => FindingGuidance {
-            title: "A whole value is copied into a mutable working copy",
-            why_care: "Ferric Lens observed a cloned value assigned to a mutable local and then changed with a known mutating operation. This can be appropriate, but it is a focused place to check whether only a smaller subset needed ownership.",
-            if_ignored: "Copying a large aggregate before filtering or mutating a small part of it can create avoidable allocation and memory traffic. Ferric Lens has not measured runtime cost.",
+            title: "A cloned aggregate is changed through one of its fields",
+            why_care: "Ferric Lens observed a whole value cloned into a mutable local and then a nested field changed with a known mutating operation. This is narrower than ordinary collection normalization and can indicate that only a filtered or changed subset needed ownership.",
+            if_ignored: "Copying a large aggregate before changing one nested collection can create avoidable allocation and memory traffic. Ferric Lens has not measured runtime cost.",
         },
         "build.rebuild_exposure_candidate" | "build.small_population_rebuild_concentration" => FindingGuidance {
             title: "Changes here may affect many parts of the repository",
