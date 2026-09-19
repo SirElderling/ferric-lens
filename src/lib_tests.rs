@@ -311,7 +311,8 @@ fn truncated_history_is_explicitly_partial() {
         .as_deref()
         .unwrap()
         .contains("sample truncated"));
-}\n
+}
+
 #[test]
 fn finding_sort_is_gate_first_then_rule_and_subject() {
     let mut findings = vec![
