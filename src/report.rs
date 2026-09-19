@@ -8,26 +8,26 @@ use crate::model::{AnalysisResult, Finding, GateVerdict};
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-pub fn result_digest(result: &AnalysisResult) -> Result<String, String> {
+pub fn result_digest(result: &AnalysisResult) -> String {
     let bytes = serde_json::to_vec(result)
         .expect("analysis result schema contains only JSON-serializable values");
-    Ok(blake3::hash(&bytes).to_hex().to_string())
+    blake3::hash(&bytes).to_hex().to_string()
 }
 
-pub fn json(result: &AnalysisResult) -> Result<String, String> {
-    let digest = result_digest(result)?;
+pub fn json(result: &AnalysisResult) -> String {
+    let digest = result_digest(result);
     let mut value =
         serde_json::to_value(result).expect("analysis result schema is JSON-serializable");
     let object = value
         .as_object_mut()
         .expect("analysis result serializes as a JSON object");
     object.insert("result_digest".into(), serde_json::Value::String(digest));
-    Ok(serde_json::to_string_pretty(&value).expect("analysis result JSON value is serializable"))
+    serde_json::to_string_pretty(&value).expect("analysis result JSON value is serializable")
 }
 
 pub fn html(result: &AnalysisResult) -> String {
     let result_digest =
-        result_digest(result).expect("analysis result digest serialization is infallible");
+        result_digest(result);
     let verdict = match result.verdict {
         GateVerdict::Pass => "PASS",
         GateVerdict::Regression => "REGRESSION",
@@ -609,8 +609,8 @@ mod tests {
     #[test]
     fn json_and_html_embed_the_same_semantic_result_digest() {
         let result = minimal_result();
-        let digest = result_digest(&result).unwrap();
-        let json = json(&result).unwrap();
+        let digest = result_digest(&result);
+        let json = json(&result);
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert_eq!(value["result_digest"], digest);
