@@ -272,11 +272,11 @@ fn analyze_internal_with_profile_context(
         &correspondence,
     );
 
-    if !current.metadata_complete && !current.modules.is_empty() {
+    if !current.metadata_complete {
         gate.incomplete_reasons
             .push("head Cargo/source inventory is incomplete".into());
     }
-    if !baseline_snapshot.metadata_complete && !baseline_snapshot.modules.is_empty() {
+    if !baseline_snapshot.metadata_complete {
         gate.incomplete_reasons
             .push("baseline Cargo/source inventory is incomplete".into());
     }
