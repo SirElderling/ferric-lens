@@ -2212,4 +2212,3 @@ fn stable_snapshot_propagates_cargo_input_verification_errors() {
     assert!(error.contains("cannot re-read Cargo input"));
     fs::remove_dir_all(root).unwrap();
 }
-
