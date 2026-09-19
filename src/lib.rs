@@ -511,9 +511,15 @@ fn finding_source_contexts(
                 .map(move |evidence| (finding.subject.as_str(), evidence.metric.as_str()))
         })
         .collect::<BTreeSet<_>>();
-    contexts.extend(snapshot.correctness_contexts.iter().filter(|context| {
-        requested.contains(&(context.subject.as_str(), context.metric.as_str()))
-    }).cloned());
+    contexts.extend(
+        snapshot
+            .correctness_contexts
+            .iter()
+            .filter(|context| {
+                requested.contains(&(context.subject.as_str(), context.metric.as_str()))
+            })
+            .cloned(),
+    );
     contexts.sort();
     contexts.dedup();
     Ok(contexts)
