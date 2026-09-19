@@ -136,12 +136,13 @@ fn imported_evidence_is_optional_and_does_not_change_the_gate_verdict() {
   "schema_version": 1,
   "producer": {{"name": "fixture", "version": "1"}},
   "source": {{"content_digest": "{}"}},
-  "configuration": {{"target": "host", "features": []}},
+  "configuration": {{"target": "{}", "features": []}},
   "observations": [
     {{"subject": "src/lib.rs", "metric": "instructions", "value": 7, "unit": "count"}}
   ]
 }}"#,
-            without.snapshot.content_digest
+            without.snapshot.content_digest,
+            without.profile.resolved_target
         ),
     );
 
