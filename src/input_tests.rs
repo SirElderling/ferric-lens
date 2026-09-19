@@ -1165,3 +1165,146 @@ fn directory_entry_collection_maps_iterator_errors() {
     assert!(error.contains("fixture directory entry failure"));
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn inventory_and_acquisition_propagate_fallback_io_failures() {
+    let root = temp_root();
+    let not_directory = root.join("not-directory");
+    fs::write(&not_directory, "file").unwrap();
+
+    assert!(super::inventory(&not_directory).is_err());
+
+    let bad_metadata = Metadata {
+        packages: vec![Package {
+            name: "demo".into(),
+            id: "demo-id".into(),
+            manifest_path: "/".into(),
+            targets: Vec::new(),
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec!["demo-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+    assert!(super::acquire_inventory(&not_directory, Ok(bad_metadata), None).is_err());
+    assert!(super::acquire_inventory(
+        &not_directory,
+        Err("metadata unavailable".into()),
+        None,
+    )
+    .is_err());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn metadata_inventory_rejects_manifest_without_parent() {
+    let root = temp_root();
+    let metadata = Metadata {
+        packages: vec![Package {
+            name: "demo".into(),
+            id: "demo-id".into(),
+            manifest_path: "/".into(),
+            targets: Vec::new(),
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec!["demo-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+
+    assert!(inventory_from_metadata(&root, metadata, None)
+        .unwrap_err()
+        .contains("manifest has no parent"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn binary_only_package_has_no_implicit_library_alias() {
+    let root = temp_root();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+
+    let metadata = Metadata {
+        packages: vec![Package {
+            name: "demo".into(),
+            id: "demo-id".into(),
+            manifest_path: root.join("Cargo.toml").to_string_lossy().into_owned(),
+            targets: vec![Target {
+                name: "demo".into(),
+                kind: vec!["bin".into()],
+                src_path: root.join("src/main.rs").to_string_lossy().into_owned(),
+            }],
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec!["demo-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+
+    let (sources, aliases, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
+
+    assert_eq!(sources.len(), 1);
+    assert!(aliases.get("demo").unwrap().is_empty());
+    assert!(limitations.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn fallback_directory_helpers_propagate_entry_and_metadata_errors() {
+    let root = temp_root();
+    let not_directory = root.join("file");
+    fs::write(&not_directory, "x").unwrap();
+    assert!(super::read_directory_paths(&not_directory).is_err());
+
+    let entry_error = std::io::Error::new(std::io::ErrorKind::Other, "entry failed");
+    let entries: Vec<std::io::Result<fs::DirEntry>> = vec![Err(entry_error)];
+    assert!(super::collect_directory_entries(entries, &root).is_err());
+
+    let mut budget = SourceBudget::default();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    assert!(super::collect_rust_paths(
+        &root,
+        vec![root.join("missing.rs")],
+        &root.join("target"),
+        "demo",
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )
+    .is_err());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn fallback_path_reader_propagates_regular_read_failures() {
+    use std::os::unix::net::UnixListener;
+
+    let root = temp_root();
+    let socket = root.join("unreadable.rs");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let mut budget = SourceBudget::default();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+
+    let error = super::collect_rust_paths(
+        &root,
+        vec![socket.clone()],
+        &root.join("target"),
+        "demo",
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("cannot read"));
+    drop(listener);
+    fs::remove_dir_all(root).unwrap();
+}
