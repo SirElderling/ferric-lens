@@ -71,10 +71,7 @@ fn missing_baseline_returns_inconclusive_exit_code() {
 
 #[test]
 fn invalid_repository_returns_error_exit_code_and_diagnostic() {
-    let missing = std::env::temp_dir().join(format!(
-        "ferric-lens-missing-{}",
-        std::process::id()
-    ));
+    let missing = std::env::temp_dir().join(format!("ferric-lens-missing-{}", std::process::id()));
     let _ = fs::remove_dir_all(&missing);
     let output = run(&["check", missing.to_str().unwrap(), "--base", "HEAD"]);
 
