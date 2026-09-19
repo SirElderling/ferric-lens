@@ -694,9 +694,7 @@ pub fn source_contexts_for_findings(
     Ok(contexts)
 }
 
-fn requested_source_contexts(
-    findings: &[Finding],
-) -> BTreeMap<String, BTreeSet<SourceMetric>> {
+fn requested_source_contexts(findings: &[Finding]) -> BTreeMap<String, BTreeSet<SourceMetric>> {
     let mut requested = BTreeMap::<String, BTreeSet<SourceMetric>>::new();
     for finding in findings {
         for evidence in &finding.evidence {
