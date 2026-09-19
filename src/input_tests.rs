@@ -2280,3 +2280,68 @@ fn non_literal_path_modules_remain_explicitly_incomplete() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn literal_module_path_rejects_ambiguous_empty_and_list_forms() {
+    fn module(source: &str) -> syn::ItemMod {
+        let file = syn::parse_file(source).unwrap();
+        match file.items.into_iter().next().unwrap() {
+            syn::Item::Mod(module) => module,
+            _ => panic!("fixture must parse as a module"),
+        }
+    }
+
+    assert_eq!(super::literal_module_path(&module("mod plain;")).unwrap(), None);
+    assert_eq!(
+        super::literal_module_path(&module("#[path = \"custom.rs\"] mod custom;")).unwrap(),
+        Some(std::path::PathBuf::from("custom.rs"))
+    );
+    assert_eq!(
+        super::literal_module_path(&module("#[path = \"\"] mod empty;")).unwrap_err(),
+        "path value is not a non-empty string literal"
+    );
+    assert_eq!(
+        super::literal_module_path(&module("#[path(\"custom.rs\")] mod list;")).unwrap_err(),
+        "path attribute is not name-value syntax"
+    );
+    assert_eq!(
+        super::literal_module_path(&module(
+            "#[path = \"one.rs\"] #[path = \"two.rs\"] mod duplicate;"
+        ))
+        .unwrap_err(),
+        "multiple path attributes"
+    );
+}
+
+#[test]
+fn inline_path_module_remains_explicitly_incomplete() {
+    let root = temp_root();
+    fs::write(
+        root.join("src/lib.rs"),
+        "#[path = \"ignored.rs\"] mod inline { pub fn value() {} }\n",
+    )
+    .unwrap();
+
+    let mut visited = BTreeSet::new();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    let mut budget = SourceBudget::default();
+    collect_reachable_module(
+        &root,
+        "demo",
+        &root.join("src/lib.rs"),
+        "",
+        true,
+        None,
+        &mut visited,
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap();
+
+    assert!(limitations
+        .iter()
+        .any(|detail| detail.contains("inline module inline uses #[path]")));
+    fs::remove_dir_all(root).unwrap();
+}
