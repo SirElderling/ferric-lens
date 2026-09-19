@@ -80,6 +80,19 @@ fn invalid_repository_returns_error_exit_code_and_diagnostic() {
 }
 
 #[test]
+fn analyze_invalid_repository_returns_error_exit_code_and_diagnostic() {
+    let missing = std::env::temp_dir().join(format!(
+        "ferric-lens-analyze-missing-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&missing);
+    let output = run(&["analyze", missing.to_str().unwrap(), "--base", "HEAD"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ferric-lens:"));
+}
+
+#[test]
 fn accept_rejects_unknown_fingerprint_through_cli() {
     let repo = Repo::baseline("accept");
     let output = run(&[
