@@ -16,6 +16,16 @@ fn run(args: &[&str]) -> Output {
     Command::new(binary()).args(args).output().unwrap()
 }
 
+fn assert_success(output: &Output) {
+    assert!(
+        output.status.success(),
+        "status={:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn check_passes_and_can_write_json() {
     let repo = Repo::baseline("check");
@@ -29,7 +39,7 @@ fn check_passes_and_can_write_json() {
         json.to_str().unwrap(),
     ]);
 
-    assert!(output.status.success());
+    assert_success(&output);
     assert!(String::from_utf8_lossy(&output.stdout).contains("Ferric Lens: Pass"));
     let value: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(json).unwrap()).unwrap();
@@ -53,7 +63,7 @@ fn analyze_writes_json_and_html_with_matching_digest() {
         html.to_str().unwrap(),
     ]);
 
-    assert!(output.status.success());
+    assert_success(&output);
     let value: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&json).unwrap()).unwrap();
     let digest = value["result_digest"].as_str().unwrap();
@@ -141,7 +151,7 @@ fn analyze_accepts_explicit_profile_and_evidence_options() {
         html.to_str().unwrap(),
     ]);
 
-    assert!(output.status.success());
+    assert_success(&output);
     let value: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(json).unwrap()).unwrap();
     assert_eq!(value["profile"]["features"][0], "alpha");
