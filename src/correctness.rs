@@ -103,14 +103,10 @@ fn detect_cargo_feature_resolution(sources: &[SourceFile], scan: &mut Correctnes
 fn detect_symbolic_target_identity(sources: &[SourceFile], scan: &mut CorrectnessScan) {
     let resolved = matches_where(sources, |line| line.contains("resolved_target"));
     let symbolic = matches_where(sources, |line| {
-        line.contains("format!")
-            && line.contains("target={")
-            && !line.contains("resolved_target")
+        line.contains("format!") && line.contains("target={") && !line.contains("resolved_target")
     });
     let symbolic_match = matches_where(sources, |line| {
-        line.contains("==")
-            && line.contains(".target")
-            && !line.contains(".resolved_target")
+        line.contains("==") && line.contains(".target") && !line.contains(".resolved_target")
     });
     if symbolic.is_empty() || symbolic_match.is_empty() || resolved.is_empty() {
         return;
@@ -155,10 +151,9 @@ fn detect_stdout_mode_artifacts(sources: &[SourceFile], scan: &mut CorrectnessSc
             else {
                 continue;
             };
-            let guarded = window.iter().any(|line| {
-                line.contains("if")
-                    && contains_ident(line, mode)
-            });
+            let guarded = window
+                .iter()
+                .any(|line| line.contains("if") && contains_ident(line, mode));
             if guarded {
                 continue;
             }
@@ -305,10 +300,7 @@ fn detect_lossy_git_paths(sources: &[SourceFile], scan: &mut CorrectnessScan) {
     );
 }
 
-fn matches_where(
-    sources: &[SourceFile],
-    predicate: impl Fn(&str) -> bool,
-) -> Vec<Match> {
+fn matches_where(sources: &[SourceFile], predicate: impl Fn(&str) -> bool) -> Vec<Match> {
     let mut out = Vec::new();
     for source in sources {
         let Ok(text) = std::str::from_utf8(&source.bytes) else {
