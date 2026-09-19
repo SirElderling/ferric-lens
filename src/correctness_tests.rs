@@ -242,6 +242,22 @@ fn filtered(world: &World) {
 }
 
 #[test]
+fn mutable_clone_binding_rejects_non_bindings_invalid_names_and_non_clones() {
+    assert_eq!(super::mutable_clone_binding("let value = source.clone();"), None);
+    assert_eq!(super::mutable_clone_binding("let mut value;"), None);
+    assert_eq!(super::mutable_clone_binding("let mut = source.clone();"), None);
+    assert_eq!(
+        super::mutable_clone_binding("let mut value-name = source.clone();"),
+        None
+    );
+    assert_eq!(super::mutable_clone_binding("let mut value = source;"), None);
+    assert_eq!(
+        super::mutable_clone_binding("let mut value = source.clone();"),
+        Some("value")
+    );
+}
+
+#[test]
 fn clone_then_mutate_does_not_flag_direct_collection_normalization() {
     let sources = vec![source(
         "src/input.rs",
