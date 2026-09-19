@@ -53,7 +53,8 @@ fn ignores_dependencies_outside_the_observed_module_graph() {
     assert_eq!(summary.modules, 1);
     assert_eq!(summary.explicit_dependency_edges, 0);
     assert!(summary.cycles.is_empty());
-}\n
+}
+
 #[test]
 fn sorts_multiple_cycles_deterministically() {
     let modules = vec![
