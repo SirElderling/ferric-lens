@@ -229,3 +229,10 @@ fn rustc_cfg_command_and_parser_report_spawn_and_utf8_errors() {
         .unwrap_err()
         .contains("not UTF-8"));
 }
+
+
+#[test]
+fn cfg_output_builder_propagates_parse_errors() {
+    let error = HostCfg::from_rustc_output(&[0xff], &[]).unwrap_err();
+    assert!(error.contains("not UTF-8"));
+}
