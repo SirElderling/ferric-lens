@@ -2253,11 +2253,7 @@ fn literal_path_modules_are_discovered_without_incompleteness() {
 #[test]
 fn non_literal_path_modules_remain_explicitly_incomplete() {
     let root = temp_root();
-    fs::write(
-        root.join("src/lib.rs"),
-        "#[path = SOME_PATH] mod view;\n",
-    )
-    .unwrap();
+    fs::write(root.join("src/lib.rs"), "#[path = SOME_PATH] mod view;\n").unwrap();
 
     let mut visited = BTreeSet::new();
     let mut sources = Vec::new();
