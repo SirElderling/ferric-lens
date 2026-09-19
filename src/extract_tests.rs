@@ -1040,7 +1040,10 @@ fn source_line_priority_covers_clone_and_decision_context_classes() {
         super::source_line_priority("clone_call_syntax_sites", "field: self.value.clone(),"),
         -20
     );
-    assert_eq!(super::source_line_priority("decision_sites", "if ready {"), 60);
+    assert_eq!(
+        super::source_line_priority("decision_sites", "if ready {"),
+        60
+    );
     assert_eq!(
         super::source_line_priority("decision_sites", "while ready {"),
         50
