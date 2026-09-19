@@ -1257,7 +1257,7 @@ fn fallback_directory_helpers_propagate_entry_and_metadata_errors() {
     fs::write(&not_directory, "x").unwrap();
     assert!(super::read_directory_paths(&not_directory).is_err());
 
-    let entry_error = std::io::Error::new(std::io::ErrorKind::Other, "entry failed");
+    let entry_error = std::io::Error::other("entry failed");
     let entries: Vec<std::io::Result<fs::DirEntry>> = vec![Err(entry_error)];
     assert!(super::collect_directory_entries(entries, &root).is_err());
 
