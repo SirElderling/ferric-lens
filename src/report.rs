@@ -292,6 +292,31 @@ fn finding_guidance(finding: &Finding) -> FindingGuidance {
             why_care: "Many repository modules depend on this area. A frequently changing shared boundary can increase the amount of code that must be reconsidered or rebuilt after a change.",
             if_ignored: "A broad, unstable dependency boundary can gradually increase change coordination and incremental-build cost. This finding is structural evidence, not a measured compile-time claim.",
         },
+        "correctness.cargo_feature_resolution_without_resolve" => FindingGuidance {
+            title: "Feature-gated code may be analyzed under the wrong configuration",
+            why_care: "The code asks Cargo for metadata without the resolved dependency graph while separately deciding cfg(feature) reachability. Requested feature names are not enough to establish the enabled feature set for every workspace package.",
+            if_ignored: "Ferric Lens can omit production modules that Cargo would compile, include modules for the wrong package configuration, or mark valid code as unresolved.",
+        },
+        "correctness.symbolic_target_identity" => FindingGuidance {
+            title: "Machine configuration identity can collide across host targets",
+            why_care: "A symbolic label such as host is being used in persistent identity or evidence matching even though the actual resolved target triple is available.",
+            if_ignored: "Acceptances or imported evidence can be reused across architectures or operating-system targets whose cfg-dependent code is different.",
+        },
+        "correctness.stdout_mode_unconditional_artifacts" => FindingGuidance {
+            title: "A stdout-only mode still writes files",
+            why_care: "A compact/agent output mode is followed by unconditional artifact writes. Callers reasonably expect stdout-only operation not to create default files in the analyzed repository.",
+            if_ignored: "Automation can unexpectedly mutate or dirty repositories, overwrite files, or require cleanup even when the caller only requested machine-readable stdout.",
+        },
+        "correctness.workspace_manifest_snapshot_gap" => FindingGuidance {
+            title: "The analyzed snapshot can mix different workspace manifest states",
+            why_care: "Workspace member manifests are read during analysis, but the final stability check only covers a narrower Cargo-input set.",
+            if_ignored: "A manifest can change during analysis and Ferric Lens may publish a result assembled from inconsistent repository states.",
+        },
+        "correctness.lossy_git_path_decoding" => FindingGuidance {
+            title: "Distinct repository paths can be silently collapsed",
+            why_care: "Git path bytes are converted with lossy UTF-8 decoding. Invalid byte sequences are replaced instead of preserved or rejected explicitly.",
+            if_ignored: "Rename, history, or path identity can become incorrect for repositories containing non-UTF-8 path names.",
+        },
         "refactor.multi_signal_candidate" => FindingGuidance {
             title: "Possible refactoring opportunity",
             why_care: "Multiple independent signals point to the same module. Corroborating evidence makes it more useful to inspect than a module flagged by only one isolated metric.",
@@ -1023,6 +1048,14 @@ fn metric_label(metric: &str) -> &'static str {
         "clone_call_syntax_sites" => "Clone call sites",
         "reverse_repository_dependents" => "Modules depending on this area",
         "public_items" => "Public items",
+        "cargo_metadata_no_deps_sites" => "Cargo metadata calls without resolve graph",
+        "cfg_feature_resolution_sites" => "Feature cfg resolution sites",
+        "symbolic_target_identity_sites" => "Symbolic target identity sites",
+        "symbolic_target_match_sites" => "Symbolic target comparison sites",
+        "unconditional_output_write_sites" => "Unconditional output writes",
+        "root_only_cargo_input_sites" => "Root-only Cargo input digests",
+        "workspace_manifest_read_sites" => "Workspace manifest reads",
+        "lossy_git_path_decode_sites" => "Lossy Git path decodes",
         _ => "Evidence value",
     }
 }
