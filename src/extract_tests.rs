@@ -430,3 +430,129 @@ fn non_boolean_binary_expressions_do_not_count_as_decisions() {
 
     assert_eq!(metrics.decision_sites, 0);
 }
+
+
+#[test]
+fn extracts_function_type_and_clone_syntax_facts_deterministically() {
+    use crate::model::{FunctionKind, TypeKind};
+
+    let metrics = extract(
+        &source(
+            r#"
+            pub struct PublicType;
+            enum PrivateEnum { A }
+
+            pub fn top_level(value: PublicType) {
+                let _ = value.clone();
+            }
+
+            impl PublicType {
+                pub fn make() -> Self { Self }
+                fn duplicate(&self) {
+                    let _ = self.clone();
+                    let _ = self.clone();
+                }
+            }
+
+            pub trait PublicTrait {
+                fn required(&self);
+                fn defaulted(&self) {}
+            }
+
+            mod nested {
+                pub type Alias = u8;
+                pub fn nested_fn() {}
+            }
+            "#,
+        ),
+        &host(),
+    )
+    .unwrap();
+
+    assert_eq!(metrics.clone_calls, 3);
+    assert!(metrics.functions.iter().any(|fact| {
+        fact.name == "top_level"
+            && fact.kind == FunctionKind::Function
+            && fact.public_declared
+    }));
+    assert!(metrics.functions.iter().any(|fact| {
+        fact.name == "PublicType::make"
+            && fact.kind == FunctionKind::Method
+            && fact.public_declared
+    }));
+    assert!(metrics.functions.iter().any(|fact| {
+        fact.name == "PublicType::duplicate"
+            && fact.kind == FunctionKind::Method
+            && !fact.public_declared
+    }));
+    assert!(metrics.functions.iter().any(|fact| {
+        fact.name == "PublicTrait::required"
+            && fact.kind == FunctionKind::TraitMethod
+            && fact.public_declared
+    }));
+    assert!(metrics
+        .functions
+        .iter()
+        .any(|fact| fact.name == "nested::nested_fn"));
+
+    assert!(metrics.types.iter().any(|fact| {
+        fact.name == "PublicType" && fact.kind == TypeKind::Struct && fact.public_declared
+    }));
+    assert!(metrics.types.iter().any(|fact| {
+        fact.name == "PrivateEnum" && fact.kind == TypeKind::Enum && !fact.public_declared
+    }));
+    assert!(metrics.types.iter().any(|fact| {
+        fact.name == "PublicTrait" && fact.kind == TypeKind::Trait && fact.public_declared
+    }));
+    assert!(metrics
+        .types
+        .iter()
+        .any(|fact| fact.name == "nested::Alias" && fact.kind == TypeKind::TypeAlias));
+
+    let mut function_names = metrics
+        .functions
+        .iter()
+        .map(|fact| fact.name.as_str())
+        .collect::<Vec<_>>();
+    let sorted = {
+        let mut value = function_names.clone();
+        value.sort_unstable();
+        value
+    };
+    assert_eq!(function_names, sorted);
+
+    function_names.dedup();
+    assert_eq!(function_names.len(), metrics.functions.len());
+}
+
+#[test]
+fn cfg_disabled_impl_members_do_not_contribute_item_or_clone_facts() {
+    let metrics = extract(
+        &source(
+            r#"
+            struct Item;
+            impl Item {
+                #[cfg(target_os = "macos")]
+                fn disabled(&self) {
+                    let _ = self.clone();
+                }
+
+                #[cfg(target_os = "linux")]
+                fn enabled(&self) {}
+            }
+            "#,
+        ),
+        &host(),
+    )
+    .unwrap();
+
+    assert_eq!(metrics.clone_calls, 0);
+    assert!(!metrics
+        .functions
+        .iter()
+        .any(|fact| fact.name.ends_with("disabled")));
+    assert!(metrics
+        .functions
+        .iter()
+        .any(|fact| fact.name.ends_with("enabled")));
+}
