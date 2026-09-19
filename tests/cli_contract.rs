@@ -117,8 +117,9 @@ fn analyze_accepts_explicit_profile_and_evidence_options() {
     repo.write(
         "evidence.json",
         &format!(
-            r#"{{"schema_version":1,"producer":{{"name":"fixture","version":"1"}},"source":{{"content_digest":"{}"}},"configuration":{{"target":"host","features":[]}},"observations":[]}}"#,
-            seed.snapshot.content_digest
+            r#"{{"schema_version":1,"producer":{{"name":"fixture","version":"1"}},"source":{{"content_digest":"{}"}},"configuration":{{"target":"{}","features":[]}},"observations":[]}}"#,
+            seed.snapshot.content_digest,
+            seed.profile.resolved_target
         ),
     );
     let json = repo.root.join("result.json");
