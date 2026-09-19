@@ -63,10 +63,7 @@ fn outputs_are_reproducible_for_identical_inputs() {
     let first = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
     let second = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
 
-    assert_eq!(
-        report::json(&first),
-        report::json(&second)
-    );
+    assert_eq!(report::json(&first), report::json(&second));
     assert_eq!(report::html(&first), report::html(&second));
 }
 
