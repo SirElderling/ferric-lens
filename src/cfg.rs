@@ -204,7 +204,6 @@ impl HostCfg {
     }
 }
 
-
 fn run_rustc_cfg(command: &mut Command) -> Result<std::process::Output, String> {
     let output = match command.output() {
         Ok(output) => output,
