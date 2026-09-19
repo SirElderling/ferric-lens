@@ -374,9 +374,7 @@ fn small_population_emits_descriptive_candidates_without_gating() {
 
 #[test]
 fn descriptive_small_population_candidates_require_four_subjects_and_a_unique_maximum() {
-    let mut tiny = (0..3)
-        .map(|index| module(index, 10, 0))
-        .collect::<Vec<_>>();
+    let mut tiny = (0..3).map(|index| module(index, 10, 0)).collect::<Vec<_>>();
     tiny[0].decision_sites = 99;
     tiny[0].clone_calls = 99;
     for module in tiny.iter_mut().skip(1) {
