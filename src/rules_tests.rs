@@ -449,9 +449,9 @@ fn small_population_clear_dependency_hub_remains_an_observation() {
 
 #[test]
 fn unique_max_helper_handles_empty_and_singleton_inputs_without_false_concentration() {
-    assert_eq!(super::unique_max_above_median(&[]), None);
-    assert_eq!(super::unique_max_above_median(&[7]), None);
-    assert_eq!(super::unique_max_above_median(&[1, 2]), None);
+    assert_eq!(super::dominant_unique_max(&[]), None);
+    assert_eq!(super::dominant_unique_max(&[7]), None);
+    assert_eq!(super::dominant_unique_max(&[1, 2]), None);
 }
 
 fn advisory_finding(
