@@ -8,8 +8,8 @@ use std::{
 use super::{
     acquire_inventory, collect_reachable_module, collect_rust_files, collect_target_roots,
     finalize_inventory, inventory_from_metadata, module_path_from_relative, rust_name, Dependency,
-    Metadata, Package, Resolve, ResolveNode, SourceBudget, SourceFile, Target, TargetRoot,
-    WorkspaceAliases, MAX_SNAPSHOT_SOURCE_BYTES,
+    CargoInputEntry, CargoInputSnapshot, Metadata, Package, Resolve, ResolveNode, SourceBudget,
+    SourceFile, Target, TargetRoot, WorkspaceAliases, MAX_SNAPSHOT_SOURCE_BYTES,
 };
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -2084,5 +2084,111 @@ fn workspace_member_manifest_change_invalidates_captured_cargo_snapshot() {
     let error = super::verify_cargo_inputs(&snapshot).unwrap_err();
     assert!(error.contains("crates/member/Cargo.toml changed during analysis"));
 
+    fs::remove_dir_all(root).unwrap();
+}
+
+
+#[test]
+fn cargo_input_label_falls_back_for_paths_outside_repository_root() {
+    let root = temp_root();
+    let outside = root.parent().unwrap().join("outside-Cargo.toml");
+
+    assert_eq!(
+        super::cargo_input_label(&root, &outside),
+        outside.to_string_lossy()
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn cargo_input_reread_errors_are_reported_explicitly() {
+    let root = temp_root();
+    let unreadable_as_file = root.join("Cargo.toml");
+    fs::create_dir_all(&unreadable_as_file).unwrap();
+    let snapshot = CargoInputSnapshot {
+        entries: vec![CargoInputEntry {
+            path: unreadable_as_file,
+            label: "Cargo.toml".into(),
+            bytes: None,
+        }],
+        digest: "fixture".into(),
+    };
+
+    let error = super::verify_cargo_inputs(&snapshot).unwrap_err();
+
+    assert!(error.contains("cannot re-read Cargo input"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn stable_snapshot_reports_source_disappearance_before_publication() {
+    let root = temp_root();
+    fs::write(root.join("Cargo.toml"), "[package]\nname='x'\nversion='0.1.0'\n").unwrap();
+    fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
+    let cargo = super::cargo_input_snapshot(&root, None).unwrap();
+    let source = SourceFile {
+        crate_name: "demo".into(),
+        module_path: String::new(),
+        relative_path: "src/missing.rs".into(),
+        bytes: b"fn missing() {}".to_vec(),
+    };
+
+    let error = super::verify_stable_inputs_snapshot(&root, &[source], &cargo).unwrap_err();
+
+    assert!(error.contains("repository source src/missing.rs changed during analysis"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn target_without_resolve_features_uses_unresolved_profile_cfg() {
+    let root = temp_root();
+    fs::write(
+        root.join("src/lib.rs"),
+        "#[cfg(feature = \"enabled\")]\nmod gated;\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/gated.rs"), "pub fn gated() {}\n").unwrap();
+
+    let target = TargetRoot {
+        id: "demo".into(),
+        import_name: "demo".into(),
+        kind: "lib",
+        source: root.join("src/lib.rs"),
+        package_root: root.clone(),
+        dependencies: Vec::new(),
+        resolved_features: None,
+    };
+    let profile = ProfileContext {
+        public: AnalysisProfile {
+            id: "fixture".into(),
+            target: "host".into(),
+            resolved_target: "x86_64-unknown-linux-gnu".into(),
+            features: vec!["enabled".into()],
+            target_cfg: Vec::new(),
+        },
+        cfg: HostCfg::test_with_features(
+            &["unix", "target_os=\"linux\""],
+            &["enabled"],
+        ),
+    };
+    let mut budget = SourceBudget::default();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+
+    collect_target_roots(
+        &root,
+        vec![target],
+        Some(&profile),
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap();
+
+    assert!(limitations
+        .iter()
+        .any(|detail| detail.contains("unresolved cfg reachability")));
+    assert!(!sources.iter().any(|source| source.module_path == "gated"));
     fs::remove_dir_all(root).unwrap();
 }
