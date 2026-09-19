@@ -34,6 +34,19 @@ struct SnapshotAnalysis {
     parse_failures: usize,
 }
 
+struct AnalysisOps {
+    materialize_baseline: fn(&Path, &str) -> Result<git::TemporaryWorktree, String>,
+    analyze_baseline:
+        fn(&Path, &Path, &profile::ProfileContext) -> Result<SnapshotAnalysis, String>,
+    sample_history: fn(&Path) -> Result<git::HistorySample, String>,
+}
+
+const REAL_OPS: AnalysisOps = AnalysisOps {
+    materialize_baseline: git::materialize_worktree,
+    analyze_baseline: analyze_snapshot,
+    sample_history: git::sample_history,
+};
+
 pub fn analyze(root: &Path) -> Result<AnalysisResult, String> {
     analyze_internal(root, None, true, None, None, &[])
 }
@@ -80,6 +93,26 @@ fn analyze_internal(
     evidence_path: Option<&Path>,
     target: Option<&str>,
     features: &[String],
+) -> Result<AnalysisResult, String> {
+    analyze_internal_with_ops(
+        root,
+        base,
+        include_history,
+        evidence_path,
+        target,
+        features,
+        &REAL_OPS,
+    )
+}
+
+fn analyze_internal_with_ops(
+    root: &Path,
+    base: Option<&str>,
+    include_history: bool,
+    evidence_path: Option<&Path>,
+    target: Option<&str>,
+    features: &[String],
+    ops: &AnalysisOps,
 ) -> Result<AnalysisResult, String> {
     let profile = profile::ProfileContext::resolve(target, features)?;
     let mut current = analyze_snapshot(root, root, &profile)?;
@@ -153,7 +186,8 @@ fn analyze_internal(
         }
     };
 
-    let baseline_worktree = match git::materialize_worktree(root, &baseline_selection.merge_base) {
+    let baseline_worktree =
+        match (ops.materialize_baseline)(root, &baseline_selection.merge_base) {
         Ok(worktree) => worktree,
         Err(error) => {
             capabilities.push(Capability {
@@ -181,7 +215,8 @@ fn analyze_internal(
         }
     };
 
-    let baseline_snapshot = match analyze_snapshot(baseline_worktree.path(), root, &profile) {
+    let baseline_snapshot =
+        match (ops.analyze_baseline)(baseline_worktree.path(), root, &profile) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             capabilities.push(Capability {
@@ -318,7 +353,7 @@ fn analyze_internal(
             });
             None
         } else {
-            match git::sample_history(root) {
+            match (ops.sample_history)(root) {
                 Ok(sample) => {
                     let summary = history::enrich(&mut current.modules, &sample, &candidates);
                     capabilities.push(Capability {
