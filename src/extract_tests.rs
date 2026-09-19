@@ -405,3 +405,12 @@
 
         assert!(modules[0].local_dependency_modules.is_empty());
     }
+
+
+    #[test]
+    fn unsupported_syn_item_variants_have_no_attributes_or_public_surface() {
+        let item = syn::Item::Verbatim(quote::quote!(unsupported));
+
+        assert!(super::item_attributes(&item).is_empty());
+        assert!(!super::is_public(&item));
+    }
