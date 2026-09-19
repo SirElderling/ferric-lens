@@ -1541,6 +1541,181 @@ mod tests {
     }
 
     #[test]
+    fn guidance_helpers_cover_supported_families_labels_paths_and_limits() {
+        use crate::model::{
+            Capability, CapabilityStatus, DeltaStatus, EvidenceClass, Finding, GateVerdict,
+            Priority, SourceContext,
+        };
+
+        let mut finding = Finding {
+            fingerprint: "f".into(),
+            rule: String::new(),
+            subject: "demo::missing".into(),
+            identity: "demo::missing".into(),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Candidate,
+            priority: Priority::Observe,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: String::new(),
+            direction: "inspect".into(),
+            evidence: Vec::new(),
+        };
+
+        for (rule, expected_title) in [
+            (
+                "structure.small_population_decision_concentration",
+                "Complex logic is concentrated here",
+            ),
+            (
+                "runtime.clone_syntax_outlier",
+                "Repeated copying may be worth measuring",
+            ),
+            (
+                "build.rebuild_exposure_candidate",
+                "Changes here may affect many parts of the repository",
+            ),
+            (
+                "refactor.multi_signal_candidate",
+                "Possible refactoring opportunity",
+            ),
+            ("unknown.rule", "This area is worth reviewing"),
+        ] {
+            finding.rule = rule.into();
+            assert_eq!(super::finding_guidance(&finding).title, expected_title);
+        }
+
+        assert_eq!(super::metric_label("decision_sites"), "Decision points");
+        assert_eq!(
+            super::metric_label("local_dependency_modules"),
+            "Repository dependencies"
+        );
+        assert_eq!(
+            super::metric_label("clone_call_syntax_sites"),
+            "Clone call sites"
+        );
+        assert_eq!(
+            super::metric_label("reverse_repository_dependents"),
+            "Modules depending on this area"
+        );
+        assert_eq!(super::metric_label("public_items"), "Public items");
+        assert_eq!(super::metric_label("other"), "Evidence value");
+
+        assert_eq!(
+            super::capability_status_label(&CapabilityStatus::Complete),
+            "complete"
+        );
+        assert_eq!(
+            super::capability_status_label(&CapabilityStatus::Partial),
+            "partial"
+        );
+        assert_eq!(
+            super::capability_status_label(&CapabilityStatus::Unavailable),
+            "unavailable"
+        );
+        assert_eq!(super::verdict_label(&GateVerdict::Pass), "PASS");
+        assert_eq!(
+            super::verdict_label(&GateVerdict::Regression),
+            "REGRESSION"
+        );
+        assert_eq!(
+            super::verdict_label(&GateVerdict::Inconclusive),
+            "INCONCLUSIVE"
+        );
+        assert_eq!(super::cli_verdict_label(&GateVerdict::Pass), "Pass");
+        assert_eq!(
+            super::cli_verdict_label(&GateVerdict::Regression),
+            "Regression"
+        );
+        assert_eq!(
+            super::cli_verdict_label(&GateVerdict::Inconclusive),
+            "Inconclusive"
+        );
+
+        let contexts = vec![SourceContext {
+            subject: "demo::missing".into(),
+            metric: "decision_sites".into(),
+            path: "src/context.rs".into(),
+            start_line: 1,
+            end_line: 1,
+            excerpt: "if value {}".into(),
+            excerpt_truncated: false,
+        }];
+        assert_eq!(
+            super::finding_path(&finding, &[], &contexts),
+            "src/context.rs"
+        );
+        assert_eq!(
+            super::finding_path(&finding, &[], &[]),
+            "demo::missing"
+        );
+
+        let mut result = minimal_result();
+        result.capabilities = vec![
+            Capability {
+                name: "complete".into(),
+                status: CapabilityStatus::Complete,
+                detail: None,
+            },
+            Capability {
+                name: "partial".into(),
+                status: CapabilityStatus::Partial,
+                detail: Some("limited".into()),
+            },
+            Capability {
+                name: "unavailable".into(),
+                status: CapabilityStatus::Unavailable,
+                detail: None,
+            },
+        ];
+        let value: serde_json::Value =
+            serde_json::from_str(&super::ai_json(&result)).unwrap();
+        assert_eq!(value["analysis_limits"].as_array().unwrap().len(), 2);
+        assert_eq!(value["analysis_limits"][0]["status"], "partial");
+        assert_eq!(value["analysis_limits"][1]["status"], "unavailable");
+    }
+
+    #[test]
+    fn cli_summary_bounds_visible_findings_and_reports_limit_count() {
+        use crate::model::{
+            Capability, CapabilityStatus, DeltaStatus, EvidenceClass, Finding, Priority,
+        };
+
+        let mut result = minimal_result();
+        result.capabilities = vec![Capability {
+            name: "partial".into(),
+            status: CapabilityStatus::Partial,
+            detail: Some("limited".into()),
+        }];
+        for index in 0..6 {
+            result.findings.push(Finding {
+                fingerprint: format!("finding-{index}"),
+                rule: "refactor.multi_signal_candidate".into(),
+                subject: format!("demo::m{index}"),
+                identity: format!("demo::m{index}"),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::Investigate,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "candidate".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            });
+        }
+
+        let rendered = super::cli_summary(&result);
+
+        assert!(rendered.contains("6 areas worth reviewing"));
+        assert!(rendered.contains("1 additional active finding"));
+        assert!(rendered.contains("1 capability limitation"));
+    }
+
+    #[test]
     fn write_rejects_paths_without_file_names() {
         let error = super::write(std::path::Path::new("/"), "content").unwrap_err();
         assert!(error.contains("output path has no file name"));
