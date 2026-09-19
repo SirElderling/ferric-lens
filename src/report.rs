@@ -1348,6 +1348,63 @@ mod tests {
     }
 
     #[test]
+    fn source_evidence_renders_ranges_truncation_and_escaped_excerpt() {
+        use crate::model::{
+            DeltaStatus, Evidence, EvidenceClass, Finding, Priority, SourceContext,
+        };
+
+        let mut result = minimal_result();
+        result.findings = vec![Finding {
+            fingerprint: "source-context".into(),
+            rule: "structure.test".into(),
+            subject: "demo::engine".into(),
+            identity: "demo::engine".into(),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Strong,
+            priority: Priority::Investigate,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "source context".into(),
+            direction: "inspect".into(),
+            evidence: vec![Evidence {
+                metric: "decision_sites".into(),
+                value: 2,
+                reference: 1,
+                population: 20,
+                baseline: None,
+                material_delta: None,
+            }],
+        }];
+        result.source_contexts = vec![SourceContext {
+            subject: "demo::engine".into(),
+            metric: "decision_sites".into(),
+            path: "src/engine.rs".into(),
+            start_line: 7,
+            end_line: 9,
+            excerpt: "<unsafe & excerpt>".into(),
+            excerpt_truncated: true,
+        }];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("src/engine.rs:7-9"));
+        assert!(rendered.contains("&lt;unsafe &amp; excerpt&gt;"));
+        assert!(rendered.contains("Excerpt bounded for report size"));
+        assert_eq!(
+            super::source_location_label(&result.source_contexts[0]),
+            "src/engine.rs:7-9"
+        );
+
+        result.source_contexts[0].end_line = 7;
+        assert_eq!(
+            super::source_location_label(&result.source_contexts[0]),
+            "src/engine.rs:7"
+        );
+    }
+
+    #[test]
     fn write_reports_parent_creation_failure() {
         use std::fs;
 
