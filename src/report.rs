@@ -723,6 +723,42 @@ mod tests {
         assert!(!rendered.contains("instructions = 1 count —"));
     }
 
+
+    #[test]
+    fn separates_structural_runtime_and_build_advisories() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        let mut result = minimal_result();
+        for rule in [
+            "structure.current_coupled_outlier",
+            "runtime.clone_syntax_outlier",
+            "build.rebuild_exposure_candidate",
+        ] {
+            result.findings.push(Finding {
+                fingerprint: rule.into(),
+                rule: rule.into(),
+                subject: "demo::m0".into(),
+                identity: "demo::m0".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "candidate".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            });
+        }
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("<h2>Structural advisories</h2>"));
+        assert!(rendered.contains("<h2>Runtime-risk candidates</h2>"));
+        assert!(rendered.contains("<h2>Build-efficiency candidates</h2>"));
+    }
+
     #[test]
     fn write_reports_parent_creation_failure() {
         use std::fs;
