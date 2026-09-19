@@ -1116,13 +1116,11 @@ fn metadata_helpers_report_spawn_parse_manifest_and_io_errors() {
     assert!(super::manifest_parent("/").is_err());
 
     let error = std::io::Error::new(std::io::ErrorKind::Other, "fixture");
-    assert!(super::io_with_path::<()>(
-        Err(error),
-        "inspect",
-        std::path::Path::new("fixture")
-    )
-    .unwrap_err()
-    .contains("cannot inspect"));
+    assert!(
+        super::io_with_path::<()>(Err(error), "inspect", std::path::Path::new("fixture"))
+            .unwrap_err()
+            .contains("cannot inspect")
+    );
     fs::remove_dir_all(root).unwrap();
 }
 
