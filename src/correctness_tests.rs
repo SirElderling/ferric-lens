@@ -287,7 +287,6 @@ fn generated() {
     assert!(scan(&sources).findings.is_empty());
 }
 
-
 #[test]
 fn correctness_detectors_are_not_tied_to_ferric_lens_variable_names() {
     let sources = vec![
