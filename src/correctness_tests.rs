@@ -239,3 +239,34 @@ Analyze { ai, json } => {
         .iter()
         .any(|finding| finding.rule == "correctness.stdout_mode_unconditional_artifacts"));
 }
+
+#[test]
+fn multiple_correctness_findings_are_sorted_deterministically() {
+    let sources = vec![
+        source(
+            "src/input.rs",
+            r#"
+command.args(["metadata", "--no-deps"]);
+fn cargo_input_digest() {
+    for name in ["Cargo.toml", "Cargo.lock"] {}
+}
+fn cargo_resolution_identity(package: &Package) {
+    let manifest = PathBuf::from(&package.manifest_path);
+}
+fn verify_stable_inputs() {}
+"#,
+        ),
+        source(
+            "src/cfg.rs",
+            r#"if key == "feature" { explicit_features.contains("fast"); }"#,
+        ),
+    ];
+
+    let scan = scan(&sources);
+
+    assert!(scan.findings.len() >= 2);
+    assert!(scan
+        .findings
+        .windows(2)
+        .all(|pair| (&pair[0].rule, &pair[0].subject) <= (&pair[1].rule, &pair[1].subject)));
+}
