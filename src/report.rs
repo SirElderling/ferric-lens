@@ -552,7 +552,7 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
         html.push_str(&escape(&module.path));
         html.push_str("</code><br><small>");
         html.push_str(&escape(&subject));
-        html.push_str("</small></span><span class="explorer-status">");
+        html.push_str(r#"</small></span><span class="explorer-status">"#);
         html.push_str(&escape(&status));
         html.push_str("</span></span></summary>");
 
@@ -587,10 +587,10 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
         html.push_str("</div>");
 
         if !module.gate_complete {
-            html.push_str("<p class="muted">Some gate-relevant evidence for this module is incomplete.</p>");
+            html.push_str(r#"<p class="muted">Some gate-relevant evidence for this module is incomplete.</p>"#);
         }
         if !module.local_dependency_modules.is_empty() {
-            html.push_str("<details class="explorer-detail"><summary>Dependencies (");
+            html.push_str(r#"<details class="explorer-detail"><summary>Dependencies ("#);
             html.push_str(&module.local_dependency_modules.len().to_string());
             html.push_str(")</summary><ul>");
             for dependency in &module.local_dependency_modules {
@@ -601,7 +601,7 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
             html.push_str("</ul></details>");
         }
         if !module.functions.is_empty() {
-            html.push_str("<details class="explorer-detail"><summary>Functions (");
+            html.push_str(r#"<details class="explorer-detail"><summary>Functions ("#);
             html.push_str(&module.functions.len().to_string());
             html.push_str(")</summary><ul>");
             for function in &module.functions {
@@ -616,7 +616,7 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
             html.push_str("</ul></details>");
         }
         if !module.types.is_empty() {
-            html.push_str("<details class="explorer-detail"><summary>Types (");
+            html.push_str(r#"<details class="explorer-detail"><summary>Types ("#);
             html.push_str(&module.types.len().to_string());
             html.push_str(")</summary><ul>");
             for item_type in &module.types {
@@ -631,7 +631,7 @@ fn render_repository_explorer(result: &AnalysisResult) -> String {
             html.push_str("</ul></details>");
         }
         if let Some(history) = &module.history {
-            html.push_str("<details class="explorer-detail"><summary>History context</summary><p>");
+            html.push_str(r#"<details class="explorer-detail"><summary>History context</summary><p>"#);
             html.push_str(&escape(&format!(
                 "Changed in {} of {} sampled non-merge commits.",
                 history.change_commits, history.sampled_commits
@@ -839,7 +839,7 @@ fn render_findings(
                 html.push_str(metric_label(&evidence.metric));
                 html.push_str(":</strong> ");
                 html.push_str(&evidence.value.to_string());
-                html.push_str(" <span class="muted">(comparison reference ");
+                html.push_str(r#" <span class="muted">(comparison reference "#);
                 html.push_str(&evidence.reference.to_string());
                 html.push_str(" across ");
                 html.push_str(&evidence.population.to_string());
@@ -864,18 +864,18 @@ fn render_findings(
             let anchor = anchor_id("module", &finding.subject);
             html.push_str(r#"<p class="location"><strong>Affected area:</strong> <code>"#);
             html.push_str(&escape(&module.path));
-            html.push_str("</code> · <a href="#");
+            html.push_str(r##"</code> · <a href="#"##);
             html.push_str(&anchor);
-            html.push_str("">View in repository explorer</a></p>");
+            html.push_str(r#"">View in repository explorer</a></p>"#);
         }
 
         let contexts = contexts_for_finding(finding, source_contexts);
         if !contexts.is_empty() {
-            html.push_str("<details class="source-evidence"><summary>Relevant source evidence (");
+            html.push_str(r#"<details class="source-evidence"><summary>Relevant source evidence ("#);
             html.push_str(&contexts.len().to_string());
             html.push_str(")</summary>");
             for context in contexts {
-                html.push_str("<div class="source-context"><p><strong>");
+                html.push_str(r#"<div class="source-context"><p><strong>"#);
                 html.push_str(metric_label(&context.metric));
                 html.push_str("</strong> · <code>");
                 html.push_str(&escape(&source_location_label(context)));
