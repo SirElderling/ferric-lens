@@ -806,6 +806,52 @@ mod tests {
     }
 
     #[test]
+    fn codebase_map_renders_dependency_function_and_type_hierarchy() {
+        use crate::model::{
+            FunctionFact, FunctionKind, ModuleMetrics, TypeFact, TypeKind,
+        };
+
+        let mut result = minimal_result();
+        result.modules = vec![ModuleMetrics {
+            crate_name: "demo".into(),
+            module_path: "engine".into(),
+            path: "src/engine.rs".into(),
+            lines: 10,
+            decision_sites: 1,
+            public_items: 2,
+            clone_calls: 1,
+            functions: vec![FunctionFact {
+                name: "engine::run<&>".into(),
+                kind: FunctionKind::Function,
+                public_declared: true,
+            }],
+            types: vec![TypeFact {
+                name: "engine::State<&>".into(),
+                kind: TypeKind::Struct,
+                public_declared: false,
+            }],
+            explicit_imports: Vec::new(),
+            local_dependency_modules: vec!["demo::model<&>".into()],
+            structure_digest: "engine".into(),
+            parse_complete: true,
+            gate_complete: true,
+            limitation: None,
+            history: None,
+        }];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("<summary>Dependencies (1)</summary>"));
+        assert!(rendered.contains("demo::model&lt;&amp;&gt;"));
+        assert!(rendered.contains("<summary>Functions (1)</summary>"));
+        assert!(rendered.contains("engine::run&lt;&amp;&gt;"));
+        assert!(rendered.contains("function · public"));
+        assert!(rendered.contains("<summary>Types (1)</summary>"));
+        assert!(rendered.contains("engine::State&lt;&amp;&gt;"));
+        assert!(rendered.contains("struct · private"));
+    }
+
+    #[test]
     fn write_reports_parent_creation_failure() {
         use std::fs;
 
