@@ -369,9 +369,11 @@ mod tests {
         assert!(super::atomic_write(&destination, b"x")
             .unwrap_err()
             .contains("cannot replace"));
-        assert!(fs::read_dir(&root)
+        assert!(fs::read_dir(&root).unwrap().all(|entry| !entry
             .unwrap()
-            .all(|entry| !entry.unwrap().file_name().to_string_lossy().starts_with(".raw.tmp-")));
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".raw.tmp-")));
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -382,9 +384,14 @@ mod tests {
         let mut second = source("src/other.rs");
         second.bytes.push(b' ');
 
-        assert_eq!(super::key(&first, "profile"), super::key(&source("moved.rs"), "profile"));
-        assert_ne!(super::key(&first, "profile"), super::key(&second, "profile"));
+        assert_eq!(
+            super::key(&first, "profile"),
+            super::key(&source("moved.rs"), "profile")
+        );
+        assert_ne!(
+            super::key(&first, "profile"),
+            super::key(&second, "profile")
+        );
         assert_ne!(super::key(&first, "profile"), super::key(&first, "other"));
     }
-
 }
