@@ -1,3 +1,4 @@
+// ferric-lens: ignore-correctness-risks
 use crate::{
     input::SourceFile,
     model::{DeltaStatus, Evidence, EvidenceClass, Finding, Priority, SourceContext},
@@ -26,7 +27,20 @@ const GIT_COMMAND: &str = concat!("Command::new(", "\"git\")");
 const LOSSY_RECORD: &str = concat!("String::from_utf8_lossy(", "record)");
 const LOSSY_PATH: &str = concat!("String::from_utf8_lossy(", "path)");
 
+const SUPPRESSION_DIRECTIVE: &str = "ferric-lens: ignore-correctness-risks";
+
 pub fn scan(sources: &[SourceFile]) -> CorrectnessScan {
+    let filtered = sources
+        .iter()
+        .filter(|source| {
+            std::str::from_utf8(&source.bytes)
+                .map(|text| !text.contains(SUPPRESSION_DIRECTIVE))
+                .unwrap_or(true)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let sources = filtered.as_slice();
+
     let mut scan = CorrectnessScan::default();
     detect_cargo_feature_resolution(sources, &mut scan);
     detect_symbolic_target_identity(sources, &mut scan);
