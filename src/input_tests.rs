@@ -1353,3 +1353,123 @@ fn canonical_module_and_directory_path_helpers_propagate_supplied_errors() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn auxiliary_target_summary_classifies_non_production_target_kinds() {
+    let root = temp_root();
+    let manifest = root.join("Cargo.toml");
+    fs::write(&manifest, "[package]\nname='demo'\nversion='0.1.0'\n").unwrap();
+
+    let metadata = Metadata {
+        packages: vec![Package {
+            name: "demo".into(),
+            id: "demo-id".into(),
+            manifest_path: manifest.to_string_lossy().into_owned(),
+            targets: vec![
+                Target { name: "demo".into(), kind: vec!["lib".into()], src_path: root.join("src/lib.rs").to_string_lossy().into_owned() },
+                Target { name: "integration".into(), kind: vec!["test".into()], src_path: root.join("tests/integration.rs").to_string_lossy().into_owned() },
+                Target { name: "bench".into(), kind: vec!["bench".into()], src_path: root.join("benches/bench.rs").to_string_lossy().into_owned() },
+                Target { name: "example".into(), kind: vec!["example".into()], src_path: root.join("examples/example.rs").to_string_lossy().into_owned() },
+                Target { name: "build-script-build".into(), kind: vec!["custom-build".into()], src_path: root.join("build.rs").to_string_lossy().into_owned() },
+                Target { name: "macro".into(), kind: vec!["proc-macro".into()], src_path: root.join("src/macro.rs").to_string_lossy().into_owned() },
+            ],
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec!["demo-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+
+    let summary = super::auxiliary_target_summary(&metadata);
+
+    assert_eq!(summary.tests, 1);
+    assert_eq!(summary.benches, 1);
+    assert_eq!(summary.examples, 1);
+    assert_eq!(summary.build_scripts, 1);
+    assert_eq!(summary.proc_macros, 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn cargo_resolution_identity_is_checkout_relative_and_tracks_lockfile_changes() {
+    fn fixture(root: &PathBuf) -> Metadata {
+        let manifest = root.join("Cargo.toml");
+        fs::write(
+            &manifest,
+            "[package]\nname='demo'\nversion='0.1.0'\nedition='2021'\n",
+        )
+        .unwrap();
+        fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
+        fs::write(root.join("src/lib.rs"), "pub fn stable() {}\n").unwrap();
+        Metadata {
+            packages: vec![Package {
+                name: "demo".into(),
+                id: "demo 0.1.0 (path+file:///checkout)".into(),
+                manifest_path: manifest.to_string_lossy().into_owned(),
+                targets: vec![Target {
+                    name: "demo".into(),
+                    kind: vec!["lib".into()],
+                    src_path: root.join("src/lib.rs").to_string_lossy().into_owned(),
+                }],
+                dependencies: Vec::new(),
+            }],
+            workspace_members: vec!["demo 0.1.0 (path+file:///checkout)".into()],
+            workspace_root: root.to_string_lossy().into_owned(),
+        }
+    }
+
+    let left = temp_root();
+    let right = temp_root();
+    let left_metadata = fixture(&left);
+    let right_metadata = fixture(&right);
+
+    let left_id = super::cargo_resolution_identity(&left, &left_metadata).unwrap();
+    let right_id = super::cargo_resolution_identity(&right, &right_metadata).unwrap();
+    assert_eq!(left_id, right_id);
+
+    fs::write(right.join("Cargo.lock"), "version = 4\n# changed\n").unwrap();
+    let changed = super::cargo_resolution_identity(&right, &right_metadata).unwrap();
+    assert_ne!(left_id, changed);
+
+    fs::remove_dir_all(left).unwrap();
+    fs::remove_dir_all(right).unwrap();
+}
+
+#[test]
+fn stability_verification_detects_source_and_cargo_input_changes() {
+    let root = temp_root();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    fs::write(root.join("Cargo.lock"), "version = 4\n").unwrap();
+    fs::write(root.join("src/lib.rs"), "pub fn stable() {}\n").unwrap();
+
+    let source = super::SourceFile {
+        crate_name: "demo".into(),
+        module_path: String::new(),
+        relative_path: "src/lib.rs".into(),
+        bytes: fs::read(root.join("src/lib.rs")).unwrap(),
+    };
+    let cargo_digest = super::cargo_input_digest(&root).unwrap();
+
+    super::verify_stable_inputs(&root, std::slice::from_ref(&source), &cargo_digest).unwrap();
+
+    fs::write(root.join("src/lib.rs"), "pub fn changed() {}\n").unwrap();
+    assert!(super::verify_stable_inputs(
+        &root,
+        std::slice::from_ref(&source),
+        &cargo_digest
+    )
+    .unwrap_err()
+    .contains("changed during analysis"));
+
+    fs::write(root.join("src/lib.rs"), &source.bytes).unwrap();
+    fs::write(root.join("Cargo.lock"), "version = 4\n# changed\n").unwrap();
+    assert!(super::verify_stable_inputs(&root, &[source], &cargo_digest)
+        .unwrap_err()
+        .contains("Cargo inputs changed during analysis"));
+
+    fs::remove_dir_all(root).unwrap();
+}
