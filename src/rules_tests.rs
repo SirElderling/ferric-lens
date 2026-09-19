@@ -304,25 +304,16 @@ fn finding_sort_orders_gates_first_then_rule_and_subject() {
 }
 
 #[test]
-fn runtime_clone_syntax_outlier_is_candidate_only() {
+fn raw_clone_frequency_alone_does_not_emit_a_runtime_finding() {
     let mut modules = (0..20).map(|index| module(index, 0, 0)).collect::<Vec<_>>();
     for module in &mut modules {
         module.clone_calls = 1;
     }
-    modules[0].clone_calls = 7;
+    modules[0].clone_calls = 99;
 
-    let findings = current_snapshot_findings(&modules);
-    let finding = findings
+    assert!(!current_snapshot_findings(&modules)
         .iter()
-        .find(|finding| finding.rule == "runtime.clone_syntax_outlier")
-        .expect("runtime candidate");
-
-    assert_eq!(finding.subject, "demo::m0");
-    assert_eq!(finding.evidence_class, EvidenceClass::Candidate);
-    assert_eq!(finding.priority, Priority::Observe);
-    assert!(!finding.gate);
-    assert!(finding.summary.contains(".clone()"));
-    assert!(finding.summary.contains("does not establish allocation"));
+        .any(|finding| finding.rule.starts_with("runtime.clone")));
 }
 
 #[test]
@@ -361,7 +352,6 @@ fn small_population_emits_descriptive_candidates_without_gating() {
 
     for rule in [
         "structure.small_population_decision_concentration",
-        "runtime.small_population_clone_concentration",
         "build.small_population_rebuild_concentration",
     ] {
         let finding = findings
@@ -395,10 +385,9 @@ fn descriptive_small_population_candidates_require_four_subjects_and_a_unique_ma
         })
         .collect::<Vec<_>>();
     let findings = current_snapshot_findings(&tied);
-    assert!(!findings.iter().any(|finding| {
-        finding.rule == "structure.small_population_decision_concentration"
-            || finding.rule == "runtime.small_population_clone_concentration"
-    }));
+    assert!(!findings
+        .iter()
+        .any(|finding| finding.rule == "structure.small_population_decision_concentration"));
 }
 
 #[test]
@@ -417,10 +406,9 @@ fn small_population_near_maxima_do_not_create_false_concentration_alerts() {
 
     let findings = current_snapshot_findings(&modules);
 
-    assert!(!findings.iter().any(|finding| {
-        finding.rule == "structure.small_population_decision_concentration"
-            || finding.rule == "runtime.small_population_clone_concentration"
-    }));
+    assert!(!findings
+        .iter()
+        .any(|finding| finding.rule == "structure.small_population_decision_concentration"));
 }
 
 #[test]
