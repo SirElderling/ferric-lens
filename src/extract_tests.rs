@@ -608,7 +608,6 @@ fn non_clone_method_calls_do_not_increment_clone_syntax_count() {
     assert_eq!(metrics.clone_calls, 0);
 }
 
-
 static CONTEXT_TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn context_root(name: &str) -> std::path::PathBuf {
@@ -741,7 +740,9 @@ fn source_contexts_cover_decisions_clones_local_and_reverse_dependencies() {
             && context.path == "src/caller.rs"
             && context.start_line == 1
     }));
-    assert!(!contexts.iter().any(|context| context.metric == "public_items"));
+    assert!(!contexts
+        .iter()
+        .any(|context| context.metric == "public_items"));
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -756,10 +757,7 @@ fn source_contexts_ignore_globs_external_imports_and_missing_subjects() {
     engine.local_dependency_modules = vec!["demo::target".into()];
     let target = context_module("target", "src/target.rs", "");
     let modules = vec![engine, target];
-    let digests = BTreeMap::from([(
-        "src/engine.rs".into(),
-        source_digest(text.as_bytes()),
-    )]);
+    let digests = BTreeMap::from([("src/engine.rs".into(), source_digest(text.as_bytes()))]);
     let findings = vec![
         context_finding("demo::engine", &["local_dependency_modules"]),
         context_finding("demo::missing", &["decision_sites"]),
@@ -840,10 +838,7 @@ fn source_contexts_detect_missing_digest_changed_missing_invalid_and_malformed_s
     assert!(error.contains("cannot read"));
 
     fs::write(root.join("src/engine.rs"), [0xff]).unwrap();
-    let digests = BTreeMap::from([(
-        "src/engine.rs".into(),
-        source_digest(&[0xff]),
-    )]);
+    let digests = BTreeMap::from([("src/engine.rs".into(), source_digest(&[0xff]))]);
     let error = super::source_contexts_for_findings(
         &root,
         std::slice::from_ref(&module),
@@ -857,10 +852,7 @@ fn source_contexts_detect_missing_digest_changed_missing_invalid_and_malformed_s
 
     let malformed = b"fn {";
     fs::write(root.join("src/engine.rs"), malformed).unwrap();
-    let digests = BTreeMap::from([(
-        "src/engine.rs".into(),
-        source_digest(malformed),
-    )]);
+    let digests = BTreeMap::from([("src/engine.rs".into(), source_digest(malformed))]);
     let error = super::source_contexts_for_findings(
         &root,
         &[module],
