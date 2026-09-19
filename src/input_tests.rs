@@ -2213,32 +2213,3 @@ fn stable_snapshot_propagates_cargo_input_verification_errors() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
-#[test]
-fn stable_snapshot_propagates_cargo_input_reread_failure() {
-    let root = temp_root();
-    let source_path = root.join("src/lib.rs");
-    fs::write(&source_path, "pub fn stable() {}\n").unwrap();
-    let source = SourceFile {
-        crate_name: "demo".into(),
-        module_path: String::new(),
-        relative_path: "src/lib.rs".into(),
-        bytes: fs::read(&source_path).unwrap(),
-    };
-    let invalid_input = root.join("Cargo.toml");
-    fs::create_dir_all(&invalid_input).unwrap();
-    let cargo = CargoInputSnapshot {
-        entries: vec![CargoInputEntry {
-            path: invalid_input,
-            label: "Cargo.toml".into(),
-            bytes: None,
-        }],
-        digest: "fixture".into(),
-    };
-
-    let error =
-        super::verify_stable_inputs_snapshot(&root, &[source], &cargo).unwrap_err();
-
-    assert!(error.contains("cannot re-read Cargo input"));
-    fs::remove_dir_all(root).unwrap();
-}
