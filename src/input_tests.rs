@@ -1815,3 +1815,31 @@ fn stability_verification_reports_source_disappearance() {
     assert!(error.contains("changed during analysis"));
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn cargo_resolution_identity_propagates_cargo_input_read_failure() {
+    let root = temp_root();
+    fs::create_dir(root.join("Cargo.toml")).unwrap();
+    let metadata = Metadata {
+        packages: Vec::new(),
+        workspace_members: Vec::new(),
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+
+    let error = super::cargo_resolution_identity(&root, &metadata).unwrap_err();
+
+    assert!(error.contains("cannot read Cargo input"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn stability_verification_propagates_cargo_input_read_failure() {
+    let root = temp_root();
+    fs::create_dir(root.join("Cargo.toml")).unwrap();
+
+    let error = super::verify_stable_inputs(&root, &[], "expected").unwrap_err();
+
+    assert!(error.contains("cannot read Cargo input"));
+    fs::remove_dir_all(root).unwrap();
+}
