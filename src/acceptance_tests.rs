@@ -213,7 +213,8 @@ fn atomic_write_reports_invalid_parent_and_replace_errors() {
         .contains("cannot replace"));
 
     fs::remove_dir_all(root).unwrap();
-}\n
+}
+
 #[test]
 fn atomic_write_reports_parent_creation_failure() {
     let root = temp_root();
