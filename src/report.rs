@@ -686,4 +686,48 @@ mod tests {
         assert!(!rendered.contains("Sample truncated"));
         assert!(rendered.matches("<details><summary><strong>").count() >= 2);
     }
+
+    #[test]
+    fn write_reports_parent_creation_failure() {
+        use std::fs;
+
+        let root = std::env::temp_dir().join(format!(
+            "ferric-lens-report-parent-error-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let blocker = root.join("blocker");
+        fs::write(&blocker, "file").unwrap();
+
+        let error = super::write(&blocker.join("report.json"), "x").unwrap_err();
+
+        assert!(error.contains("cannot create"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_reports_temporary_write_failure() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let root = std::env::temp_dir().join(format!(
+            "ferric-lens-report-write-error-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let mut permissions = fs::metadata(&root).unwrap().permissions();
+        permissions.set_mode(0o555);
+        fs::set_permissions(&root, permissions).unwrap();
+
+        let result = super::write(&root.join("report.json"), "x");
+
+        let mut permissions = fs::metadata(&root).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&root, permissions).unwrap();
+        assert!(result.unwrap_err().contains("cannot write"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
 }
