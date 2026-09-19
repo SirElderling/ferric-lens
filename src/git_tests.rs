@@ -97,6 +97,24 @@ fn parses_nul_delimited_history_records() {
     assert_eq!(sample.commits[1].paths, ["src/a.rs"]);
 }
 
+
+#[test]
+fn history_strips_only_git_separator_newline_from_first_path() {
+    let first = "1".repeat(40);
+    let second = "2".repeat(40);
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"\0\0");
+    bytes.extend_from_slice(first.as_bytes());
+    bytes.extend_from_slice(b"\0\nsrc/a.rs\0src/b.rs\0\0\0");
+    bytes.extend_from_slice(second.as_bytes());
+    bytes.extend_from_slice(b"\0\n\nleading-newline.rs\0");
+
+    let sample = parse_history(&bytes).unwrap();
+
+    assert_eq!(sample.commits[0].paths, ["src/a.rs", "src/b.rs"]);
+    assert_eq!(sample.commits[1].paths, ["\nleading-newline.rs"]);
+}
+
 #[test]
 fn samples_real_checkout_when_git_metadata_is_available() {
     if !Path::new(".git").exists() {
