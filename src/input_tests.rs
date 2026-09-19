@@ -1151,3 +1151,18 @@ fn reachable_module_propagates_directory_read_errors() {
     assert!(error.contains("cannot read"));
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn directory_entry_collection_maps_iterator_errors() {
+    let root = temp_root();
+    let entries = std::iter::once(Err::<fs::DirEntry, _>(std::io::Error::other(
+        "fixture directory entry failure",
+    )));
+
+    let error = super::collect_directory_entries(entries, &root).unwrap_err();
+
+    assert!(error.contains("read directory entry"));
+    assert!(error.contains("fixture directory entry failure"));
+    fs::remove_dir_all(root).unwrap();
+}
