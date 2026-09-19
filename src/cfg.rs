@@ -399,7 +399,10 @@ mod tests {
         let malformed: syn::Meta = syn::parse_str("all(@)").unwrap();
         assert_eq!(cfg.evaluate(&malformed), Truth::Unknown);
         assert_eq!(cfg.evaluate(&parse_quote!(xor(unix))), Truth::Unknown);
-        assert_eq!(cfg.evaluate(&parse_quote!(not(unix, windows))), Truth::Unknown);
+        assert_eq!(
+            cfg.evaluate(&parse_quote!(not(unix, windows))),
+            Truth::Unknown
+        );
     }
 
     #[test]
@@ -414,10 +417,7 @@ mod tests {
             cfg.evaluate(&parse_quote!(all(unix, my_custom_cfg))),
             Truth::Unknown
         );
-        assert_eq!(
-            cfg.evaluate(&parse_quote!(any(windows, unix))),
-            Truth::True
-        );
+        assert_eq!(cfg.evaluate(&parse_quote!(any(windows, unix))), Truth::True);
         assert_eq!(
             cfg.evaluate(&parse_quote!(not(my_custom_cfg))),
             Truth::Unknown
@@ -477,5 +477,4 @@ mod tests {
         }
         assert!(!super::is_known_value_cfg("custom"));
     }
-
 }
