@@ -1421,7 +1421,7 @@ fn auxiliary_target_summary_classifies_non_production_target_kinds() {
 
 #[test]
 fn cargo_resolution_identity_is_checkout_relative_and_tracks_lockfile_changes() {
-    fn fixture(root: &PathBuf) -> Metadata {
+    fn fixture(root: &std::path::Path) -> Metadata {
         let manifest = root.join("Cargo.toml");
         fs::write(
             &manifest,
