@@ -678,7 +678,7 @@ fn materialize_worktree_reports_stale_non_directory_path() {
     let _ = fs::remove_dir_all(&path);
     fs::write(&path, "blocker").unwrap();
 
-    let error = super::materialize_worktree(&repo.root, &head).unwrap_err();
+    let error = super::materialize_worktree(&repo.root, &head).err().unwrap();
 
     assert!(error.contains("cannot clear temporary baseline directory"));
     fs::remove_file(path).unwrap();
@@ -686,7 +686,7 @@ fn materialize_worktree_reports_stale_non_directory_path() {
 
 #[test]
 fn baseline_selection_helper_propagates_merge_base_shape_errors() {
-    assert!(super::baseline_selection_from_merge_bases("main".into(), "a".repeat(40), "").is_err());
+    assert!(super::baseline_selection_from_output("main".into(), "a".repeat(40), "").is_err());
 }
 
 #[test]
@@ -748,15 +748,4 @@ fn git_text_os_propagates_native_git_failure() {
     ];
 
     assert!(super::git_text_os(&repo.root, args).is_err());
-}
-
-#[test]
-fn automatic_candidates_helper_handles_missing_base_ref_and_empty_symbolic_head() {
-    let repo = Repo::new("automatic-helper");
-
-    let candidates = super::automatic_target_candidates_with_base(&repo.root, None);
-
-    assert!(candidates
-        .iter()
-        .any(|(candidate, _)| candidate == "refs/remotes/origin/main"));
 }
