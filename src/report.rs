@@ -659,7 +659,7 @@ fn render_analysis_details(result: &AnalysisResult, digest: &str) -> String {
         || "<p>No comparable baseline was available.</p>".to_owned(),
         |baseline| {
             format!(
-                "<p><strong>Target:</strong> <code>{}</code><br><strong>Merge base:</strong> <code class="digest">{}</code><br>{} baseline source files</p>",
+                r#"<p><strong>Target:</strong> <code>{}</code><br><strong>Merge base:</strong> <code class="digest">{}</code><br>{} baseline source files</p>"#,
                 escape(&baseline.target_ref),
                 escape(&baseline.merge_base),
                 baseline.source_files
@@ -744,7 +744,7 @@ fn render_analysis_details(result: &AnalysisResult, digest: &str) -> String {
 fn render_triage_summary(result: &AnalysisResult) -> String {
     let summary = ai_summary(result);
     format!(
-        "<h3>{}</h3><p>{} · {} · {}</p><p class="muted">Ferric Lens only recommends investigation when deterministic evidence meets a rule threshold. Large metric values alone are not treated as problems.</p>",
+        r#"<h3>{}</h3><p>{} · {} · {}</p><p class="muted">Ferric Lens only recommends investigation when deterministic evidence meets a rule threshold. Large metric values alone are not treated as problems.</p>"#,
         count_phrase(
             summary.areas_worth_reviewing,
             "area worth reviewing",
@@ -778,6 +778,7 @@ fn count_phrase(count: usize, singular: &str, plural: &str) -> String {
     format!("{count} {}", if count == 1 { singular } else { plural })
 }
 
+
 fn render_findings(
     findings: &[&Finding],
     empty: &str,
@@ -788,68 +789,94 @@ fn render_findings(
         return format!("<p>{}</p>", escape(empty));
     }
 
-    let mut ordered = findings.to_vec();
-    ordered.sort_by(|a, b| {
-        priority_rank(&a.priority)
-            .cmp(&priority_rank(&b.priority))
-            .then_with(|| delta_rank(&a.delta).cmp(&delta_rank(&b.delta)))
-            .then_with(|| a.subject.cmp(&b.subject))
-            .then_with(|| a.rule.cmp(&b.rule))
-    });
-
+    let ordered = ordered_findings(findings.to_vec());
     let mut html = String::new();
     for finding in ordered {
+        let guidance = finding_guidance(finding);
+        let path = finding_path(finding, modules, source_contexts);
+        let finding_anchor = anchor_id("finding", &finding.fingerprint);
+
         html.push_str(if finding.gate {
-            r#"<article class="gate">"#
+            r#"<article class="finding-card gate" id=""#
         } else {
-            "<article>"
+            r#"<article class="finding-card" id=""#
         });
-        html.push_str("<h3>");
+        html.push_str(&finding_anchor);
+        html.push_str(r#""><div class="finding-header"><div><h3>"#);
+        html.push_str(&escape(guidance.title));
+        html.push_str("</h3><p><code>");
+        html.push_str(&escape(&path));
+        html.push_str("</code><br><small>");
         html.push_str(&escape(&finding.subject));
-        html.push_str("</h3><p class=\"finding-meta\"><strong>");
+        html.push_str(r#"</small></p></div><div class="badges"><span class="badge">"#);
         html.push_str(priority_label(&finding.priority));
-        html.push_str("</strong> · ");
+        html.push_str(r#"</span><span class="badge">"#);
         html.push_str(evidence_label(&finding.evidence_class));
-        html.push_str(" · ");
+        html.push_str(r#"</span><span class="badge">"#);
         html.push_str(delta_label(&finding.delta));
-        if finding.accepted {
-            html.push_str(" · accepted");
+        html.push_str("</span>");
+        if finding.gate {
+            html.push_str(r#"<span class="badge">CI gate</span>"#);
         }
-        html.push_str("</p><p><strong>");
-        html.push_str(&escape(&finding.rule));
-        html.push_str("</strong></p>");
+        if finding.accepted {
+            html.push_str(r#"<span class="badge">accepted</span>"#);
+        }
+        html.push_str("</div></div>");
+
+        html.push_str(r#"<div class="guidance"><div><h4>Why this matters</h4><p>"#);
+        html.push_str(&escape(guidance.why_care));
+        html.push_str(r#"</p></div><div><h4>If ignored</h4><p>"#);
+        html.push_str(&escape(guidance.if_ignored));
+        html.push_str("</p></div></div>");
+
+        html.push_str("<h4>What Ferric Lens found</h4><p>");
+        html.push_str(&escape(&finding.summary));
+        html.push_str("</p>");
+        if !finding.evidence.is_empty() {
+            html.push_str(r#"<ul class="metric-list">"#);
+            for evidence in &finding.evidence {
+                html.push_str("<li><strong>");
+                html.push_str(metric_label(&evidence.metric));
+                html.push_str(":</strong> ");
+                html.push_str(&evidence.value.to_string());
+                html.push_str(" <span class="muted">(comparison reference ");
+                html.push_str(&evidence.reference.to_string());
+                html.push_str(" across ");
+                html.push_str(&evidence.population.to_string());
+                html.push_str(" comparable modules");
+                if let Some(baseline) = evidence.baseline {
+                    html.push_str(", baseline ");
+                    html.push_str(&baseline.to_string());
+                }
+                if let Some(material) = evidence.material_delta {
+                    html.push_str(", material growth threshold ");
+                    html.push_str(&material.to_string());
+                }
+                html.push_str(")</span></li>");
+            }
+            html.push_str("</ul>");
+        }
 
         if let Some(module) = modules
             .iter()
             .find(|module| module_subject(module) == finding.subject)
         {
             let anchor = anchor_id("module", &finding.subject);
-            html.push_str(r#"<p class="location"><strong>Source:</strong> <code>"#);
+            html.push_str(r#"<p class="location"><strong>Affected area:</strong> <code>"#);
             html.push_str(&escape(&module.path));
-            html.push_str("</code> · <a href=\"#");
+            html.push_str("</code> · <a href="#");
             html.push_str(&anchor);
-            html.push_str("\">View module</a></p>");
+            html.push_str("">View in repository explorer</a></p>");
         }
 
-        let evidence_metrics = finding
-            .evidence
-            .iter()
-            .map(|evidence| evidence.metric.as_str())
-            .collect::<Vec<_>>();
-        let contexts = source_contexts
-            .iter()
-            .filter(|context| {
-                context.subject == finding.subject
-                    && evidence_metrics.contains(&context.metric.as_str())
-            })
-            .collect::<Vec<_>>();
+        let contexts = contexts_for_finding(finding, source_contexts);
         if !contexts.is_empty() {
-            html.push_str("<details class=\"source-evidence\"><summary>Source evidence (");
+            html.push_str("<details class="source-evidence"><summary>Relevant source evidence (");
             html.push_str(&contexts.len().to_string());
             html.push_str(")</summary>");
             for context in contexts {
-                html.push_str("<div class=\"source-context\"><p><strong>");
-                html.push_str(&escape(&context.metric));
+                html.push_str("<div class="source-context"><p><strong>");
+                html.push_str(metric_label(&context.metric));
                 html.push_str("</strong> · <code>");
                 html.push_str(&escape(&source_location_label(context)));
                 html.push_str("</code></p><pre><code>");
@@ -863,43 +890,36 @@ fn render_findings(
             html.push_str("</details>");
         }
 
-        html.push_str("<p><strong>Fingerprint:</strong> <code>");
-        html.push_str(&escape(&finding.fingerprint));
-        html.push_str("</code></p>");
+        html.push_str("<h4>What to investigate next</h4><p>");
+        html.push_str(&escape(&finding.direction));
+        html.push_str("</p>");
+
         if let Some(reason) = &finding.acceptance_reason {
             html.push_str("<p><strong>Acceptance:</strong> ");
             html.push_str(&escape(reason));
             html.push_str("</p>");
         }
-        html.push_str("<p>");
-        html.push_str(&escape(&finding.summary));
-        html.push_str("</p><ul>");
-        for evidence in &finding.evidence {
-            html.push_str("<li>");
-            let baseline = evidence
-                .baseline
-                .map(|value| format!(", baseline {value}"))
-                .unwrap_or_default();
-            let material = evidence
-                .material_delta
-                .map(|value| format!(", required growth {value}"))
-                .unwrap_or_default();
-            html.push_str(&escape(&format!(
-                "{} = {} (p90 {}, population {}{}{})",
-                evidence.metric,
-                evidence.value,
-                evidence.reference,
-                evidence.population,
-                baseline,
-                material
-            )));
-            html.push_str("</li>");
-        }
-        html.push_str("</ul><p><strong>Direction:</strong> ");
-        html.push_str(&escape(&finding.direction));
-        html.push_str("</p></article>");
+
+        html.push_str("<details><summary>Technical details</summary><p><strong>Rule:</strong> <code>");
+        html.push_str(&escape(&finding.rule));
+        html.push_str("</code><br><strong>Fingerprint:</strong> <code>");
+        html.push_str(&escape(&finding.fingerprint));
+        html.push_str("</code><br><strong>Configuration:</strong> <code>");
+        html.push_str(&escape(&finding.configuration));
+        html.push_str("</code></p></details></article>");
     }
     html
+}
+
+fn metric_label(metric: &str) -> &'static str {
+    match metric {
+        "decision_sites" => "Decision points",
+        "local_dependency_modules" => "Repository dependencies",
+        "clone_call_syntax_sites" => "Clone call sites",
+        "reverse_repository_dependents" => "Modules depending on this area",
+        "public_items" => "Public items",
+        _ => "Evidence value",
+    }
 }
 
 fn priority_rank(priority: &Priority) -> u8 {
