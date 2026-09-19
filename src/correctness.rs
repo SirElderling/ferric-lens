@@ -75,7 +75,7 @@ pub fn scan(sources: &[SourceFile]) -> CorrectnessScan {
 fn detect_cargo_feature_resolution(sources: &[SourceFile], scan: &mut CorrectnessScan) {
     let no_deps = matches_where(sources, |line| line.contains("--no-deps"));
     let feature_branch = matches_where(sources, |line| {
-        line.contains("\"feature\"") && (line.contains("contains(") || line.contains(".contains("))
+        line.contains("\"feature\"") && line.contains("contains(")
     });
     if no_deps.is_empty() || feature_branch.is_empty() {
         return;
@@ -220,12 +220,10 @@ fn detect_workspace_manifest_snapshot_gap(sources: &[SourceFile], scan: &mut Cor
         name.contains("verify") || name.contains("stable") || name.contains("check")
     }) {
         for root_function in &root_only {
-            if verifier.contains(&format!("{}(", root_function.name)) {
-                if let Some(found) =
-                    verifier.first_match(|line| line.contains(&format!("{}(", root_function.name)))
-                {
-                    verifier_refs.push(found);
-                }
+            if let Some(found) =
+                verifier.first_match(|line| line.contains(&format!("{}(", root_function.name)))
+            {
+                verifier_refs.push(found);
             }
         }
     }
