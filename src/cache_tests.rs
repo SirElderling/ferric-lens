@@ -260,7 +260,6 @@ fn atomic_write_reports_temporary_write_failure() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn try_store_reports_atomic_replacement_failure() {
     let root = temp_root();
