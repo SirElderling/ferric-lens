@@ -435,11 +435,7 @@ fn render_triage_summary(result: &AnalysisResult) -> String {
         count_phrase(act_first, "act first", "act first"),
         count_phrase(investigate, "investigate", "investigate"),
         count_phrase(observe, "observe", "observe"),
-        count_phrase(
-            refactors,
-            "refactoring candidate",
-            "refactoring candidates"
-        ),
+        count_phrase(refactors, "refactoring candidate", "refactoring candidates"),
         count_phrase(changed, "new/worsened finding", "new/worsened findings")
     )
 }
@@ -1214,6 +1210,30 @@ mod tests {
         assert!(worsened < investigate);
         assert!(investigate < observe);
         assert_eq!(result.findings, original);
+    }
+
+    #[test]
+    fn human_report_labels_cover_all_model_states() {
+        use crate::model::{DeltaStatus, EvidenceClass, Priority};
+
+        assert_eq!(super::priority_label(&Priority::ActFirst), "Priority 1 — act first");
+        assert_eq!(
+            super::priority_label(&Priority::Investigate),
+            "Priority 2 — investigate"
+        );
+        assert_eq!(super::priority_label(&Priority::Observe), "Observe");
+        assert_eq!(super::evidence_label(&EvidenceClass::Proven), "proven evidence");
+        assert_eq!(super::evidence_label(&EvidenceClass::Strong), "strong evidence");
+        assert_eq!(
+            super::evidence_label(&EvidenceClass::Candidate),
+            "candidate evidence"
+        );
+        assert_eq!(super::delta_label(&DeltaStatus::Current), "current");
+        assert_eq!(super::delta_label(&DeltaStatus::New), "new");
+        assert_eq!(super::delta_label(&DeltaStatus::Worsened), "worsened");
+        assert_eq!(super::delta_label(&DeltaStatus::Unchanged), "unchanged");
+        assert_eq!(super::delta_label(&DeltaStatus::Unknown), "unknown");
+        assert_eq!(super::count_phrase(2, "item", "items"), "2 items");
     }
 
     #[test]
