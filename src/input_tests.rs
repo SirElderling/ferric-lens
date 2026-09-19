@@ -1115,7 +1115,7 @@ fn metadata_helpers_report_spawn_parse_manifest_and_io_errors() {
         .contains("invalid cargo metadata JSON"));
     assert!(super::manifest_parent("/").is_err());
 
-    let error = std::io::Error::new(std::io::ErrorKind::Other, "fixture");
+    let error = std::io::Error::other("fixture");
     assert!(
         super::io_with_path::<()>(Err(error), "inspect", std::path::Path::new("fixture"))
             .unwrap_err()
