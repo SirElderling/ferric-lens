@@ -181,17 +181,11 @@ fn refactor_delta(supporting: &[&Finding]) -> DeltaStatus {
 }
 
 fn refactor_direction(signals: BTreeSet<&str>) -> String {
-    let complexity = signals.contains("decision_complexity");
-    let dependency = signals.contains("dependency_surface");
-    let copying = signals.contains("copying_runtime_risk");
-
-    match (complexity, dependency, copying) {
-        (true, true, true) => "consider splitting responsibilities and narrowing dependency surface; isolate copying-sensitive paths and measure runtime/build effects before changing behavior".into(),
-        (true, true, false) => "consider splitting responsibilities and narrowing dependency surface without prescribing a final architecture".into(),
-        (true, false, true) => "consider separating complex orchestration from copying-sensitive paths; inspect receiver types and execution frequency before changing behavior".into(),
-        (false, true, true) => "consider isolating copying-sensitive behavior behind a narrower, stable dependency boundary; measure runtime and build impact before optimizing".into(),
-        _ => "investigate the corroborating evidence before choosing a refactor direction".into(),
-    }
+    debug_assert_eq!(
+        signals,
+        BTreeSet::from(["decision_complexity", "dependency_surface"])
+    );
+    "consider splitting responsibilities and narrowing dependency surface without prescribing a final architecture".into()
 }
 
 fn structural_coupled_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
