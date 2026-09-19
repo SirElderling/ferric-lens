@@ -303,4 +303,113 @@ mod tests {
         assert!(load(&path, &snapshot(), &profile()).is_err());
         fs::remove_file(path).unwrap();
     }
+
+    #[test]
+    fn attaches_clean_git_commit_identity_and_normalizes_features_and_observations() {
+        let path = temp_file(
+            r#"{
+              "schema_version": 1,
+              "producer": {"name": "bench", "version": "1"},
+              "source": {"git_commit": "abc123"},
+              "configuration": {"target": "host", "features": ["z", "a", "a"]},
+              "observations": [
+                {"subject": "src/z.rs", "metric": "m", "value": 2, "unit": "count"},
+                {"subject": "src/a.rs", "metric": "m", "value": 1, "unit": "count", "note": "n"}
+              ]
+            }"#,
+        );
+        let mut profile = profile();
+        profile.features = vec!["a".into(), "z".into()];
+
+        let imported = load(&path, &snapshot(), &profile).unwrap();
+
+        assert!(imported.attached);
+        assert_eq!(imported.features, ["a", "z"]);
+        assert_eq!(imported.observations[0].subject, "src/a.rs");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn distinguishes_configuration_and_combined_mismatches() {
+        let configuration_only = temp_file(
+            r#"{"schema_version":1,"producer":{"name":"p","version":"1"},"source":{"content_digest":"digest"},"configuration":{"target":"other","features":[]},"observations":[]}"#,
+        );
+        let both = temp_file(
+            r#"{"schema_version":1,"producer":{"name":"p","version":"1"},"source":{"content_digest":"other"},"configuration":{"target":"other","features":[]},"observations":[]}"#,
+        );
+
+        let one = load(&configuration_only, &snapshot(), &profile()).unwrap();
+        let two = load(&both, &snapshot(), &profile()).unwrap();
+
+        assert_eq!(
+            one.attachment_reason,
+            "configuration does not match the current analysis profile"
+        );
+        assert_eq!(
+            two.attachment_reason,
+            "source identity and configuration do not match the current analysis"
+        );
+        fs::remove_file(configuration_only).unwrap();
+        fs::remove_file(both).unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_envelope_contracts() {
+        let cases = [
+            (
+                r#"{"schema_version":2,"producer":{"name":"p","version":"1"},"source":{"content_digest":"d"},"configuration":{"target":"host"},"observations":[]}"#,
+                "unsupported evidence schema version",
+            ),
+            (
+                r#"{"schema_version":1,"producer":{"name":"","version":"1"},"source":{"content_digest":"d"},"configuration":{"target":"host"},"observations":[]}"#,
+                "producer name and version",
+            ),
+            (
+                r#"{"schema_version":1,"producer":{"name":"p","version":"1"},"source":{},"configuration":{"target":"host"},"observations":[]}"#,
+                "source must include",
+            ),
+            (
+                r#"{"schema_version":1,"producer":{"name":"p","version":"1"},"source":{"content_digest":"d"},"configuration":{"target":""},"observations":[]}"#,
+                "target must be non-empty",
+            ),
+            (
+                r#"{"schema_version":1,"producer":{"name":"p","version":"1"},"source":{"content_digest":"d"},"configuration":{"target":"host","features":[" "]},"observations":[]}"#,
+                "feature names must be non-empty",
+            ),
+            (
+                r#"{"schema_version":1,"producer":{"name":"p","version":"1"},"source":{"content_digest":"d"},"configuration":{"target":"host"},"observations":[{"subject":"","metric":"m","value":1,"unit":"u"}]}"#,
+                "observation subject, metric, and unit",
+            ),
+            (
+                r#"{"schema_version":1,"producer":{"name":"p","version":"1"},"source":{"content_digest":"d"},"configuration":{"target":"host"},"observations":[{"subject":"/absolute","metric":"m","value":1,"unit":"u"}]}"#,
+                "repository-relative",
+            ),
+        ];
+
+        for (json, expected) in cases {
+            let path = temp_file(json);
+            let error = load(&path, &snapshot(), &profile()).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn reports_missing_and_malformed_imports() {
+        let missing = std::env::temp_dir().join(format!(
+            "ferric-lens-evidence-missing-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&missing);
+        assert!(load(&missing, &snapshot(), &profile())
+            .unwrap_err()
+            .contains("cannot inspect evidence import"));
+
+        let malformed = temp_file("{");
+        assert!(load(&malformed, &snapshot(), &profile())
+            .unwrap_err()
+            .contains("invalid evidence import JSON"));
+        fs::remove_file(malformed).unwrap();
+    }
+
 }
