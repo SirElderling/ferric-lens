@@ -218,16 +218,13 @@ mod tests {
     #[test]
     fn analyze_and_check_accept_ai_output_mode() {
         let analyze = Cli::try_parse_from(["ferric-lens", "analyze", ".", "--ai"]).unwrap();
-        match analyze.command {
-            Command::Analyze { ai, .. } => assert!(ai),
-            _ => panic!("expected analyze"),
-        }
+        assert!(matches!(
+            analyze.command,
+            Command::Analyze { ai: true, .. }
+        ));
 
         let check = Cli::try_parse_from(["ferric-lens", "check", ".", "--ai"]).unwrap();
-        match check.command {
-            Command::Check { ai, .. } => assert!(ai),
-            _ => panic!("expected check"),
-        }
+        assert!(matches!(check.command, Command::Check { ai: true, .. }));
     }
 
     #[test]
