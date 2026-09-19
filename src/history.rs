@@ -137,4 +137,29 @@ mod tests {
         assert_eq!(history.cochange[0].shared_commits, 1);
         assert!(modules[1].history.is_none());
     }
+
+    #[test]
+    fn broad_commits_count_churn_but_skip_cochange_pairs() {
+        let mut paths = vec!["src/a.rs".to_owned()];
+        paths.extend((0..=super::MAX_COCHANGE_PATHS_PER_COMMIT).map(|index| format!("src/x{index}.rs")));
+        let sample = HistorySample {
+            commits: vec![HistoryCommit {
+                oid: "a".repeat(40),
+                paths,
+            }],
+            changed_path_records: super::MAX_COCHANGE_PATHS_PER_COMMIT + 2,
+            broad_commits_excluded_from_cochange: 1,
+            truncated: false,
+        };
+        let candidates = BTreeSet::from(["src/a.rs".to_owned()]);
+        let mut modules = vec![module("src/a.rs")];
+
+        let summary = enrich(&mut modules, &sample, &candidates);
+
+        let history = modules[0].history.as_ref().unwrap();
+        assert_eq!(history.change_commits, 1);
+        assert!(history.cochange.is_empty());
+        assert_eq!(summary.broad_commits_excluded_from_cochange, 1);
+    }
+
 }
