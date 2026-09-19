@@ -648,7 +648,7 @@ fn analyze_snapshot(
     for source in &inventory.sources {
         let cfg = resolved_features_by_crate
             .get(&source.crate_name)
-            .map(|features| profile.cfg.with_features(features))
+            .map(|features| profile.cfg.with_resolved_features(features))
             .unwrap_or_else(|| profile.cfg.clone());
         if let Some(module) = fact_cache.load(source, cfg.digest()) {
             modules.push(module);
