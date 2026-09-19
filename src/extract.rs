@@ -272,9 +272,7 @@ pub fn resolve_workspace_dependencies(
     for module in modules.iter_mut().filter(|module| module.parse_complete) {
         let current_crate = module.crate_name.clone();
         let current_module = module.module_path.clone();
-        let Some(known_current) = by_crate.get(&current_crate) else {
-            continue;
-        };
+        let known_current = &by_crate[&current_crate];
 
         let aliases = workspace_aliases.get(&current_crate);
         let mut dependencies = BTreeSet::new();
