@@ -75,7 +75,7 @@ pub fn scan(sources: &[SourceFile]) -> CorrectnessScan {
 fn detect_cargo_feature_resolution(sources: &[SourceFile], scan: &mut CorrectnessScan) {
     let no_deps = matches_where(sources, |line| line.contains("--no-deps"));
     let feature_branch = matches_where(sources, |line| {
-        line.contains("\\\"feature\\\"") && (line.contains("contains(") || line.contains(".contains("))
+        line.contains("\\"feature\\"") && (line.contains("contains(") || line.contains(".contains("))
     });
     if no_deps.is_empty() || feature_branch.is_empty() {
         return;
@@ -271,7 +271,7 @@ fn detect_lossy_git_paths(sources: &[SourceFile], scan: &mut CorrectnessScan) {
         let Ok(text) = std::str::from_utf8(&source.bytes) else {
             continue;
         };
-        let git_path_stream = text.contains("Command::new(\\\"git\\\")") && text.contains("\\\"-z\\\"");
+        let git_path_stream = text.contains("Command::new(\\"git\\")") && text.contains("\\"-z\\"");
         if !git_path_stream {
             continue;
         }
