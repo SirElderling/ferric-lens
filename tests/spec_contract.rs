@@ -31,7 +31,10 @@ impl Repo {
         )
         .unwrap();
         git(&root, &["init", "-q"]);
-        git(&root, &["config", "user.email", "ferric-lens@example.invalid"]);
+        git(
+            &root,
+            &["config", "user.email", "ferric-lens@example.invalid"],
+        );
         git(&root, &["config", "user.name", "Ferric Lens Test"]);
         Self { root }
     }
@@ -223,12 +226,9 @@ fn imported_evidence_is_optional_and_does_not_change_the_gate_verdict() {
         ),
     );
 
-    let with = ferric_lens::analyze_with_base_and_evidence(
-        &repo.root,
-        Some("HEAD"),
-        Some(&evidence_path),
-    )
-    .unwrap();
+    let with =
+        ferric_lens::analyze_with_base_and_evidence(&repo.root, Some("HEAD"), Some(&evidence_path))
+            .unwrap();
 
     assert_eq!(without.verdict, with.verdict);
     assert!(with.imported_evidence.as_ref().unwrap().attached);
