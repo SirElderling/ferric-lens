@@ -486,3 +486,27 @@ fn verify_stable_inputs() {
         .iter()
         .any(|finding| finding.rule == "correctness.workspace_manifest_snapshot_gap"));
 }
+
+
+#[test]
+fn manifest_snapshot_detector_requires_verifier_to_reference_root_only_digest() {
+    let sources = vec![source(
+        "src/input.rs",
+        r#"
+fn cargo_input_digest(root: &Path) {
+    for name in ["Cargo.toml", "Cargo.lock"] {}
+}
+fn cargo_resolution_identity(package: &Package) {
+    let manifest = PathBuf::from(&package.manifest_path);
+}
+fn verify_stable_inputs() {
+    verify_something_else();
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "correctness.workspace_manifest_snapshot_gap"));
+}
