@@ -48,6 +48,9 @@ impl FunctionRegion {
 const SUPPRESSION_DIRECTIVE: &str = "ferric-lens: ignore-correctness-risks";
 
 pub fn scan(sources: &[SourceFile]) -> CorrectnessScan {
+    let mut scan = CorrectnessScan::default();
+    detect_contextual_copy_risks(sources, &mut scan);
+
     let filtered = sources
         .iter()
         .filter(|source| {
@@ -59,7 +62,6 @@ pub fn scan(sources: &[SourceFile]) -> CorrectnessScan {
         .collect::<Vec<_>>();
     let sources = filtered.as_slice();
 
-    let mut scan = CorrectnessScan::default();
     detect_cargo_feature_resolution(sources, &mut scan);
     detect_symbolic_target_identity(sources, &mut scan);
     detect_stdout_mode_artifacts(sources, &mut scan);
@@ -70,6 +72,121 @@ pub fn scan(sources: &[SourceFile]) -> CorrectnessScan {
     scan.source_contexts.sort();
     scan.source_contexts.dedup();
     scan
+}
+
+fn detect_contextual_copy_risks(sources: &[SourceFile], scan: &mut CorrectnessScan) {
+    const MUTATING_METHODS: [&str; 15] = [
+        ".append(",
+        ".clear(",
+        ".dedup(",
+        ".drain(",
+        ".extend(",
+        ".insert(",
+        ".pop(",
+        ".push(",
+        ".remove(",
+        ".retain(",
+        ".sort(",
+        ".sort_by(",
+        ".sort_by_key(",
+        ".truncate(",
+        ".swap_remove(",
+    ];
+
+    for source in sources {
+        let Ok(text) = std::str::from_utf8(&source.bytes) else {
+            continue;
+        };
+        let lines = text.lines().collect::<Vec<_>>();
+        let subject = if source.module_path.is_empty() {
+            source.crate_name.clone()
+        } else {
+            format!("{}::{}", source.crate_name, source.module_path)
+        };
+
+        let iteration = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| {
+                let trimmed = line.trim_start();
+                trimmed.starts_with("for ")
+                    && trimmed.contains(" in ")
+                    && trimmed.contains(".clone()")
+            })
+            .map(|(index, line)| Match {
+                path: source.relative_path.clone(),
+                line: index + 1,
+                excerpt: line.trim().to_owned(),
+            })
+            .collect::<Vec<_>>();
+
+        if !iteration.is_empty() {
+            push_finding(
+                scan,
+                "runtime.clone_for_iteration_candidate",
+                &subject,
+                EvidenceClass::Candidate,
+                Priority::Observe,
+                "A cloned value is used directly as a for-loop iterator",
+                "inspect whether the loop can borrow or iterate the original collection; keep the clone when ownership or mutation semantics require it",
+                vec![evidence("clone_for_iteration_sites", iteration.len())],
+                vec![("clone_for_iteration_sites", iteration)],
+            );
+        }
+
+        let mut clone_then_mutate = Vec::new();
+        for (index, line) in lines.iter().enumerate() {
+            let Some(name) = mutable_clone_binding(line) else {
+                continue;
+            };
+            let end = (index + 13).min(lines.len());
+            let prefix = format!("{name}.");
+            let mutated = lines[index + 1..end].iter().any(|candidate| {
+                candidate.contains(&prefix)
+                    && MUTATING_METHODS
+                        .iter()
+                        .any(|method| candidate.contains(method))
+            });
+            if mutated {
+                clone_then_mutate.push(Match {
+                    path: source.relative_path.clone(),
+                    line: index + 1,
+                    excerpt: line.trim().to_owned(),
+                });
+            }
+        }
+
+        if !clone_then_mutate.is_empty() {
+            push_finding(
+                scan,
+                "runtime.clone_then_mutate_candidate",
+                &subject,
+                EvidenceClass::Candidate,
+                Priority::Observe,
+                "A cloned value is immediately used as a mutable working copy",
+                "inspect whether the operation can work on borrowed data, a narrower owned subset, or an iterator/filter pipeline before copying the whole value",
+                vec![evidence(
+                    "clone_then_mutate_sites",
+                    clone_then_mutate.len(),
+                )],
+                vec![("clone_then_mutate_sites", clone_then_mutate)],
+            );
+        }
+    }
+}
+
+fn mutable_clone_binding(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let rest = trimmed.strip_prefix("let mut ")?;
+    let (name, value) = rest.split_once('=')?;
+    let name = name.trim();
+    if name.is_empty()
+        || !name.chars().all(is_ident_char)
+        || !value.contains(".clone()")
+    {
+        return None;
+    }
+    Some(name)
 }
 
 fn detect_cargo_feature_resolution(sources: &[SourceFile], scan: &mut CorrectnessScan) {
