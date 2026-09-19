@@ -85,7 +85,7 @@ impl RawFactCache {
         raw.history = None;
 
         let payload = serde_json::to_vec(&raw)
-            .map_err(|error| format!("cannot encode cached facts: {error}"))?;
+            .expect("cached fact schema contains only JSON-serializable values");
         let entry = RawFactEntry {
             schema: RAW_FACT_SCHEMA,
             tool_version: env!("CARGO_PKG_VERSION").into(),
@@ -94,7 +94,7 @@ impl RawFactCache {
             module: raw,
         };
         let bytes = serde_json::to_vec(&entry)
-            .map_err(|error| format!("cannot encode fact cache entry: {error}"))?;
+            .expect("cache entry schema contains only JSON-serializable values");
         let destination = self.directory.join(format!("{key}.json"));
         atomic_write(&destination, &bytes)?;
         self.evict_if_needed();
