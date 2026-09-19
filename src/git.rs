@@ -127,8 +127,15 @@ pub fn resolve_baseline(root: &Path, explicit: Option<&str>) -> Result<BaselineS
         root,
         ["merge-base", "--all", head.as_str(), target_oid.as_str()],
     )?;
-    let merge_base = parse_merge_base_output(&target_ref, &merge_bases)?;
+    baseline_selection_from_output(target_ref, target_oid, &merge_bases)
+}
 
+fn baseline_selection_from_output(
+    target_ref: String,
+    target_oid: String,
+    merge_bases: &str,
+) -> Result<BaselineSelection, String> {
+    let merge_base = parse_merge_base_output(&target_ref, merge_bases)?;
     Ok(BaselineSelection {
         target_ref,
         target_oid,
@@ -156,11 +163,18 @@ pub fn changes_since(root: &Path, merge_base: &str) -> Result<ChangeSet, String>
         .map(|record| String::from_utf8_lossy(record).into_owned())
         .collect::<Vec<_>>();
 
-    let mut changes = parse_change_records(&records)?;
-    changes.added.extend(list_untracked(root)?);
+    finalize_changes(root, merge_base, &records, list_untracked(root))
+}
 
+fn finalize_changes(
+    root: &Path,
+    merge_base: &str,
+    records: &[String],
+    untracked: Result<Vec<String>, String>,
+) -> Result<ChangeSet, String> {
+    let mut changes = parse_change_records(records)?;
+    changes.added.extend(untracked?);
     detect_exact_worktree_renames(root, merge_base, &mut changes)?;
-
     Ok(changes)
 }
 
@@ -195,8 +209,18 @@ fn detect_exact_worktree_renames(
         OsStr::new("--").to_os_string(),
     ];
     hash_args.extend(added_paths.iter().map(OsString::from));
-    let hashes = git_text_os(root, hash_args)?;
-    let added_by_oid = index_added_hashes(&added_paths, &hashes)?;
+    let hashes = git_text_os(root, hash_args);
+    apply_exact_rename_hashes(changes, deleted_by_oid, &added_paths, hashes)
+}
+
+fn apply_exact_rename_hashes(
+    changes: &mut ChangeSet,
+    deleted_by_oid: BTreeMap<String, Vec<String>>,
+    added_paths: &[String],
+    hashes: Result<String, String>,
+) -> Result<(), String> {
+    let hashes = hashes?;
+    let added_by_oid = index_added_hashes(added_paths, &hashes)?;
 
     let mut exact = Vec::new();
     for (oid, deleted) in deleted_by_oid {
@@ -391,10 +415,8 @@ fn parse_history(output: &[u8]) -> Result<HistorySample, String> {
         }
 
         let path = String::from_utf8_lossy(raw).into_owned();
-        if !path.is_empty() {
-            commit.paths.push(path);
-            changed_path_records += 1;
-        }
+        commit.paths.push(path);
+        changed_path_records += 1;
     }
 
     if !truncated && current.is_some() {
@@ -474,11 +496,10 @@ fn append_base_candidates(candidates: &mut Vec<(String, bool)>, base: &str) {
 fn automatic_target_candidates(root: &Path) -> Vec<(String, bool)> {
     let mut candidates = Vec::new();
 
-    if let Ok(base) = std::env::var("GITHUB_BASE_REF") {
-        append_base_candidates(&mut candidates, &base);
-    }
+    let base = std::env::var("GITHUB_BASE_REF").ok();
+    append_optional_base_candidate(&mut candidates, base.as_deref());
 
-    if let Ok(symbolic) = git_text(
+    let symbolic = git_text(
         root,
         [
             "symbolic-ref",
@@ -486,17 +507,33 @@ fn automatic_target_candidates(root: &Path) -> Vec<(String, bool)> {
             "--short",
             "refs/remotes/origin/HEAD",
         ],
-    ) {
-        let symbolic = symbolic.trim();
-        if !symbolic.is_empty() {
-            candidates.push((symbolic.to_owned(), false));
-        }
-    }
+    )
+    .ok();
+    append_symbolic_candidate(&mut candidates, symbolic.as_deref());
 
     candidates.push(("refs/remotes/origin/main".into(), false));
     candidates.push(("main".into(), false));
 
     candidates
+}
+
+fn append_optional_base_candidate(
+    candidates: &mut Vec<(String, bool)>,
+    base: Option<&str>,
+) {
+    if let Some(base) = base {
+        append_base_candidates(candidates, base);
+    }
+}
+
+fn append_symbolic_candidate(
+    candidates: &mut Vec<(String, bool)>,
+    symbolic: Option<&str>,
+) {
+    let Some(symbolic) = symbolic.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    candidates.push((symbolic.to_owned(), false));
 }
 
 fn resolve_commit(root: &Path, reference: &str) -> Result<String, String> {
