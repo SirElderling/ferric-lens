@@ -695,6 +695,35 @@ mod tests {
     }
 
     #[test]
+    fn imported_observation_without_a_note_renders_without_note_separator() {
+        use crate::model::{ImportedEvidence, ImportedObservation};
+
+        let mut result = minimal_result();
+        result.imported_evidence = Some(ImportedEvidence {
+            producer: "fixture".into(),
+            producer_version: "1".into(),
+            source_content_digest: Some("source".into()),
+            source_git_commit: None,
+            target: "host".into(),
+            features: Vec::new(),
+            attached: true,
+            attachment_reason: "match".into(),
+            observations: vec![ImportedObservation {
+                subject: "src/lib.rs".into(),
+                metric: "instructions".into(),
+                value: 1,
+                unit: "count".into(),
+                note: None,
+            }],
+        });
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("instructions = 1 count"));
+        assert!(!rendered.contains("instructions = 1 count —"));
+    }
+
+    #[test]
     fn write_reports_parent_creation_failure() {
         use std::fs;
 
