@@ -1500,3 +1500,173 @@ fn stability_verification_detects_source_and_cargo_input_changes() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn cargo_resolution_identity_handles_outside_and_missing_manifests_explicitly() {
+    let root = temp_root();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+
+    let outside = std::env::temp_dir().join(format!(
+        "ferric-lens-outside-manifest-{}-{}",
+        std::process::id(),
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(
+        outside.join("Cargo.toml"),
+        "[package]\nname='outside'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+
+    let outside_metadata = Metadata {
+        packages: vec![Package {
+            name: "outside".into(),
+            id: "outside-id".into(),
+            manifest_path: outside.join("Cargo.toml").to_string_lossy().into_owned(),
+            targets: Vec::new(),
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec!["outside-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+    assert!(super::cargo_resolution_identity(&root, &outside_metadata).is_ok());
+
+    let missing_metadata = Metadata {
+        packages: vec![Package {
+            name: "missing".into(),
+            id: "missing-id".into(),
+            manifest_path: root
+                .join("missing/Cargo.toml")
+                .to_string_lossy()
+                .into_owned(),
+            targets: Vec::new(),
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec!["missing-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+    assert!(super::cargo_resolution_identity(&root, &missing_metadata)
+        .unwrap_err()
+        .contains("cannot read Cargo manifest"));
+
+    fs::remove_dir_all(outside).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn cargo_resolution_identity_normalizes_dependency_paths_and_ignores_outside_targets() {
+    let root = temp_root();
+    fs::create_dir_all(root.join("crates/shared")).unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/lib.rs"), "pub fn stable() {}\n").unwrap();
+
+    let outside_source = std::env::temp_dir().join(format!(
+        "ferric-lens-outside-target-{}-{}.rs",
+        std::process::id(),
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::write(&outside_source, "pub fn outside() {}\n").unwrap();
+
+    let metadata = Metadata {
+        packages: vec![Package {
+            name: "demo".into(),
+            id: "demo-id".into(),
+            manifest_path: root.join("Cargo.toml").to_string_lossy().into_owned(),
+            targets: vec![
+                Target {
+                    name: "demo".into(),
+                    kind: vec!["lib".into()],
+                    src_path: root.join("src/lib.rs").to_string_lossy().into_owned(),
+                },
+                Target {
+                    name: "outside".into(),
+                    kind: vec!["bin".into()],
+                    src_path: outside_source.to_string_lossy().into_owned(),
+                },
+            ],
+            dependencies: vec![
+                Dependency {
+                    name: "registry".into(),
+                    rename: None,
+                    path: None,
+                },
+                Dependency {
+                    name: "shared".into(),
+                    rename: Some("renamed_shared".into()),
+                    path: Some(root.join("crates/shared").to_string_lossy().into_owned()),
+                },
+                Dependency {
+                    name: "outside".into(),
+                    rename: None,
+                    path: Some(
+                        std::env::temp_dir()
+                            .join("ferric-lens-external-dependency")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
+                },
+            ],
+        }],
+        workspace_members: vec!["demo-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+
+    let with_dependencies = super::cargo_resolution_identity(&root, &metadata).unwrap();
+
+    let no_dependency_metadata = Metadata {
+        packages: vec![Package {
+            name: "demo".into(),
+            id: "demo-id".into(),
+            manifest_path: root.join("Cargo.toml").to_string_lossy().into_owned(),
+            targets: vec![Target {
+                name: "demo".into(),
+                kind: vec!["lib".into()],
+                src_path: root.join("src/lib.rs").to_string_lossy().into_owned(),
+            }],
+            dependencies: Vec::new(),
+        }],
+        workspace_members: vec!["demo-id".into()],
+        workspace_root: root.to_string_lossy().into_owned(),
+    };
+    let without_dependencies =
+        super::cargo_resolution_identity(&root, &no_dependency_metadata).unwrap();
+
+    assert_ne!(with_dependencies, without_dependencies);
+
+    fs::remove_file(outside_source).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn stability_verification_treats_a_disappearing_source_as_an_input_change() {
+    let root = temp_root();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/lib.rs"), "pub fn stable() {}\n").unwrap();
+
+    let source = SourceFile {
+        crate_name: "demo".into(),
+        module_path: String::new(),
+        relative_path: "src/lib.rs".into(),
+        bytes: fs::read(root.join("src/lib.rs")).unwrap(),
+    };
+    let cargo_digest = super::cargo_input_digest(&root).unwrap();
+    fs::remove_file(root.join("src/lib.rs")).unwrap();
+
+    let error = super::verify_stable_inputs(&root, &[source], &cargo_digest).unwrap_err();
+    assert!(error.contains("changed during analysis"));
+
+    fs::remove_dir_all(root).unwrap();
+}
