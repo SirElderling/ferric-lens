@@ -1501,7 +1501,6 @@ fn stability_verification_detects_source_and_cargo_input_changes() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn cargo_resolution_identity_handles_outside_and_missing_manifests_explicitly() {
     let root = temp_root();
