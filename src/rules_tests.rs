@@ -640,10 +640,7 @@ fn refactor_candidate_ignores_unrecognized_metrics() {
             "structure.decision_concentration",
             "demo::engine",
             DeltaStatus::Current,
-            vec![
-                evidence("decision_sites", 20),
-                evidence("public_items", 12),
-            ],
+            vec![evidence("decision_sites", 20), evidence("public_items", 12)],
         ),
         advisory_finding(
             "build.rebuild_exposure_candidate",
