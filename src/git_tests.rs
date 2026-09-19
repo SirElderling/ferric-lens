@@ -537,3 +537,164 @@ fn git_execution_reports_missing_working_directory() {
 
     assert!(error.contains("could not execute git"));
 }
+
+
+#[test]
+fn baseline_selection_helper_propagates_merge_base_parse_failures() {
+    assert!(super::baseline_selection_from_output(
+        "main".into(),
+        "a".repeat(40),
+        ""
+    )
+    .unwrap_err()
+    .contains("exactly one usable merge base"));
+
+    let selection = super::baseline_selection_from_output(
+        "main".into(),
+        "a".repeat(40),
+        "b".repeat(40).as_str(),
+    )
+    .unwrap();
+    assert_eq!(selection.target_ref, "main");
+}
+
+#[test]
+fn finalize_changes_propagates_parse_untracked_and_rename_failures() {
+    let repo = Repo::new("finalize-changes-errors");
+
+    assert!(super::finalize_changes(
+        &repo.root,
+        "HEAD",
+        &["M".into()],
+        Ok(Vec::new()),
+    )
+    .unwrap_err()
+    .contains("truncated path record"));
+
+    assert_eq!(
+        super::finalize_changes(&repo.root, "HEAD", &[], Err("untracked failed".into()))
+            .unwrap_err(),
+        "untracked failed"
+    );
+
+    let records = vec![
+        "D".into(),
+        "old.rs".into(),
+        "A".into(),
+        "new.rs".into(),
+    ];
+    assert!(super::finalize_changes(
+        &repo.root,
+        "definitely-missing",
+        &records,
+        Ok(Vec::new()),
+    )
+    .is_err());
+}
+
+#[test]
+fn exact_rename_detection_propagates_hash_errors_and_ambiguous_hashes() {
+    let repo = Repo::new("rename-hash-errors");
+    repo.write("old.rs", "same");
+    let baseline = repo.commit("baseline");
+
+    let mut missing_added = ChangeSet::default();
+    missing_added.deleted.insert("old.rs".into());
+    missing_added.added.insert("missing.rs".into());
+    assert!(super::detect_exact_worktree_renames(
+        &repo.root,
+        &baseline,
+        &mut missing_added,
+    )
+    .is_err());
+
+    let mut ambiguous = ChangeSet::default();
+    ambiguous.deleted.extend(["old1.rs".into(), "old2.rs".into()]);
+    ambiguous.added.extend(["new1.rs".into(), "new2.rs".into()]);
+    let deleted_by_oid = std::collections::BTreeMap::from([(
+        "same".into(),
+        vec!["old1.rs".into(), "old2.rs".into()],
+    )]);
+    super::apply_exact_rename_hashes(
+        &mut ambiguous,
+        deleted_by_oid,
+        &["new1.rs".into(), "new2.rs".into()],
+        Ok("same\nsame\n".into()),
+    )
+    .unwrap();
+    assert!(ambiguous.renames.is_empty());
+
+    let mut mismatch = ChangeSet::default();
+    assert!(super::apply_exact_rename_hashes(
+        &mut mismatch,
+        std::collections::BTreeMap::new(),
+        &["new.rs".into()],
+        Ok(String::new()),
+    )
+    .is_err());
+
+    assert_eq!(
+        super::apply_exact_rename_hashes(
+            &mut mismatch,
+            std::collections::BTreeMap::new(),
+            &[],
+            Err("hash failed".into()),
+        )
+        .unwrap_err(),
+        "hash failed"
+    );
+}
+
+#[test]
+fn automatic_candidate_helpers_cover_absent_empty_and_present_values() {
+    let mut candidates = Vec::new();
+    super::append_optional_base_candidate(&mut candidates, None);
+    super::append_optional_base_candidate(&mut candidates, Some(" "));
+    super::append_optional_base_candidate(&mut candidates, Some("develop"));
+    super::append_symbolic_candidate(&mut candidates, None);
+    super::append_symbolic_candidate(&mut candidates, Some(" "));
+    super::append_symbolic_candidate(&mut candidates, Some("origin/trunk"));
+
+    assert!(candidates
+        .iter()
+        .any(|(candidate, _)| candidate == "refs/remotes/origin/develop"));
+    assert!(candidates
+        .iter()
+        .any(|(candidate, _)| candidate == "develop"));
+    assert!(candidates
+        .iter()
+        .any(|(candidate, _)| candidate == "origin/trunk"));
+}
+
+#[test]
+fn git_text_os_propagates_command_failures() {
+    use std::ffi::OsString;
+
+    let repo = Repo::new("git-text-os-error");
+    let error = super::git_text_os(
+        &repo.root,
+        vec![OsString::from("definitely-not-a-git-subcommand")],
+    )
+    .unwrap_err();
+    assert!(!error.is_empty());
+}
+
+#[test]
+fn materialize_worktree_reports_stale_non_directory_path() {
+    let repo = Repo::new("worktree-path-error");
+    let head = git(&repo.root, &["rev-parse", "HEAD"]);
+    let counter = 900_000 + TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    super::WORKTREE_COUNTER.store(counter, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "ferric-lens-baseline-{}-{counter}",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let _ = fs::remove_dir_all(&path);
+    fs::write(&path, "blocker").unwrap();
+
+    let error = super::materialize_worktree(&repo.root, &head).unwrap_err();
+
+    assert!(error.contains("cannot clear temporary baseline directory"));
+    fs::remove_file(path).unwrap();
+}
