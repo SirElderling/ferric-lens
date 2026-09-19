@@ -246,7 +246,9 @@ fn multiple_correctness_findings_are_sorted_deterministically() {
         source(
             "src/input.rs",
             r#"
-command.args(["metadata", "--no-deps"]);
+fn metadata() {
+    command.args(["metadata", "--no-deps"]);
+}
 fn cargo_input_digest() {
     for name in ["Cargo.toml", "Cargo.lock"] {}
 }
