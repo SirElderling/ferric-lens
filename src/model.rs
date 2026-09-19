@@ -70,6 +70,41 @@ pub struct ImportPath {
     pub glob: bool,
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum FunctionKind {
+    Function,
+    Method,
+    TraitMethod,
+    ForeignFunction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FunctionFact {
+    pub name: String,
+    pub kind: FunctionKind,
+    pub public_declared: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum TypeKind {
+    Struct,
+    Enum,
+    Union,
+    TypeAlias,
+    Trait,
+    TraitAlias,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TypeFact {
+    pub name: String,
+    pub kind: TypeKind,
+    pub public_declared: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModuleMetrics {
     pub crate_name: String,
@@ -78,6 +113,12 @@ pub struct ModuleMetrics {
     pub lines: usize,
     pub decision_sites: usize,
     pub public_items: usize,
+    #[serde(default)]
+    pub clone_calls: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub functions: Vec<FunctionFact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<TypeFact>,
     pub explicit_imports: Vec<ImportPath>,
     pub local_dependency_modules: Vec<String>,
     pub structure_digest: String,
@@ -103,6 +144,9 @@ impl ModuleMetrics {
             lines: 0,
             decision_sites: 0,
             public_items: 0,
+            clone_calls: 0,
+            functions: Vec::new(),
+            types: Vec::new(),
             explicit_imports: Vec::new(),
             local_dependency_modules: Vec::new(),
             structure_digest: String::new(),
