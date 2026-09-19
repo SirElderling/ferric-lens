@@ -304,7 +304,14 @@ mod tests {
             .unwrap()
             .content_digest;
 
-        record(&root, &profile, "  fingerprint  ", "  accepted reason  ", &digest).unwrap();
+        record(
+            &root,
+            &profile,
+            "  fingerprint  ",
+            "  accepted reason  ",
+            &digest,
+        )
+        .unwrap();
 
         let set = load(&root).unwrap();
         let mut value = finding(18);
@@ -412,5 +419,4 @@ mod tests {
 
         fs::remove_dir_all(root).unwrap();
     }
-
 }
