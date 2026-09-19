@@ -1532,7 +1532,7 @@ mod tests {
         result.findings = vec![
             Finding {
                 fingerprint: "active".into(),
-                rule: "runtime.clone_syntax_outlier".into(),
+                rule: "runtime.clone_for_iteration_candidate".into(),
                 subject: "demo::engine".into(),
                 identity: "demo::engine".into(),
                 configuration: "host".into(),
@@ -1545,7 +1545,7 @@ mod tests {
                 summary: "raw summary".into(),
                 direction: "measure".into(),
                 evidence: vec![Evidence {
-                    metric: "clone_call_syntax_sites".into(),
+                    metric: "clone_for_iteration_sites".into(),
                     value: 12,
                     reference: 4,
                     population: 20,
@@ -1572,11 +1572,11 @@ mod tests {
         ];
         result.source_contexts = vec![SourceContext {
             subject: "demo::engine".into(),
-            metric: "clone_call_syntax_sites".into(),
+            metric: "clone_for_iteration_sites".into(),
             path: "src/engine.rs".into(),
             start_line: 12,
             end_line: 12,
-            excerpt: "value.clone()".into(),
+            excerpt: "for value in values.clone() {".into(),
             excerpt_truncated: false,
         }];
 
@@ -1590,7 +1590,7 @@ mod tests {
         assert_eq!(value["observations"].as_array().unwrap().len(), 1);
         assert_eq!(
             value["observations"][0]["title"],
-            "Repeated copying may be worth measuring"
+            "A collection is cloned just to iterate it"
         );
         assert_eq!(value["observations"][0]["path"], "src/engine.rs");
         assert_eq!(
@@ -1713,8 +1713,8 @@ mod tests {
                 "Complex logic is concentrated here",
             ),
             (
-                "runtime.clone_syntax_outlier",
-                "Repeated copying may be worth measuring",
+                "runtime.clone_for_iteration_candidate",
+                "A collection is cloned just to iterate it",
             ),
             (
                 "build.rebuild_exposure_candidate",
@@ -2059,7 +2059,7 @@ mod tests {
         for rule in [
             "refactor.multi_signal_candidate",
             "structure.current_coupled_outlier",
-            "runtime.clone_syntax_outlier",
+            "runtime.clone_for_iteration_candidate",
             "build.rebuild_exposure_candidate",
         ] {
             result.findings.push(Finding {
@@ -2084,7 +2084,7 @@ mod tests {
 
         assert!(rendered.contains("Possible refactoring opportunity"));
         assert!(rendered.contains("This module may be harder to change safely"));
-        assert!(rendered.contains("Repeated copying may be worth measuring"));
+        assert!(rendered.contains("A collection is cloned just to iterate it"));
         assert!(rendered.contains("Changes here may affect many parts of the repository"));
         assert!(rendered.contains("<h2>What needs attention</h2>"));
     }
@@ -2193,7 +2193,7 @@ mod tests {
             },
             Finding {
                 fingerprint: "observe".into(),
-                rule: "runtime.clone_syntax_outlier".into(),
+                rule: "runtime.clone_for_iteration_candidate".into(),
                 subject: "demo::engine".into(),
                 identity: "demo::engine".into(),
                 configuration: "host".into(),
@@ -2216,7 +2216,7 @@ mod tests {
         assert!(rendered.contains("1 investigate"));
         assert!(rendered.contains("1 observation"));
         assert!(rendered.contains("Possible refactoring opportunity"));
-        assert!(rendered.contains("Repeated copying may be worth measuring"));
+        assert!(rendered.contains("A collection is cloned just to iterate it"));
         assert!(rendered.contains("Priority 2 — investigate"));
         assert!(rendered.contains("strong evidence"));
         assert!(rendered.contains("worsened"));
