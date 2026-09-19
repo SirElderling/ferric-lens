@@ -698,3 +698,86 @@ fn materialize_worktree_reports_stale_non_directory_path() {
     assert!(error.contains("cannot clear temporary baseline directory"));
     fs::remove_file(path).unwrap();
 }
+
+
+#[test]
+fn baseline_selection_helper_propagates_merge_base_shape_errors() {
+    assert!(super::baseline_selection_from_merge_bases(
+        "main".into(),
+        "a".repeat(40),
+        ""
+    )
+    .is_err());
+}
+
+#[test]
+fn exact_rename_detection_reports_tree_lookup_failure() {
+    let root = std::env::temp_dir().join(format!(
+        "ferric-lens-rename-tree-error-{}-{}",
+        std::process::id(),
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let mut changes = ChangeSet::default();
+    changes.deleted.insert("old.rs".into());
+    changes.added.insert("new.rs".into());
+
+    assert!(super::detect_exact_worktree_renames(&root, "HEAD", &mut changes).is_err());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn exact_rename_detection_reports_missing_added_path_hash_failure() {
+    let repo = Repo::new("rename-hash-error");
+    repo.write("old.rs", "same");
+    let baseline = repo.commit("baseline");
+    fs::remove_file(repo.root.join("old.rs")).unwrap();
+
+    let mut changes = ChangeSet::default();
+    changes.deleted.insert("old.rs".into());
+    changes.added.insert("missing-new.rs".into());
+
+    assert!(super::detect_exact_worktree_renames(&repo.root, &baseline, &mut changes).is_err());
+}
+
+#[test]
+fn exact_rename_detection_does_not_guess_ambiguous_duplicate_content() {
+    let repo = Repo::new("rename-ambiguous");
+    repo.write("old-a.rs", "same");
+    repo.write("old-b.rs", "same");
+    let baseline = repo.commit("baseline");
+    fs::remove_file(repo.root.join("old-a.rs")).unwrap();
+    fs::remove_file(repo.root.join("old-b.rs")).unwrap();
+    repo.write("new.rs", "same");
+
+    let changes = changes_since(&repo.root, &baseline).unwrap();
+
+    assert!(changes.renames.is_empty());
+    assert!(changes.deleted.contains("old-a.rs"));
+    assert!(changes.deleted.contains("old-b.rs"));
+    assert!(changes.added.contains("new.rs"));
+}
+
+#[test]
+fn git_text_os_propagates_native_git_failure() {
+    let repo = Repo::new("git-text-os-error");
+    let args = vec![
+        std::ffi::OsString::from("rev-parse"),
+        std::ffi::OsString::from("--verify"),
+        std::ffi::OsString::from("definitely-missing"),
+    ];
+
+    assert!(super::git_text_os(&repo.root, args).is_err());
+}
+
+#[test]
+fn automatic_candidates_helper_handles_missing_base_ref_and_empty_symbolic_head() {
+    let repo = Repo::new("automatic-helper");
+
+    let candidates = super::automatic_target_candidates_with_base(&repo.root, None);
+
+    assert!(candidates
+        .iter()
+        .any(|(candidate, _)| candidate == "refs/remotes/origin/main"));
+}
