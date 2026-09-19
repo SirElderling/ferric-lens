@@ -605,7 +605,27 @@ If a newer version finds an issue that an older version did not, the newer resul
 
 Recompute both baseline and head using that same version. Never classify a new rule's discovery of unchanged historical debt as a PR regression merely by comparing output from different tool versions.
 
-## 25. Success criteria
+## 25. Test-driven development contract
+
+Test-driven development is a core project requirement, not an optional implementation preference.
+
+For every behavior change, bug fix, rule, parser capability, output contract, or regression:
+
+1. derive the expected behavior from this specification and the public contract,
+2. add or change a focused automated test first,
+3. run it and confirm that it fails for the intended reason,
+4. implement the smallest change that makes the test pass,
+5. refactor only while the full suite remains green.
+
+A change is not complete merely because the implementation appears correct. Its externally observable behavior must be covered by deterministic automated tests. Bug fixes require a regression test that demonstrates the bug before the fix. Gate rules require positive, negative, boundary, incomplete-evidence, baseline, and acceptance cases where applicable. Determinism and output-contract changes require repeatability and cross-artifact consistency tests.
+
+Tests must assert behavior rather than mirror implementation details. Prefer public CLI and analysis-model contracts for integration tests and small focused unit tests for deterministic algorithms. Tests must be offline, reproducible, isolated from user/global Git and Cargo configuration where relevant, and must not depend on wall-clock time, network access, random ordering, or mutable external state.
+
+CI must treat the automated test suite as a required gate on Linux and macOS. No production behavior may be added solely to make an after-the-fact characterization test pass if that behavior is not supported by this specification.
+
+The existing implementation predates this explicit TDD contract. Before v1 is considered complete, its already implemented behavior must be backfilled with specification-derived characterization and regression tests. Those tests are to be designed from the documented behavior first and then run against the implementation; failures indicate either an implementation gap or a specification/test mismatch that must be resolved explicitly.
+
+## 26. Success criteria
 
 Ferric Lens v1 is successful when a developer can point it at a Rust repository with no configuration and receive a reproducible result that clearly answers:
 
