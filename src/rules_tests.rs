@@ -397,3 +397,11 @@ fn descriptive_small_population_candidates_require_four_subjects_and_a_unique_ma
             || finding.rule == "runtime.small_population_clone_concentration"
     }));
 }
+
+
+#[test]
+fn unique_max_helper_handles_empty_and_singleton_inputs_without_false_concentration() {
+    assert_eq!(super::unique_max_above_median(&[]), None);
+    assert_eq!(super::unique_max_above_median(&[7]), None);
+    assert_eq!(super::unique_max_above_median(&[1, 2]), None);
+}
