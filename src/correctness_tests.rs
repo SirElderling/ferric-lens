@@ -250,7 +250,10 @@ fn mutable_clone_binding_rejects_non_bindings_invalid_names_and_non_clones() {
         super::mutable_clone_binding("let mut value-name = source.clone();"),
         None
     );
-    assert_eq!(super::mutable_clone_binding("let mut value = source;"), None);
+    assert_eq!(
+        super::mutable_clone_binding("let mut value = source;"),
+        None
+    );
     assert_eq!(
         super::mutable_clone_binding("let mut value = source.clone();"),
         Some("value")
