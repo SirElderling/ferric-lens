@@ -216,7 +216,8 @@ fn rejects_oversized_import_before_reading_contents() {
 
     assert!(error.contains("exceeds the 16 MiB limit"));
     fs::remove_file(path).unwrap();
-}\n
+}
+
 #[test]
 fn reports_read_error_after_metadata_succeeds() {
     let root = std::env::temp_dir().join(format!(
