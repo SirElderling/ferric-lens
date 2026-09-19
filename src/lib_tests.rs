@@ -104,10 +104,7 @@ fn advisory_baseline_attribution_distinguishes_unchanged_worsened_new_and_unknow
         finding("refactor.example", "demo::moved"),
         finding("other", "missing"),
     ];
-    let baseline_findings = vec![finding(
-        "structure.current_coupled_outlier",
-        "demo::old",
-    )];
+    let baseline_findings = vec![finding("structure.current_coupled_outlier", "demo::old")];
     let correspondence = Correspondence {
         head_to_baseline: [(0, 0)].into_iter().collect(),
         ambiguous_head: BTreeSet::from([2]),
