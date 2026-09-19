@@ -564,7 +564,7 @@ pub fn source_contexts_for_findings(
                 expected_digest,
                 &resolved_features_by_crate
                     .get(&module.crate_name)
-                    .map(|features| cfg.with_features(features))
+                    .map(|features| cfg.with_resolved_features(features))
                     .unwrap_or_else(|| cfg.clone()),
             )?,
         );
