@@ -54,7 +54,11 @@ impl ProfileContext {
 fn rustc_host() -> Result<String, String> {
     let mut command = Command::new("rustc");
     command.arg("-vV");
-    let output = run_rustc_host(&mut command)?;
+    run_rustc_host_and_parse(&mut command)
+}
+
+fn run_rustc_host_and_parse(command: &mut Command) -> Result<String, String> {
+    let output = run_rustc_host(command)?;
     parse_rustc_host_output(&output)
 }
 
