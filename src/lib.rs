@@ -42,17 +42,19 @@ struct SnapshotAnalysis {
     parse_failures: usize,
 }
 
+type SourceContextOp = fn(
+    &Path,
+    &SnapshotAnalysis,
+    &[model::Finding],
+    &profile::ProfileContext,
+) -> Result<Vec<model::SourceContext>, String>;
+
 struct AnalysisOps {
     materialize_baseline: fn(&Path, &str) -> Result<git::TemporaryWorktree, String>,
     analyze_baseline:
         fn(&Path, &Path, &profile::ProfileContext) -> Result<SnapshotAnalysis, String>,
     sample_history: fn(&Path) -> Result<git::HistorySample, String>,
-    source_contexts: fn(
-        &Path,
-        &SnapshotAnalysis,
-        &[model::Finding],
-        &profile::ProfileContext,
-    ) -> Result<Vec<model::SourceContext>, String>,
+    source_contexts: SourceContextOp,
 }
 
 const REAL_OPS: AnalysisOps = AnalysisOps {
