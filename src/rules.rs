@@ -88,6 +88,22 @@ pub fn refactor_candidates(findings: &[Finding]) -> Vec<Finding> {
         let identity = refactor_identity(subject, &supporting);
         let delta = refactor_delta(&supporting);
         let direction = refactor_direction(signals.keys().copied().collect());
+        let has_strong_support = supporting.iter().any(|finding| {
+            matches!(
+                finding.evidence_class,
+                EvidenceClass::Strong | EvidenceClass::Proven
+            )
+        });
+        let evidence_class = if has_strong_support {
+            EvidenceClass::Strong
+        } else {
+            EvidenceClass::Candidate
+        };
+        let priority = if has_strong_support {
+            Priority::Investigate
+        } else {
+            Priority::Observe
+        };
 
         candidates.push(Finding {
             fingerprint: String::new(),
@@ -95,8 +111,8 @@ pub fn refactor_candidates(findings: &[Finding]) -> Vec<Finding> {
             subject: subject.to_owned(),
             identity,
             configuration: String::new(),
-            evidence_class: EvidenceClass::Strong,
-            priority: Priority::Investigate,
+            evidence_class,
+            priority,
             delta,
             gate: false,
             accepted: false,
@@ -121,7 +137,6 @@ fn refactor_signal(metric: &str) -> Option<(&'static str, &'static str)> {
         "local_dependency_modules" | "reverse_repository_dependents" => {
             Some(("dependency_surface", "dependency surface"))
         }
-        "clone_call_syntax_sites" => Some(("copying_runtime_risk", "copying/runtime risk")),
         _ => None,
     }
 }
@@ -343,7 +358,7 @@ fn small_population_clone_concentrations(modules: &[ModuleMetrics]) -> Vec<Findi
 fn small_population_rebuild_concentrations(modules: &[ModuleMetrics]) -> Vec<Finding> {
     let eligible = modules
         .iter()
-        .filter(|module| module.parse_complete)
+        .filter(|module| module.parse_complete && !module.module_path.is_empty())
         .collect::<Vec<_>>();
     if eligible.len() < MIN_DESCRIPTIVE_POPULATION || eligible.len() >= MIN_POPULATION {
         return Vec::new();
