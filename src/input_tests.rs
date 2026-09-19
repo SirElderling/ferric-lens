@@ -2188,9 +2188,7 @@ fn target_without_resolve_features_uses_unresolved_profile_cfg() {
     )
     .unwrap();
 
-    assert!(limitations
-        .iter()
-        .any(|detail| detail.contains("unresolved cfg reachability")));
-    assert!(!sources.iter().any(|source| source.module_path == "gated"));
+    assert!(limitations.is_empty());
+    assert!(sources.iter().any(|source| source.module_path == "gated"));
     fs::remove_dir_all(root).unwrap();
 }
