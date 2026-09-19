@@ -6,8 +6,8 @@ use std::{
 };
 
 use super::{
-    changes_since, inspect, is_object_id, materialize_worktree, parse_history,
-    resolve_baseline, resolve_commit, sample_history, ChangeSet,
+    changes_since, inspect, is_object_id, materialize_worktree, parse_history, resolve_baseline,
+    resolve_commit, sample_history, ChangeSet,
 };
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);

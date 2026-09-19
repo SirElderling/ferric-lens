@@ -150,8 +150,7 @@ fn library_and_binary_with_same_target_name_remain_distinct() {
         workspace_root: root.to_string_lossy().into_owned(),
     };
 
-    let (sources, aliases, limitations) =
-        inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert!(limitations.is_empty());
     assert!(sources
@@ -687,8 +686,7 @@ fn workspace_metadata_builds_renamed_dependency_aliases_and_skips_non_production
         workspace_root: root.to_string_lossy().into_owned(),
     };
 
-    let (sources, aliases, limitations) =
-        inventory_from_metadata(&root, metadata, None).unwrap();
+    let (sources, aliases, limitations) = inventory_from_metadata(&root, metadata, None).unwrap();
 
     assert!(limitations.is_empty());
     assert_eq!(sources.len(), 2);

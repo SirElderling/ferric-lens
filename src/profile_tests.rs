@@ -5,8 +5,7 @@ use super::{parse_rustc_host_output, ProfileContext};
 #[test]
 fn normalizes_explicit_profile_inputs() {
     let features = vec![" z ".into(), "a".into(), "a".into(), " ".into()];
-    let profile =
-        ProfileContext::resolve(Some(" x86_64-unknown-linux-gnu "), &features).unwrap();
+    let profile = ProfileContext::resolve(Some(" x86_64-unknown-linux-gnu "), &features).unwrap();
 
     assert_eq!(profile.public.target, "x86_64-unknown-linux-gnu");
     assert_eq!(profile.public.features, ["a", "z"]);

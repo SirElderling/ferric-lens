@@ -58,9 +58,8 @@ fn records_churn_and_top_cochange_for_candidate_paths() {
 #[test]
 fn broad_commits_count_churn_but_skip_cochange_pairs() {
     let mut paths = vec!["src/a.rs".to_owned()];
-    paths.extend(
-        (0..=super::MAX_COCHANGE_PATHS_PER_COMMIT).map(|index| format!("src/x{index}.rs")),
-    );
+    paths
+        .extend((0..=super::MAX_COCHANGE_PATHS_PER_COMMIT).map(|index| format!("src/x{index}.rs")));
     let sample = HistorySample {
         commits: vec![HistoryCommit {
             oid: "a".repeat(40),
