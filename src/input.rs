@@ -296,7 +296,7 @@ fn inventory_from_metadata(
     for package in &packages {
         let package_root = manifest_parent(&package.manifest_path)?;
 
-        if !package_roots.contains_key(package_root) {
+        if !package_roots.contains_key(&package_root) {
             continue;
         }
 
