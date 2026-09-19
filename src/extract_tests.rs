@@ -431,7 +431,6 @@ fn non_boolean_binary_expressions_do_not_count_as_decisions() {
     assert_eq!(metrics.decision_sites, 0);
 }
 
-
 #[test]
 fn extracts_function_type_and_clone_syntax_facts_deterministically() {
     use crate::model::{FunctionKind, TypeKind};
@@ -471,14 +470,10 @@ fn extracts_function_type_and_clone_syntax_facts_deterministically() {
 
     assert_eq!(metrics.clone_calls, 3);
     assert!(metrics.functions.iter().any(|fact| {
-        fact.name == "top_level"
-            && fact.kind == FunctionKind::Function
-            && fact.public_declared
+        fact.name == "top_level" && fact.kind == FunctionKind::Function && fact.public_declared
     }));
     assert!(metrics.functions.iter().any(|fact| {
-        fact.name == "PublicType::make"
-            && fact.kind == FunctionKind::Method
-            && fact.public_declared
+        fact.name == "PublicType::make" && fact.kind == FunctionKind::Method && fact.public_declared
     }));
     assert!(metrics.functions.iter().any(|fact| {
         fact.name == "PublicType::duplicate"
