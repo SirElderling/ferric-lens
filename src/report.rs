@@ -723,7 +723,6 @@ mod tests {
         assert!(!rendered.contains("instructions = 1 count —"));
     }
 
-
     #[test]
     fn separates_structural_runtime_and_build_advisories() {
         use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
