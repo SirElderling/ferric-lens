@@ -1750,17 +1750,20 @@ fn cargo_resolution_identity_covers_checkout_boundaries_dependencies_and_orderin
         dependencies: Vec::new(),
     };
     let metadata = Metadata {
-        packages: vec![second.clone(), outside_package, first.clone()],
+        packages: vec![second, outside_package, first],
         workspace_members: vec!["demo-id".into(), "second-id".into(), "outside-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
     };
+    let first_id = super::cargo_resolution_identity(&root, &metadata).unwrap();
+
+    let mut packages = metadata.packages;
+    let first = packages.pop().unwrap();
+    let second = packages.remove(0);
     let reordered = Metadata {
         packages: vec![first, second],
         workspace_members: vec!["second-id".into(), "demo-id".into()],
         workspace_root: root.to_string_lossy().into_owned(),
     };
-
-    let first_id = super::cargo_resolution_identity(&root, &metadata).unwrap();
     let reordered_id = super::cargo_resolution_identity(&root, &reordered).unwrap();
 
     assert_eq!(first_id, reordered_id);
