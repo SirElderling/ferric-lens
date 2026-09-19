@@ -398,7 +398,7 @@ fn change_record_parser_covers_all_supported_statuses_and_truncation() {
 #[test]
 fn exact_rename_helpers_reject_malformed_or_mismatched_git_output() {
     let tree = b"100644 blob abc123\told.rs\x00malformed\x00100644 blob\tmissing.rs\x00";
-    let parsed = super::parse_tree_oids(tree);
+    let parsed = super::parse_tree_oids(tree).unwrap();
     assert_eq!(
         parsed
             .get("abc123")
