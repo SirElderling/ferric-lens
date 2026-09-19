@@ -283,11 +283,7 @@ fn analyze_internal_with_ops(
 
     findings.extend(gate.findings);
     finalize_findings(root, &profile.public.id, &mut findings)?;
-    findings.sort_by(|a, b| {
-        b.gate
-            .cmp(&a.gate)
-            .then_with(|| (&a.rule, &a.subject).cmp(&(&b.rule, &b.subject)))
-    });
+    sort_findings(&mut findings);
 
     let has_regression = findings
         .iter()
@@ -447,6 +443,18 @@ pub fn accept_finding_with_profile(
         reason,
         &result.snapshot.content_digest,
     )
+}
+
+
+fn sort_findings(findings: &mut [model::Finding]) {
+    findings.sort_by(|a, b| {
+        let gate_order = b.gate.cmp(&a.gate);
+        if gate_order == std::cmp::Ordering::Equal {
+            (&a.rule, &a.subject).cmp(&(&b.rule, &b.subject))
+        } else {
+            gate_order
+        }
+    });
 }
 
 fn history_candidates(
