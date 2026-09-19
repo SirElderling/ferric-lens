@@ -334,3 +334,146 @@ fn automatic_candidates_include_symbolic_origin_head() {
         .iter()
         .any(|(candidate, explicit)| candidate == "origin/main" && !explicit));
 }
+
+
+#[test]
+fn merge_base_parser_requires_exactly_one_commit() {
+    assert!(super::parse_merge_base_output("main", "").is_err());
+    assert!(super::parse_merge_base_output("main", "a\nb\n").is_err());
+    assert_eq!(
+        super::parse_merge_base_output("main", "  abc123  \n").unwrap(),
+        "abc123"
+    );
+}
+
+#[test]
+fn change_record_parser_covers_all_supported_statuses_and_truncation() {
+    let records = vec![
+        "A".to_owned(),
+        "added.rs".to_owned(),
+        "D".to_owned(),
+        "deleted.rs".to_owned(),
+        "M".to_owned(),
+        "modified.rs".to_owned(),
+        "T".to_owned(),
+        "typed.rs".to_owned(),
+        "X".to_owned(),
+        "ignored.rs".to_owned(),
+        "R100".to_owned(),
+        "old.rs".to_owned(),
+        "new.rs".to_owned(),
+    ];
+    let changes = super::parse_change_records(&records).unwrap();
+
+    assert!(changes.added.contains("added.rs"));
+    assert!(changes.deleted.contains("deleted.rs"));
+    assert!(changes.modified.contains("modified.rs"));
+    assert!(changes.modified.contains("typed.rs"));
+    assert!(!changes.modified.contains("ignored.rs"));
+    assert_eq!(changes.renames.get("old.rs").map(String::as_str), Some("new.rs"));
+
+    assert!(super::parse_change_records(&["M".to_owned()]).is_err());
+    assert!(super::parse_change_records(&["R100".to_owned(), "old.rs".to_owned()]).is_err());
+}
+
+#[test]
+fn exact_rename_helpers_reject_malformed_or_mismatched_git_output() {
+    let tree = b"100644 blob abc123\told.rs\0malformed\0100644 blob\tmissing.rs\0";
+    let parsed = super::parse_tree_oids(tree);
+    assert_eq!(
+        parsed.get("abc123").and_then(|paths| paths.first()).map(String::as_str),
+        Some("old.rs")
+    );
+
+    let added = vec!["new.rs".to_owned(), "other.rs".to_owned()];
+    assert!(super::index_added_hashes(&added, "abc123\n").is_err());
+    let indexed = super::index_added_hashes(&added, "abc123\ndef456\n").unwrap();
+    assert_eq!(indexed["abc123"], ["new.rs"]);
+    assert_eq!(indexed["def456"], ["other.rs"]);
+}
+
+#[test]
+fn baseline_candidate_and_resolved_commit_parsers_handle_empty_inputs() {
+    let mut candidates = Vec::new();
+    super::append_base_candidates(&mut candidates, " main ");
+    super::append_base_candidates(&mut candidates, "   ");
+    assert_eq!(
+        candidates,
+        vec![
+            ("refs/remotes/origin/main".to_owned(), false),
+            ("main".to_owned(), false)
+        ]
+    );
+
+    assert!(super::parse_resolved_commit("main", "   ").is_err());
+    assert_eq!(
+        super::parse_resolved_commit("main", "abc123\n").unwrap(),
+        "abc123"
+    );
+}
+
+#[test]
+fn worktree_path_preparation_removes_stale_directory() {
+    let root = std::env::temp_dir().join(format!(
+        "ferric-lens-worktree-prepare-{}-{}",
+        std::process::id(),
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("stale"), "old").unwrap();
+
+    super::prepare_worktree_path(&root).unwrap();
+
+    assert!(!root.exists());
+}
+
+#[test]
+fn history_counts_broad_commit_when_a_following_commit_starts() {
+    let first = "a".repeat(40);
+    let second = "b".repeat(40);
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"\0\0");
+    bytes.extend_from_slice(first.as_bytes());
+    bytes.push(0);
+    for index in 0..=super::HISTORY_MAX_COCHANGE_PATHS_PER_COMMIT {
+        bytes.extend_from_slice(format!("src/{index}.rs").as_bytes());
+        bytes.push(0);
+    }
+    bytes.extend_from_slice(b"\0\0");
+    bytes.extend_from_slice(second.as_bytes());
+    bytes.extend_from_slice(b"\0src/final.rs\0");
+
+    let sample = parse_history(&bytes).unwrap();
+
+    assert_eq!(sample.commits.len(), 2);
+    assert_eq!(sample.broad_commits_excluded_from_cochange, 1);
+}
+
+#[test]
+fn staged_rename_is_classified_by_native_git_diff() {
+    let repo = Repo::new("staged-rename");
+    repo.write("old.rs", "same");
+    let baseline = repo.commit("baseline");
+    git(&repo.root, &["mv", "old.rs", "new.rs"]);
+
+    let changes = changes_since(&repo.root, &baseline).unwrap();
+
+    assert_eq!(
+        changes.renames.get("old.rs").map(String::as_str),
+        Some("new.rs")
+    );
+}
+
+#[test]
+fn untracked_listing_reports_non_repository_errors() {
+    let root = std::env::temp_dir().join(format!(
+        "ferric-lens-untracked-error-{}-{}",
+        std::process::id(),
+        TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    assert!(super::list_untracked(&root).is_err());
+
+    fs::remove_dir_all(root).unwrap();
+}
