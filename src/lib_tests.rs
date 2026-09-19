@@ -110,6 +110,7 @@ fn advisory_baseline_attribution_distinguishes_unchanged_worsened_new_and_unknow
     let mut findings = vec![
         unchanged,
         worsened_clone,
+        finding("build.rebuild_exposure_candidate", "demo::moved"),
         finding("build.rebuild_exposure_candidate", "demo::added"),
         finding("build.rebuild_exposure_candidate", "demo::ambiguous"),
         finding("build.rebuild_exposure_candidate", "demo::unmatched"),
@@ -145,13 +146,16 @@ fn advisory_baseline_attribution_distinguishes_unchanged_worsened_new_and_unknow
     assert_eq!(findings[1].identity, "demo::old");
     assert_eq!(findings[1].delta, DeltaStatus::Worsened);
 
-    assert_eq!(findings[2].delta, DeltaStatus::New);
-    assert_eq!(findings[3].delta, DeltaStatus::Unknown);
-    assert_eq!(findings[4].delta, DeltaStatus::Unknown);
+    assert_eq!(findings[2].identity, "demo::old");
+    assert_eq!(findings[2].delta, DeltaStatus::Unknown);
 
-    assert_eq!(findings[5].delta, DeltaStatus::Current);
+    assert_eq!(findings[3].delta, DeltaStatus::New);
+    assert_eq!(findings[4].delta, DeltaStatus::Unknown);
+    assert_eq!(findings[5].delta, DeltaStatus::Unknown);
+
     assert_eq!(findings[6].delta, DeltaStatus::Current);
     assert_eq!(findings[7].delta, DeltaStatus::Current);
+    assert_eq!(findings[8].delta, DeltaStatus::Current);
 }
 
 #[test]
