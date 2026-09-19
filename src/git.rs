@@ -360,11 +360,8 @@ fn parse_history(output: &[u8]) -> Result<HistorySample, String> {
         }
 
         if empty_run >= 2 {
-            if let Some(commit) = current.take() {
-                if commit.paths.len() > HISTORY_MAX_COCHANGE_PATHS_PER_COMMIT {
-                    broad_commits += 1;
-                }
-                commits.push(commit);
+            if current.is_some() {
+                finish_history_commit(&mut commits, current.take(), &mut broad_commits);
                 if commits.len() >= HISTORY_MAX_COMMITS {
                     truncated = true;
                     break;
@@ -400,14 +397,9 @@ fn parse_history(output: &[u8]) -> Result<HistorySample, String> {
         }
     }
 
-    if !truncated {
-        if let Some(commit) = current {
-            debug_assert!(commits.len() < HISTORY_MAX_COMMITS);
-            if commit.paths.len() > HISTORY_MAX_COCHANGE_PATHS_PER_COMMIT {
-                broad_commits += 1;
-            }
-            commits.push(commit);
-        }
+    if !truncated && current.is_some() {
+        debug_assert!(commits.len() < HISTORY_MAX_COMMITS);
+        finish_history_commit(&mut commits, current, &mut broad_commits);
     }
 
     Ok(HistorySample {
@@ -416,6 +408,20 @@ fn parse_history(output: &[u8]) -> Result<HistorySample, String> {
         broad_commits_excluded_from_cochange: broad_commits,
         truncated,
     })
+}
+
+fn finish_history_commit(
+    commits: &mut Vec<HistoryCommit>,
+    commit: Option<HistoryCommit>,
+    broad_commits: &mut usize,
+) {
+    let Some(commit) = commit else {
+        return;
+    };
+    if commit.paths.len() > HISTORY_MAX_COCHANGE_PATHS_PER_COMMIT {
+        *broad_commits += 1;
+    }
+    commits.push(commit);
 }
 
 fn is_object_id(value: &str) -> bool {
