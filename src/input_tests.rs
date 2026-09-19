@@ -1670,7 +1670,6 @@ fn stability_verification_treats_a_disappearing_source_as_an_input_change() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn cargo_resolution_identity_covers_checkout_boundaries_dependencies_and_ordering() {
     let root = temp_root();
@@ -1696,8 +1695,11 @@ fn cargo_resolution_identity_covers_checkout_boundaries_dependencies_and_orderin
         TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
     fs::create_dir_all(&outside).unwrap();
-    fs::write(outside.join("Cargo.toml"), "[package]\nname='outside'\nversion='0.1.0'\n")
-        .unwrap();
+    fs::write(
+        outside.join("Cargo.toml"),
+        "[package]\nname='outside'\nversion='0.1.0'\n",
+    )
+    .unwrap();
 
     let first = Package {
         name: "demo".into(),
@@ -1793,7 +1795,11 @@ fn cargo_resolution_identity_reports_missing_repository_manifest() {
 #[test]
 fn stability_verification_reports_source_disappearance() {
     let root = temp_root();
-    fs::write(root.join("Cargo.toml"), "[package]\nname='demo'\nversion='0.1.0'\n").unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .unwrap();
     fs::write(root.join("src/lib.rs"), "pub fn stable() {}\n").unwrap();
     let source = super::SourceFile {
         crate_name: "demo".into(),
