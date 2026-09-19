@@ -237,17 +237,8 @@ fn cfg_output_builder_propagates_parse_errors() {
 }
 
 #[test]
-fn target_detection_propagates_cfg_parser_errors_from_the_runner() {
-    use std::os::unix::process::ExitStatusExt;
-
-    let error = HostCfg::detect_for_target_with_runner(None, &[], |_| {
-        Ok(std::process::Output {
-            status: std::process::ExitStatus::from_raw(0),
-            stdout: vec![0xff],
-            stderr: Vec::new(),
-        })
-    })
-    .unwrap_err();
+fn cfg_construction_propagates_parser_errors() {
+    let error = HostCfg::from_rustc_output(&[0xff], &[]).unwrap_err();
 
     assert!(error.contains("not UTF-8"));
 }
