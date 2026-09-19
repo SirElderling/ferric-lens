@@ -708,8 +708,12 @@ fn load_context_facts(
     cfg: &HostCfg,
 ) -> Result<ContextFacts, String> {
     let path = root.join(&module.path);
-    let bytes =
-        fs::read(&path).map_err(|error| format!("cannot read {} for finding context: {error}", path.display()))?;
+    let bytes = fs::read(&path).map_err(|error| {
+        format!(
+            "cannot read {} for finding context: {error}",
+            path.display()
+        )
+    })?;
     let actual_digest = blake3::hash(&bytes).to_hex().to_string();
     if actual_digest != expected_digest {
         return Err(format!(
