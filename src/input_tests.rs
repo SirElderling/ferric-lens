@@ -1101,4 +1101,52 @@ fn fallback_recursive_directory_errors_are_propagated() {
     fs::set_permissions(&locked, permissions).unwrap();
     assert!(result.is_err());
     fs::remove_dir_all(root).unwrap();
+}\n
+#[test]
+fn metadata_helpers_report_spawn_parse_manifest_and_io_errors() {
+    let missing = temp_root().join("missing");
+    assert!(super::load_metadata(&missing, None)
+        .unwrap_err()
+        .contains("could not execute cargo metadata"));
+    assert!(super::parse_metadata_output(b"{")
+        .unwrap_err()
+        .contains("invalid cargo metadata JSON"));
+    assert!(super::manifest_parent("/").is_err());
+
+    let error = std::io::Error::new(std::io::ErrorKind::Other, "fixture");
+    assert!(super::io_with_path::<()>(
+        Err(error),
+        "inspect",
+        std::path::Path::new("fixture")
+    )
+    .unwrap_err()
+    .contains("cannot inspect"));
+}
+
+#[test]
+fn reachable_module_propagates_directory_read_errors() {
+    let root = temp_root();
+    let directory = root.join("src/directory.rs");
+    fs::create_dir_all(&directory).unwrap();
+    let mut visited = BTreeSet::new();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    let mut budget = SourceBudget::default();
+
+    let error = collect_reachable_module(
+        &root,
+        "demo",
+        &directory,
+        "directory",
+        false,
+        None,
+        &mut visited,
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("cannot read"));
+    fs::remove_dir_all(root).unwrap();
 }
