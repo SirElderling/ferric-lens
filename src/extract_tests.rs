@@ -766,6 +766,9 @@ fn source_contexts_ignore_globs_external_imports_and_missing_subjects() {
     let findings = vec![
         context_finding("demo::engine", &["local_dependency_modules"]),
         context_finding("demo::missing", &["decision_sites"]),
+        context_finding("demo::missing", &["clone_call_syntax_sites"]),
+        context_finding("demo::missing", &["local_dependency_modules"]),
+        context_finding("demo::target", &["reverse_repository_dependents"]),
     ];
 
     let contexts = super::source_contexts_for_findings(
