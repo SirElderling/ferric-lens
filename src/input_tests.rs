@@ -2212,3 +2212,75 @@ fn stable_snapshot_propagates_cargo_input_verification_errors() {
     assert!(error.contains("cannot re-read Cargo input"));
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn literal_path_modules_are_discovered_without_incompleteness() {
+    let root = temp_root();
+    fs::write(
+        root.join("src/lib.rs"),
+        "#[path = \"renamed_impl.rs\"] mod view;\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/renamed_impl.rs"), "pub fn render() {}\n").unwrap();
+
+    let mut visited = BTreeSet::new();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    let mut budget = SourceBudget::default();
+
+    collect_reachable_module(
+        &root,
+        "demo",
+        &root.join("src/lib.rs"),
+        "",
+        true,
+        None,
+        &mut visited,
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap();
+
+    assert!(limitations.is_empty());
+    assert!(sources.iter().any(|source| {
+        source.module_path == "view" && source.relative_path == "src/renamed_impl.rs"
+    }));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn non_literal_path_modules_remain_explicitly_incomplete() {
+    let root = temp_root();
+    fs::write(
+        root.join("src/lib.rs"),
+        "#[path = SOME_PATH] mod view;\n",
+    )
+    .unwrap();
+
+    let mut visited = BTreeSet::new();
+    let mut sources = Vec::new();
+    let mut limitations = Vec::new();
+    let mut budget = SourceBudget::default();
+
+    collect_reachable_module(
+        &root,
+        "demo",
+        &root.join("src/lib.rs"),
+        "",
+        true,
+        None,
+        &mut visited,
+        &mut budget,
+        &mut sources,
+        &mut limitations,
+    )
+    .unwrap();
+
+    assert!(limitations
+        .iter()
+        .any(|detail| detail.contains("path value is not a non-empty string literal")));
+
+    fs::remove_dir_all(root).unwrap();
+}
