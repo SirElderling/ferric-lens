@@ -829,6 +829,7 @@ mod tests {
 
         let mut result = minimal_result();
         for rule in [
+            "refactor.multi_signal_candidate",
             "structure.current_coupled_outlier",
             "runtime.clone_syntax_outlier",
             "build.rebuild_exposure_candidate",
@@ -853,6 +854,7 @@ mod tests {
 
         let rendered = html(&result);
 
+        assert!(rendered.contains("<h2>Refactoring candidates</h2>"));
         assert!(rendered.contains("<h2>Structural advisories</h2>"));
         assert!(rendered.contains("<h2>Runtime-risk candidates</h2>"));
         assert!(rendered.contains("<h2>Build-efficiency candidates</h2>"));
