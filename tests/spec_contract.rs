@@ -1,12 +1,12 @@
 //! Specification-derived regression tests for behavior that existed before
 //! Ferric Lens made TDD an explicit project contract.
 
-use std::{fs, path::{Path, PathBuf}, process::Command, sync::atomic::{AtomicU64, Ordering}};
+use std::{\n    fs,\n    path::{Path, PathBuf},\n    process::Command,\n    sync::atomic::{AtomicU64, Ordering},\n};
 use ferric_lens::{model::GateVerdict, report};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-struct Repo { root: PathBuf }
+struct Repo {\n    root: PathBuf,\n}
 
 impl Repo {
     fn new(name: &str) -> Self {
@@ -22,7 +22,7 @@ impl Repo {
     }
     fn write(&self, path: &str, contents: &str) {
         let path = self.root.join(path);
-        if let Some(parent) = path.parent() { fs::create_dir_all(parent).unwrap(); }
+        if let Some(parent) = path.parent() {\n            fs::create_dir_all(parent).unwrap();\n        }
         fs::write(path, contents).unwrap();
     }
     fn commit(&self, message: &str) {
@@ -30,7 +30,7 @@ impl Repo {
         git(&self.root, &["commit", "-q", "-m", message]);
     }
 }
-impl Drop for Repo { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.root); } }
+impl Drop for Repo {\n    fn drop(&mut self) {\n        let _ = fs::remove_dir_all(&self.root);\n    }\n}
 
 fn git(root: &Path, args: &[&str]) -> String {
     let output = Command::new("git").current_dir(root)
@@ -83,7 +83,7 @@ fn outputs_are_reproducible_for_identical_inputs() {
     let repo = baseline_repo();
     let first = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
     let second = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
-    assert_eq!(report::json(&first).unwrap(), report::json(&second).unwrap());
+    assert_eq!(\n        report::json(&first).unwrap(),\n        report::json(&second).unwrap()\n    );
     assert_eq!(report::html(&first), report::html(&second));
 }
 
@@ -117,7 +117,7 @@ fn malformed_rust_is_reported_as_incomplete_not_silently_complete() {
     repo.commit("baseline");
     let result = ferric_lens::check_with_base(&repo.root, Some("HEAD")).unwrap();
     assert_eq!(result.verdict, GateVerdict::Inconclusive);
-    assert!(result.capabilities.iter().any(|c| c.name == "head.syntax_extraction"));
+    assert!(result\n        .capabilities\n        .iter()\n        .any(|c| c.name == "head.syntax_extraction"));
     assert!(result.modules.iter().any(|m| !m.parse_complete));
 }
 
@@ -125,7 +125,7 @@ fn malformed_rust_is_reported_as_incomplete_not_silently_complete() {
 fn explicit_feature_selection_is_normalized_and_recorded() {
     let repo = baseline_repo();
     let features = vec!["zeta".to_owned(), "alpha".to_owned(), "alpha".to_owned()];
-    let result = ferric_lens::check_with_profile(&repo.root, Some("HEAD"), None, &features).unwrap();
+    let result =\n        ferric_lens::check_with_profile(&repo.root, Some("HEAD"), None, &features).unwrap();
     assert_eq!(result.profile.features, vec!["alpha", "zeta"]);
     assert!(result.profile.id.contains("alpha,zeta"));
 }
@@ -142,7 +142,7 @@ fn imported_evidence_is_optional_and_does_not_change_the_gate_verdict() {
   "configuration": {{"target": "host", "features": []}},
   "observations": [{{"subject": "src/lib.rs", "metric": "instructions", "value": 7, "unit": "count"}}]
 }}"#, without.snapshot.content_digest));
-    let with = ferric_lens::analyze_with_base_and_evidence(&repo.root, Some("HEAD"), Some(&evidence_path)).unwrap();
+    let with =\n        ferric_lens::analyze_with_base_and_evidence(&repo.root, Some("HEAD"), Some(&evidence_path))\n            .unwrap();
     assert_eq!(without.verdict, with.verdict);
     assert!(with.imported_evidence.as_ref().unwrap().attached);
 }
@@ -150,6 +150,6 @@ fn imported_evidence_is_optional_and_does_not_change_the_gate_verdict() {
 #[test]
 fn accept_rejects_unknown_finding_fingerprints() {
     let repo = baseline_repo();
-    let error = ferric_lens::accept_finding_with_base(&repo.root, Some("HEAD"), "not-a-current-finding", "documented exception").unwrap_err();
+    let error = ferric_lens::accept_finding_with_base(\n        &repo.root,\n        Some("HEAD"),\n        "not-a-current-finding",\n        "documented exception",\n    )\n    .unwrap_err();
     assert!(error.contains("not present in the current analysis"));
 }
