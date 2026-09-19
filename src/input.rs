@@ -8,7 +8,10 @@ use std::{
 use serde::Deserialize;
 use syn::{Attribute, Item, ItemMod};
 
-use crate::{cfg::Truth, profile::ProfileContext};
+use crate::{
+    cfg::{HostCfg, Truth},
+    profile::ProfileContext,
+};
 
 pub type WorkspaceAliases = BTreeMap<String, BTreeMap<String, String>>;
 
@@ -73,6 +76,7 @@ pub struct AuxiliaryTargetSummary {
 pub struct Inventory {
     pub sources: Vec<SourceFile>,
     pub workspace_aliases: WorkspaceAliases,
+    pub resolved_features_by_crate: BTreeMap<String, Vec<String>>,
     pub content_digest: String,
     pub metadata_complete: bool,
     pub metadata_detail: Option<String>,
@@ -86,6 +90,21 @@ struct Metadata {
     packages: Vec<Package>,
     workspace_members: Vec<String>,
     workspace_root: String,
+    #[serde(default)]
+    resolve: Option<Resolve>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Resolve {
+    #[serde(default)]
+    nodes: Vec<ResolveNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResolveNode {
+    id: String,
+    #[serde(default)]
+    features: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,6 +139,7 @@ struct TargetRoot {
     source: PathBuf,
     package_root: PathBuf,
     dependencies: Vec<Dependency>,
+    resolved_features: Vec<String>,
 }
 
 pub fn inventory(root: &Path) -> Result<Inventory, String> {
@@ -191,7 +211,13 @@ fn finalize_verified_inventory(
     Ok(inventory)
 }
 
-type AcquiredInventory = (Vec<SourceFile>, WorkspaceAliases, bool, Option<String>);
+type AcquiredInventory = (
+    Vec<SourceFile>,
+    WorkspaceAliases,
+    BTreeMap<String, Vec<String>>,
+    bool,
+    Option<String>,
+);
 
 fn acquire_inventory(
     root: &Path,
@@ -200,9 +226,10 @@ fn acquire_inventory(
 ) -> Result<AcquiredInventory, String> {
     match metadata {
         Ok(metadata) => match inventory_from_metadata(root, metadata, profile) {
-            Ok((sources, aliases, limitations)) => Ok((
+            Ok((sources, aliases, resolved_features_by_crate, limitations)) => Ok((
                 sources,
                 aliases,
+                resolved_features_by_crate,
                 limitations.is_empty(),
                 summarize_limitations(&limitations),
             )),
@@ -211,6 +238,7 @@ fn acquire_inventory(
                 Ok((
                     sources,
                     WorkspaceAliases::new(),
+                    BTreeMap::new(),
                     false,
                     fallback_detail(
                         &format!("Cargo metadata inventory failed: {error}"),
@@ -224,6 +252,7 @@ fn acquire_inventory(
             Ok((
                 sources,
                 WorkspaceAliases::new(),
+                BTreeMap::new(),
                 false,
                 fallback_detail(
                     &format!("Cargo metadata unavailable: {error}"),
@@ -235,7 +264,7 @@ fn acquire_inventory(
 }
 
 fn finalize_inventory(acquired: AcquiredInventory) -> Inventory {
-    let (mut sources, workspace_aliases, complete, detail) = acquired;
+    let (mut sources, workspace_aliases, resolved_features_by_crate, complete, detail) = acquired;
     sources.sort_by(|a, b| {
         (&a.crate_name, &a.module_path, &a.relative_path).cmp(&(
             &b.crate_name,
@@ -275,6 +304,7 @@ fn finalize_inventory(acquired: AcquiredInventory) -> Inventory {
     Inventory {
         sources,
         workspace_aliases,
+        resolved_features_by_crate,
         content_digest: hasher.finalize().to_hex().to_string(),
         metadata_complete: complete,
         metadata_detail: detail,
@@ -413,6 +443,7 @@ fn cargo_resolution_identity(
         .iter()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
+    let resolved_features = resolved_features_by_package(metadata);
     let mut records = Vec::new();
 
     for package in metadata
@@ -472,13 +503,17 @@ fn cargo_resolution_identity(
             manifest_bytes,
             targets,
             dependencies,
+            resolved_features
+                .get(&package.id)
+                .cloned()
+                .unwrap_or_default(),
         ));
     }
     records.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
 
     let mut hasher = blake3::Hasher::new();
     hasher.update(cargo_input_digest.as_bytes());
-    for (name, manifest, bytes, targets, dependencies) in records {
+    for (name, manifest, bytes, targets, dependencies, features) in records {
         hasher.update(name.as_bytes());
         hasher.update(&[0]);
         hasher.update(manifest.as_bytes());
@@ -492,6 +527,10 @@ fn cargo_resolution_identity(
         for dependency in dependencies {
             hasher.update(dependency.as_bytes());
             hasher.update(&[0xfd]);
+        }
+        for feature in features {
+            hasher.update(feature.as_bytes());
+            hasher.update(&[0xfc]);
         }
     }
     Ok(hasher.finalize().to_hex().to_string())
@@ -554,7 +593,6 @@ fn load_metadata(root: &Path, profile: Option<&ProfileContext>) -> Result<Metada
         "metadata",
         "--format-version",
         "1",
-        "--no-deps",
         "--offline",
         "--locked",
     ]);
@@ -607,17 +645,40 @@ fn io_with_path<T>(result: std::io::Result<T>, action: &str, path: &Path) -> Res
     }
 }
 
+fn resolved_features_by_package(metadata: &Metadata) -> BTreeMap<String, Vec<String>> {
+    let mut by_package = BTreeMap::new();
+    let Some(resolve) = &metadata.resolve else {
+        return by_package;
+    };
+    for node in &resolve.nodes {
+        let mut features = node.features.clone();
+        features.sort();
+        features.dedup();
+        by_package.insert(node.id.clone(), features);
+    }
+    by_package
+}
+
 fn inventory_from_metadata(
     root: &Path,
     metadata: Metadata,
     profile: Option<&ProfileContext>,
-) -> Result<(Vec<SourceFile>, WorkspaceAliases, Vec<String>), String> {
+) -> Result<
+    (
+        Vec<SourceFile>,
+        WorkspaceAliases,
+        BTreeMap<String, Vec<String>>,
+        Vec<String>,
+    ),
+    String,
+> {
     let metadata_root = PathBuf::from(&metadata.workspace_root);
     let members: BTreeSet<&str> = metadata
         .workspace_members
         .iter()
         .map(String::as_str)
         .collect();
+    let resolved_features_by_package = resolved_features_by_package(&metadata);
 
     let packages = metadata
         .packages
@@ -638,7 +699,8 @@ fn inventory_from_metadata(
         package_root_by_id.insert(package.id.clone(), package_root);
     }
 
-    let mut raw_targets = Vec::<(String, &'static str, PathBuf, PathBuf, Vec<Dependency>)>::new();
+    let mut raw_targets =
+        Vec::<(String, &'static str, PathBuf, PathBuf, Vec<Dependency>, Vec<String>)>::new();
     for package in &packages {
         let Some(package_root) = package_root_by_id.get(&package.id).cloned() else {
             continue;
@@ -671,12 +733,16 @@ fn inventory_from_metadata(
                 source,
                 package_root.to_path_buf(),
                 package.dependencies.clone(),
+                resolved_features_by_package
+                    .get(&package.id)
+                    .cloned()
+                    .unwrap_or_default(),
             ));
         }
     }
 
     let mut name_counts = BTreeMap::<(PathBuf, String), usize>::new();
-    for (import_name, _, _, package_root, _) in &raw_targets {
+    for (import_name, _, _, package_root, _, _) in &raw_targets {
         *name_counts
             .entry((package_root.clone(), import_name.clone()))
             .or_default() += 1;
@@ -684,7 +750,8 @@ fn inventory_from_metadata(
 
     let mut target_roots = raw_targets
         .into_iter()
-        .map(|(import_name, kind, source, package_root, dependencies)| {
+        .map(
+            |(import_name, kind, source, package_root, dependencies, resolved_features)| {
             let duplicate_name = name_counts
                 .get(&(package_root.clone(), import_name.clone()))
                 .copied()
@@ -702,8 +769,10 @@ fn inventory_from_metadata(
                 source,
                 package_root,
                 dependencies,
+                resolved_features,
             }
-        })
+        },
+        )
         .collect::<Vec<_>>();
 
     target_roots.sort_by(|left, right| (&left.id, &left.source).cmp(&(&right.id, &right.source)));
@@ -717,6 +786,11 @@ fn inventory_from_metadata(
             );
         }
     }
+
+    let resolved_features_by_crate = target_roots
+        .iter()
+        .map(|target| (target.id.clone(), target.resolved_features.clone()))
+        .collect::<BTreeMap<_, _>>();
 
     let mut aliases = WorkspaceAliases::new();
     for target in &target_roots {
@@ -767,7 +841,7 @@ fn inventory_from_metadata(
 
     limitations.sort();
     limitations.dedup();
-    Ok((sources, aliases, limitations))
+    Ok((sources, aliases, resolved_features_by_crate, limitations))
 }
 
 fn collect_target_roots(
@@ -783,13 +857,14 @@ fn collect_target_roots(
             break;
         }
         let mut visited = BTreeSet::new();
+        let target_cfg = profile.map(|profile| profile.cfg.with_features(&target.resolved_features));
         collect_reachable_module(
             root,
             &target.id,
             &target.source,
             "",
             true,
-            profile,
+            target_cfg.as_ref(),
             &mut visited,
             budget,
             sources,
@@ -806,7 +881,7 @@ fn collect_reachable_module(
     source_path: &Path,
     module_path: &str,
     is_crate_root: bool,
-    profile: Option<&ProfileContext>,
+    cfg: Option<&HostCfg>,
     visited: &mut BTreeSet<PathBuf>,
     budget: &mut SourceBudget,
     out: &mut Vec<SourceFile>,
@@ -845,7 +920,7 @@ fn collect_reachable_module(
         source_path,
         module_path,
         is_crate_root,
-        profile,
+        cfg,
         metadata.len(),
         source_path.canonicalize(),
         visited,
@@ -945,7 +1020,7 @@ fn collect_canonical_module(
         &syntax.items,
         module_path,
         &module_dir,
-        profile,
+        cfg,
         visited,
         budget,
         out,
@@ -960,7 +1035,7 @@ fn discover_child_modules(
     items: &[Item],
     parent_module: &str,
     module_dir: &Path,
-    profile: Option<&ProfileContext>,
+    cfg: Option<&HostCfg>,
     visited: &mut BTreeSet<PathBuf>,
     budget: &mut SourceBudget,
     out: &mut Vec<SourceFile>,
@@ -983,7 +1058,7 @@ fn discover_child_modules(
             continue;
         }
 
-        match module_cfg_state(&module.attrs, profile) {
+        match module_cfg_state(&module.attrs, cfg) {
             Truth::False => continue,
             Truth::Unknown => {
                 limitations.push(format!(
@@ -1069,8 +1144,8 @@ fn child_module_path(parent: &str, module: &ItemMod) -> String {
     }
 }
 
-fn module_cfg_state(attrs: &[Attribute], profile: Option<&ProfileContext>) -> Truth {
-    let Some(profile) = profile else {
+fn module_cfg_state(attrs: &[Attribute], cfg: Option<&HostCfg>) -> Truth {
+    let Some(cfg) = cfg else {
         return Truth::True;
     };
 
@@ -1079,7 +1154,7 @@ fn module_cfg_state(attrs: &[Attribute], profile: Option<&ProfileContext>) -> Tr
         let Ok(meta) = attr.parse_args::<syn::Meta>() else {
             return Truth::Unknown;
         };
-        state = match (state, profile.cfg.evaluate(&meta)) {
+        state = match (state, cfg.evaluate(&meta)) {
             (Truth::False, _) | (_, Truth::False) => Truth::False,
             (Truth::Unknown, _) | (_, Truth::Unknown) => Truth::Unknown,
             (Truth::True, Truth::True) => Truth::True,
