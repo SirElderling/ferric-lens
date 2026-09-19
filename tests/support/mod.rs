@@ -22,7 +22,12 @@ impl Repo {
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(
             root.join("Cargo.toml"),
-            "[package]\nname='fixture'\nversion='0.1.0'\nedition='2021'\n",
+            "[package]\nname='fixture'\nversion='0.1.0'\nedition='2021'\n\n[features]\ndefault=[]\nalpha=[]\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("Cargo.lock"),
+            "version = 4\n\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
         )
         .unwrap();
         git(&root, &["init", "-q"]);
