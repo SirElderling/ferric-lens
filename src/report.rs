@@ -16,8 +16,8 @@ pub fn result_digest(result: &AnalysisResult) -> Result<String, String> {
 
 pub fn json(result: &AnalysisResult) -> Result<String, String> {
     let digest = result_digest(result)?;
-    let mut value = serde_json::to_value(result)
-        .map_err(|error| format!("cannot serialize JSON: {error}"))?;
+    let mut value =
+        serde_json::to_value(result).map_err(|error| format!("cannot serialize JSON: {error}"))?;
     let object = value
         .as_object_mut()
         .ok_or_else(|| "analysis result did not serialize as a JSON object".to_owned())?;
