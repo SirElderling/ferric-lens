@@ -19,6 +19,7 @@ pub struct HostCfg {
     digest: String,
     reliable: bool,
     explicit_features: BTreeSet<String>,
+    features_resolved: bool,
 }
 
 impl HostCfg {
@@ -43,6 +44,7 @@ impl HostCfg {
             .map(|feature| feature.trim().to_owned())
             .filter(|feature| !feature.is_empty())
             .collect();
+        cfg.features_resolved = false;
         cfg.rehash();
         Ok(cfg)
     }
@@ -54,6 +56,7 @@ impl HostCfg {
             digest: "cfg-unavailable".into(),
             reliable: false,
             explicit_features: BTreeSet::new(),
+            features_resolved: false,
         }
     }
 
@@ -61,13 +64,14 @@ impl HostCfg {
         &self.digest
     }
 
-    pub fn with_features(&self, features: &[String]) -> Self {
+    pub fn with_resolved_features(&self, features: &[String]) -> Self {
         let mut cfg = self.clone();
         cfg.explicit_features = features
             .iter()
             .map(|feature| feature.trim().to_owned())
             .filter(|feature| !feature.is_empty())
             .collect();
+        cfg.features_resolved = true;
         cfg.rehash();
         cfg
     }
@@ -122,6 +126,8 @@ impl HostCfg {
                     };
                     return if self.explicit_features.contains(&value.value()) {
                         Truth::True
+                    } else if self.features_resolved {
+                        Truth::False
                     } else {
                         Truth::Unknown
                     };
@@ -190,6 +196,7 @@ impl HostCfg {
             digest: String::new(),
             reliable: true,
             explicit_features: BTreeSet::new(),
+            features_resolved: false,
         };
         cfg.rehash();
         Ok(cfg)
@@ -209,6 +216,7 @@ impl HostCfg {
                 hasher.update(&[0]);
             }
         }
+        hasher.update(&[u8::from(self.features_resolved)]);
         for feature in &self.explicit_features {
             hasher.update(b"feature");
             hasher.update(&[2]);
