@@ -141,8 +141,7 @@ fn imported_evidence_is_optional_and_does_not_change_the_gate_verdict() {
     {{"subject": "src/lib.rs", "metric": "instructions", "value": 7, "unit": "count"}}
   ]
 }}"#,
-            without.snapshot.content_digest,
-            without.profile.resolved_target
+            without.snapshot.content_digest, without.profile.resolved_target
         ),
     );
 
