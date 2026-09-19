@@ -159,9 +159,6 @@ fn small_population_clone_concentrations(modules: &[ModuleMetrics]) -> Vec<Findi
         let Some((index, value, reference)) = unique_max_above_median(&values) else {
             continue;
         };
-        if value == 0 {
-            continue;
-        }
         let module = population[index];
         let module_subject = subject(crate_name, &module.module_path);
         findings.push(Finding {
@@ -219,9 +216,6 @@ fn small_population_rebuild_concentrations(modules: &[ModuleMetrics]) -> Vec<Fin
     let Some((index, value, reference)) = unique_max_above_median(&values) else {
         return Vec::new();
     };
-    if value == 0 {
-        return Vec::new();
-    }
     let module = eligible[index];
     let module_subject = subject(&module.crate_name, &module.module_path);
     vec![Finding {
