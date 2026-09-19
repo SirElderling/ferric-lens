@@ -395,7 +395,9 @@ fn cargo_input_snapshot(
                 hasher.update(&[1]);
                 hasher.update(bytes);
             }
-            None => hasher.update(&[0]),
+            None => {
+                hasher.update(&[0]);
+            }
         }
         hasher.update(&[0xff]);
         entries.push(CargoInputEntry { path, label, bytes });
@@ -940,7 +942,7 @@ fn collect_canonical_module(
     source_path: &Path,
     module_path: &str,
     is_crate_root: bool,
-    profile: Option<&ProfileContext>,
+    cfg: Option<&HostCfg>,
     source_len: u64,
     canonical_result: std::io::Result<PathBuf>,
     visited: &mut BTreeSet<PathBuf>,
@@ -1090,7 +1092,7 @@ fn discover_child_modules(
                 inline_items,
                 &child_path,
                 &inline_dir,
-                profile,
+                cfg,
                 visited,
                 budget,
                 out,
@@ -1128,7 +1130,7 @@ fn discover_child_modules(
             &source,
             &child_path,
             false,
-            profile,
+            cfg,
             visited,
             budget,
             out,
