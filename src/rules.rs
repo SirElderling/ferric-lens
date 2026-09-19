@@ -261,7 +261,7 @@ fn small_population_decision_concentrations(modules: &[ModuleMetrics]) -> Vec<Fi
             .iter()
             .map(|module| module.decision_sites)
             .collect::<Vec<_>>();
-        let Some((index, value, reference)) = unique_max_above_median(&values) else {
+        let Some((index, value, reference)) = dominant_unique_max(&values) else {
             continue;
         };
         let module = population[index];
@@ -278,7 +278,7 @@ fn small_population_decision_concentrations(modules: &[ModuleMetrics]) -> Vec<Fi
             gate: false,
             accepted: false,
             acceptance_reason: None,
-            summary: "module has the highest observed decision-site count in a small cohort; this is descriptive concentration, not a statistical outlier".into(),
+            summary: "module has a clearly separated highest observed decision-site count in a small cohort; this is descriptive concentration, not a statistical outlier".into(),
             direction: "inspect whether the module concentrates multiple responsibilities; the cohort is too small for percentile-based classification".into(),
             evidence: vec![Evidence {
                 metric: "decision_sites".into(),
@@ -308,7 +308,7 @@ fn small_population_clone_concentrations(modules: &[ModuleMetrics]) -> Vec<Findi
             .iter()
             .map(|module| module.clone_calls)
             .collect::<Vec<_>>();
-        let Some((index, value, reference)) = unique_max_above_median(&values) else {
+        let Some((index, value, reference)) = dominant_unique_max(&values) else {
             continue;
         };
         let module = population[index];
@@ -325,7 +325,7 @@ fn small_population_clone_concentrations(modules: &[ModuleMetrics]) -> Vec<Findi
             gate: false,
             accepted: false,
             acceptance_reason: None,
-            summary: "module has the highest observed .clone() syntax count in a small cohort; this is descriptive concentration, not a statistical outlier and does not establish allocation or runtime cost".into(),
+            summary: "module has a clearly separated highest observed .clone() syntax count in a small cohort; this is descriptive concentration, not a statistical outlier and does not establish allocation or runtime cost".into(),
             direction: "inspect receiver types and execution frequency, then measure before changing copying or allocation behavior".into(),
             evidence: vec![Evidence {
                 metric: "clone_call_syntax_sites".into(),
@@ -365,7 +365,7 @@ fn small_population_rebuild_concentrations(modules: &[ModuleMetrics]) -> Vec<Fin
         .iter()
         .map(|module| reverse_dependents[&subject(&module.crate_name, &module.module_path)])
         .collect::<Vec<_>>();
-    let Some((index, value, reference)) = unique_max_above_median(&values) else {
+    let Some((index, value, reference)) = dominant_unique_max(&values) else {
         return Vec::new();
     };
     let module = eligible[index];
@@ -382,7 +382,7 @@ fn small_population_rebuild_concentrations(modules: &[ModuleMetrics]) -> Vec<Fin
         gate: false,
         accepted: false,
         acceptance_reason: None,
-        summary: "module has the highest observed reverse repository dependency reach in a small cohort; this is descriptive concentration, not a statistical outlier or measured compile cost".into(),
+        summary: "module has a clearly separated highest observed reverse repository dependency reach in a small cohort; this is descriptive concentration, not a statistical outlier or measured compile cost".into(),
         direction: "inspect whether this dependency boundary can remain stable or narrower, then measure incremental build impact before optimizing it".into(),
         evidence: vec![Evidence {
             metric: "reverse_repository_dependents".into(),
@@ -673,7 +673,11 @@ fn sort_findings(findings: &mut [Finding]) {
     });
 }
 
-fn unique_max_above_median(values: &[usize]) -> Option<(usize, usize, usize)> {
+fn dominant_unique_max(values: &[usize]) -> Option<(usize, usize, usize)> {
+    if values.len() < 3 {
+        return None;
+    }
+
     let (&first, rest) = values.split_first()?;
     let mut max = first;
     let mut max_index = 0usize;
@@ -696,11 +700,14 @@ fn unique_max_above_median(values: &[usize]) -> Option<(usize, usize, usize)> {
     let mut sorted = values.to_vec();
     sorted.sort_unstable();
     let median = sorted[sorted.len() / 2];
-    if max <= median {
+    let runner_up = sorted[sorted.len() - 2];
+    let material_gap = runner_up.div_ceil(2).max(2);
+
+    if max <= median || max.saturating_sub(runner_up) < material_gap {
         return None;
     }
 
-    Some((max_index, max, median))
+    Some((max_index, max, runner_up))
 }
 
 fn nearest_rank_p90(values: &[usize]) -> usize {
