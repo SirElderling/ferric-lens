@@ -295,12 +295,9 @@ fn finding_sort_orders_gates_first_then_rule_and_subject() {
     );
 }
 
-
 #[test]
 fn runtime_clone_syntax_outlier_is_candidate_only() {
-    let mut modules = (0..20)
-        .map(|index| module(index, 0, 0))
-        .collect::<Vec<_>>();
+    let mut modules = (0..20).map(|index| module(index, 0, 0)).collect::<Vec<_>>();
     for module in &mut modules {
         module.clone_calls = 1;
     }
@@ -345,9 +342,7 @@ fn build_reverse_dependency_outlier_is_candidate_only() {
 
 #[test]
 fn runtime_and_build_advisories_require_a_meaningful_population() {
-    let mut modules = (0..19)
-        .map(|index| module(index, 0, 0))
-        .collect::<Vec<_>>();
+    let mut modules = (0..19).map(|index| module(index, 0, 0)).collect::<Vec<_>>();
     modules[0].clone_calls = 99;
     for module in modules.iter_mut().skip(1) {
         module.local_dependency_modules = vec!["demo::m0".into()];
