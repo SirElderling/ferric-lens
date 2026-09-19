@@ -573,9 +573,9 @@ fn git_text_os(root: &Path, args: Vec<OsString>) -> Result<String, String> {
 }
 
 fn decode_git_text(bytes: &[u8], context: &str) -> Result<String, String> {
-    std::str::from_utf8(bytes)
-        .map(str::to_owned)
-        .map_err(|_| format!("{context} is not valid UTF-8; repository path analysis is incomplete"))
+    std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| {
+        format!("{context} is not valid UTF-8; repository path analysis is incomplete")
+    })
 }
 
 fn git_bytes<I, S>(root: &Path, args: I) -> Result<Vec<u8>, String>
