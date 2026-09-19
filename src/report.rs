@@ -435,10 +435,10 @@ mod tests {
         use std::fs;
 
         use crate::model::{
-            AnalysisProfile, AnalysisResult, ArchitectureSummary, BaselineContext, Capability,
+            AnalysisProfile, ArchitectureSummary, BaselineContext, Capability,
             CapabilityStatus, CoChangeEvidence, DependencyCycle, Evidence, EvidenceClass, Finding,
             HistoryEvidence, HistorySummary, ImportedEvidence, ImportedObservation, ModuleMetrics,
-            Priority, Snapshot,
+            Priority,
         };
 
         let mut result = minimal_result();
@@ -480,6 +480,8 @@ mod tests {
         result.imported_evidence = Some(ImportedEvidence {
             producer: "bench".into(),
             producer_version: "1".into(),
+            source_content_digest: Some("other".into()),
+            source_git_commit: None,
             target: "fixture".into(),
             features: vec!["alpha".into()],
             attached: false,
@@ -487,7 +489,7 @@ mod tests {
             observations: vec![ImportedObservation {
                 subject: "src/a.rs".into(),
                 metric: "instructions".into(),
-                value: 7.0,
+                value: 7,
                 unit: "count".into(),
                 note: Some("<note>".into()),
             }],
@@ -543,6 +545,7 @@ mod tests {
                 configuration: "fixture".into(),
                 rule: "rule.gate".into(),
                 subject: "demo::a".into(),
+                identity: "demo::a".into(),
                 evidence_class: EvidenceClass::Strong,
                 priority: Priority::ActFirst,
                 delta: crate::model::DeltaStatus::Worsened,
@@ -565,6 +568,7 @@ mod tests {
                 configuration: "fixture".into(),
                 rule: "rule.advisory".into(),
                 subject: "demo".into(),
+                identity: "demo".into(),
                 evidence_class: EvidenceClass::Candidate,
                 priority: Priority::Observe,
                 delta: crate::model::DeltaStatus::Current,
