@@ -1152,7 +1152,6 @@ fn reachable_module_propagates_directory_read_errors() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 #[test]
 fn directory_entry_collection_maps_iterator_errors() {
     let root = temp_root();
