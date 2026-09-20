@@ -719,12 +719,7 @@ pub fn html(result: &AnalysisResult) -> String {
             .filter(|finding| finding.accepted)
             .collect(),
     );
-    let active_html = render_findings(
-        &active_findings,
-        "No active finding currently has enough evidence to recommend investigation.",
-        &result.modules,
-        &result.source_contexts,
-    );
+    let active_html = render_attention_findings(result, &active_findings);
     let observation_html = render_findings(
         &observations,
         "No lower-confidence observations were emitted.",
@@ -877,6 +872,36 @@ article.finding-card.accepted .priority-badge {{ color: var(--muted); background
 .priority-investigate .guidance > div {{ border-left-color: var(--warning-border); }}
 .priority-observe .guidance > div {{ border-left-color: var(--info-border); }}
 .guidance h4 {{ margin: 0 0 .3rem; color: #f0f6fc; }}
+.finding-group {{ margin: 1.35rem 0 1.8rem; }}
+.finding-group-heading {{
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: .45rem;
+  margin-bottom: .65rem;
+}}
+.finding-group-heading h3 {{ margin: 0; }}
+.finding-facts {{
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: .45rem;
+  padding: .75rem .9rem;
+  margin: .9rem 0;
+}}
+.finding-facts h4, .finding-limit h4 {{ margin: 0 0 .35rem; }}
+.fact-list, .inspection-list, .limit-list {{ margin: .35rem 0; padding-left: 1.2rem; }}
+.fact-list li, .inspection-list li, .limit-list li {{ margin: .3rem 0; }}
+.finding-limit {{
+  background: #10151c;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--info-border);
+  border-radius: .45rem;
+  padding: .7rem .85rem;
+  margin: .9rem 0;
+  color: var(--muted);
+}}
 summary {{ cursor: pointer; color: #dbe4ee; }}
 summary:hover {{ color: #ffffff; }}
 .analysis-details {{ background: var(--surface-soft); }}
@@ -979,6 +1004,74 @@ a:hover {{ color: #a5d6ff; }}
         observation_count = observations.len(),
         accepted_count = accepted_findings.len(),
     )
+}
+
+fn render_attention_findings(result: &AnalysisResult, findings: &[&Finding]) -> String {
+    if findings.is_empty() {
+        return "<p>No active finding currently has enough evidence to recommend investigation.</p>"
+            .to_owned();
+    }
+
+    if result.baseline.is_none() {
+        let body = render_findings(
+            findings,
+            "",
+            &result.modules,
+            &result.source_contexts,
+        );
+        return format!(
+            r#"<div class="finding-group"><div class="finding-group-heading"><h3>Current findings</h3><span class="muted">Change attribution unavailable</span></div><p class="muted">No comparable baseline was available, so Ferric Lens cannot say whether these findings were introduced by the current change.</p>{body}</div>"#
+        );
+    }
+
+    let changed = findings
+        .iter()
+        .copied()
+        .filter(|finding| matches!(finding.delta, DeltaStatus::New | DeltaStatus::Worsened))
+        .collect::<Vec<_>>();
+    let existing = findings
+        .iter()
+        .copied()
+        .filter(|finding| finding.delta == DeltaStatus::Unchanged)
+        .collect::<Vec<_>>();
+    let unattributed = findings
+        .iter()
+        .copied()
+        .filter(|finding| matches!(finding.delta, DeltaStatus::Current | DeltaStatus::Unknown))
+        .collect::<Vec<_>>();
+
+    let mut html = String::new();
+    if !changed.is_empty() {
+        html.push_str(r#"<div class="finding-group"><div class="finding-group-heading"><h3>Introduced or worsened by this change</h3><span class="muted">Review these first</span></div>"#);
+        html.push_str(&render_findings(
+            &ai_ordered_findings(changed, true),
+            "",
+            &result.modules,
+            &result.source_contexts,
+        ));
+        html.push_str("</div>");
+    }
+    if !existing.is_empty() {
+        html.push_str(r#"<div class="finding-group"><div class="finding-group-heading"><h3>Existing findings</h3><span class="muted">Not introduced by this change</span></div>"#);
+        html.push_str(&render_findings(
+            &existing,
+            "",
+            &result.modules,
+            &result.source_contexts,
+        ));
+        html.push_str("</div>");
+    }
+    if !unattributed.is_empty() {
+        html.push_str(r#"<div class="finding-group"><div class="finding-group-heading"><h3>Attribution uncertain</h3><span class="muted">Baseline comparison could not classify these findings</span></div>"#);
+        html.push_str(&render_findings(
+            &unattributed,
+            "",
+            &result.modules,
+            &result.source_contexts,
+        ));
+        html.push_str("</div>");
+    }
+    html
 }
 
 fn render_repository_overview(result: &AnalysisResult) -> String {
@@ -1364,6 +1457,8 @@ fn render_findings(
     let mut html = String::new();
     for finding in ordered {
         let guidance = finding_guidance(finding);
+        let ai_guidance = ai_rule_guidance(&finding.rule);
+        let facts = ai_facts(finding, ai_guidance);
         let path = finding_path(finding, modules, source_contexts);
         let finding_anchor = anchor_id("finding", &finding.fingerprint);
 
@@ -1404,16 +1499,22 @@ fn render_findings(
         }
         html.push_str("</div></div>");
 
+        html.push_str(r#"<div class="finding-facts"><h4>Observed facts</h4><ul class="fact-list">"#);
+        for fact in &facts {
+            html.push_str("<li>");
+            html.push_str(&escape(fact));
+            html.push_str("</li>");
+        }
+        html.push_str("</ul></div>");
+
         html.push_str(r#"<div class="guidance"><div><h4>Why this matters</h4><p>"#);
         html.push_str(&escape(guidance.why_care));
         html.push_str(r#"</p></div><div><h4>If ignored</h4><p>"#);
         html.push_str(&escape(guidance.if_ignored));
         html.push_str("</p></div></div>");
 
-        html.push_str("<h4>What Ferric Lens found</h4><p>");
-        html.push_str(&escape(&finding.summary));
-        html.push_str("</p>");
         if !finding.evidence.is_empty() {
+            html.push_str("<h4>Selection evidence</h4>");
             html.push_str(r#"<ul class="metric-list">"#);
             for evidence in &finding.evidence {
                 html.push_str("<li><strong>");
@@ -1473,9 +1574,23 @@ fn render_findings(
             html.push_str("</details>");
         }
 
-        html.push_str("<h4>What to investigate next</h4><p>");
-        html.push_str(&escape(&finding.direction));
-        html.push_str("</p>");
+        html.push_str("<h4>What to inspect next</h4><ul class="inspection-list">");
+        for question in ai_guidance.recommended_inspection {
+            html.push_str("<li>");
+            html.push_str(&escape(question));
+            html.push_str("</li>");
+        }
+        html.push_str("</ul>");
+
+        if !ai_guidance.limitations.is_empty() {
+            html.push_str(r#"<div class="finding-limit"><h4>What this does not establish</h4><ul class="limit-list">"#);
+            for limitation in ai_guidance.limitations {
+                html.push_str("<li>");
+                html.push_str(&escape(limitation));
+                html.push_str("</li>");
+            }
+            html.push_str("</ul></div>");
+        }
 
         if let Some(reason) = &finding.acceptance_reason {
             html.push_str("<p><strong>Acceptance:</strong> ");
@@ -1491,7 +1606,11 @@ fn render_findings(
         html.push_str(&escape(&finding.fingerprint));
         html.push_str("</code><br><strong>Configuration:</strong> <code>");
         html.push_str(&escape(&finding.configuration));
-        html.push_str("</code></p></details></article>");
+        html.push_str("</code><br><strong>Rule summary:</strong> ");
+        html.push_str(&escape(&finding.summary));
+        html.push_str("<br><strong>Original direction:</strong> ");
+        html.push_str(&escape(&finding.direction));
+        html.push_str("</p></details></article>");
     }
     html
 }
