@@ -2357,6 +2357,32 @@ mod tests {
         assert!(rendered.contains("Not introduced by this change"));
         assert!(rendered.contains("Attribution uncertain"));
         assert!(rendered.contains("Baseline comparison could not classify these findings"));
+
+        result.findings = vec![make("only-new", DeltaStatus::New, Priority::Investigate)];
+        let changed_only = html(&result);
+        assert!(changed_only.contains("Introduced or worsened by this change"));
+        assert!(!changed_only.contains("<h3>Existing findings</h3>"));
+        assert!(!changed_only.contains("<h3>Attribution uncertain</h3>"));
+
+        result.findings = vec![make(
+            "only-existing",
+            DeltaStatus::Unchanged,
+            Priority::Investigate,
+        )];
+        let existing_only = html(&result);
+        assert!(!existing_only.contains("<h3>Introduced or worsened by this change</h3>"));
+        assert!(existing_only.contains("<h3>Existing findings</h3>"));
+        assert!(!existing_only.contains("<h3>Attribution uncertain</h3>"));
+
+        result.findings = vec![make(
+            "only-unknown",
+            DeltaStatus::Unknown,
+            Priority::Investigate,
+        )];
+        let unknown_only = html(&result);
+        assert!(!unknown_only.contains("<h3>Introduced or worsened by this change</h3>"));
+        assert!(!unknown_only.contains("<h3>Existing findings</h3>"));
+        assert!(unknown_only.contains("<h3>Attribution uncertain</h3>"));
     }
 
     #[test]
