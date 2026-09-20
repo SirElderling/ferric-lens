@@ -37,6 +37,10 @@ struct FindingGuidance {
     if_ignored: &'static str,
 }
 
+const AI_ACTIONABLE_LIMIT: usize = 5;
+const AI_OBSERVATION_LIMIT: usize = 5;
+const AI_SOURCE_CONTEXT_LIMIT: usize = 3;
+
 #[derive(Serialize)]
 struct AiSummary {
     areas_worth_reviewing: usize,
@@ -55,19 +59,35 @@ struct AiLimit<'a> {
 }
 
 #[derive(Serialize)]
+struct AiChangeAttribution<'a> {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline: Option<&'a str>,
+}
+
+#[derive(Serialize)]
 struct AiFinding<'a> {
+    change_relevance: &'static str,
     priority: &'static str,
     evidence_strength: &'static str,
-    delta: &'static str,
     gate: bool,
     title: &'static str,
     subject: &'a str,
     path: String,
-    why_care: &'static str,
-    next_step: &'a str,
+    facts: Vec<String>,
+    source: Vec<&'a SourceContext>,
+    additional_source_contexts_omitted: usize,
+    interpretation: &'static str,
+    recommended_inspection: &'static [&'static str],
+    limitations: &'static [&'static str],
+    selection_evidence: &'a [crate::model::Evidence],
     rule: &'a str,
-    evidence: &'a [crate::model::Evidence],
-    source_contexts: Vec<&'a SourceContext>,
+}
+
+#[derive(Serialize)]
+struct AiContext<'a> {
+    observations: Vec<AiFinding<'a>>,
+    additional_observations_omitted: usize,
 }
 
 #[derive(Serialize)]
@@ -77,40 +97,96 @@ struct AiOutput<'a> {
     result_digest: String,
     verdict: &'static str,
     verdict_reason: &'a str,
+    change_attribution: AiChangeAttribution<'a>,
     summary: AiSummary,
-    findings: Vec<AiFinding<'a>>,
-    observations: Vec<AiFinding<'a>>,
+    change_findings: Vec<AiFinding<'a>>,
+    existing_findings: Vec<AiFinding<'a>>,
+    unattributed_findings: Vec<AiFinding<'a>>,
+    additional_actionable_findings_omitted: usize,
+    context: AiContext<'a>,
     analysis_limits: Vec<AiLimit<'a>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct AiRuleGuidance {
+    fact: &'static str,
+    interpretation: &'static str,
+    recommended_inspection: &'static [&'static str],
+    limitations: &'static [&'static str],
+}
+
 pub fn ai_json(result: &AnalysisResult) -> String {
-    let active = ordered_findings(
+    let baseline_available = result.baseline.is_some();
+    let actionable = ai_ordered_findings(
         result
             .findings
             .iter()
-            .filter(|finding| !finding.accepted)
+            .filter(|finding| !finding.accepted && finding.priority != Priority::Observe)
             .collect(),
+        baseline_available,
     );
-    let findings = active
-        .iter()
-        .filter(|finding| finding.priority != Priority::Observe)
-        .map(|finding| ai_finding(finding, result))
+    let observations = ai_ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| !finding.accepted && finding.priority == Priority::Observe)
+            .collect(),
+        baseline_available,
+    );
+
+    let additional_actionable_findings_omitted =
+        actionable.len().saturating_sub(AI_ACTIONABLE_LIMIT);
+    let included_actionable = actionable
+        .into_iter()
+        .take(AI_ACTIONABLE_LIMIT)
         .collect::<Vec<_>>();
-    let observations = active
-        .iter()
-        .filter(|finding| finding.priority == Priority::Observe)
-        .map(|finding| ai_finding(finding, result))
-        .collect::<Vec<_>>();
+
+    let mut change_findings = Vec::new();
+    let mut existing_findings = Vec::new();
+    let mut unattributed_findings = Vec::new();
+    for finding in included_actionable {
+        let rendered = ai_finding(finding, result, baseline_available);
+        match change_relevance(finding, baseline_available) {
+            "introduced" | "worsened" => change_findings.push(rendered),
+            "existing" => existing_findings.push(rendered),
+            _ => unattributed_findings.push(rendered),
+        }
+    }
+
+    let additional_observations_omitted =
+        observations.len().saturating_sub(AI_OBSERVATION_LIMIT);
+    let observations = observations
+        .into_iter()
+        .take(AI_OBSERVATION_LIMIT)
+        .map(|finding| ai_finding(finding, result, baseline_available))
+        .collect();
 
     let output = AiOutput {
         format: "ferric_lens_ai",
-        schema_version: 1,
+        schema_version: 2,
         result_digest: result_digest(result),
         verdict: verdict_label(&result.verdict),
         verdict_reason: &result.verdict_reason,
+        change_attribution: AiChangeAttribution {
+            status: if baseline_available {
+                "available"
+            } else {
+                "unavailable"
+            },
+            baseline: result
+                .baseline
+                .as_ref()
+                .map(|baseline| baseline.target_ref.as_str()),
+        },
         summary: ai_summary(result),
-        findings,
-        observations,
+        change_findings,
+        existing_findings,
+        unattributed_findings,
+        additional_actionable_findings_omitted,
+        context: AiContext {
+            observations,
+            additional_observations_omitted,
+        },
         analysis_limits: result
             .capabilities
             .iter()
@@ -126,21 +202,37 @@ pub fn ai_json(result: &AnalysisResult) -> String {
     serde_json::to_string_pretty(&output).expect("AI output is JSON-serializable")
 }
 
-fn ai_finding<'a>(finding: &'a Finding, result: &'a AnalysisResult) -> AiFinding<'a> {
+fn ai_finding<'a>(
+    finding: &'a Finding,
+    result: &'a AnalysisResult,
+    baseline_available: bool,
+) -> AiFinding<'a> {
     let guidance = finding_guidance(finding);
+    let ai_guidance = ai_rule_guidance(&finding.rule);
+    let all_source = contexts_for_finding(finding, &result.source_contexts);
+    let additional_source_contexts_omitted =
+        all_source.len().saturating_sub(AI_SOURCE_CONTEXT_LIMIT);
+    let source = all_source
+        .into_iter()
+        .take(AI_SOURCE_CONTEXT_LIMIT)
+        .collect();
+
     AiFinding {
+        change_relevance: change_relevance(finding, baseline_available),
         priority: priority_label(&finding.priority),
         evidence_strength: evidence_label(&finding.evidence_class),
-        delta: delta_label(&finding.delta),
         gate: finding.gate,
         title: guidance.title,
         subject: &finding.subject,
         path: finding_path(finding, &result.modules, &result.source_contexts),
-        why_care: guidance.why_care,
-        next_step: &finding.direction,
+        facts: ai_facts(finding, ai_guidance),
+        source,
+        additional_source_contexts_omitted,
+        interpretation: ai_guidance.interpretation,
+        recommended_inspection: ai_guidance.recommended_inspection,
+        limitations: ai_guidance.limitations,
+        selection_evidence: &finding.evidence,
         rule: &finding.rule,
-        evidence: &finding.evidence,
-        source_contexts: contexts_for_finding(finding, &result.source_contexts),
     }
 }
 
@@ -254,6 +346,215 @@ fn ai_summary(result: &AnalysisResult) -> AiSummary {
             .iter()
             .filter(|finding| finding.accepted)
             .count(),
+    }
+}
+
+fn change_relevance(finding: &Finding, baseline_available: bool) -> &'static str {
+    if !baseline_available {
+        return "unattributed";
+    }
+    match finding.delta {
+        DeltaStatus::New => "introduced",
+        DeltaStatus::Worsened => "worsened",
+        DeltaStatus::Unchanged => "existing",
+        DeltaStatus::Current | DeltaStatus::Unknown => "unattributed",
+    }
+}
+
+fn ai_relevance_rank(finding: &Finding, baseline_available: bool) -> u8 {
+    match change_relevance(finding, baseline_available) {
+        "introduced" => 0,
+        "worsened" => 1,
+        "existing" => 2,
+        _ => 3,
+    }
+}
+
+fn ai_ordered_findings(
+    mut findings: Vec<&Finding>,
+    baseline_available: bool,
+) -> Vec<&Finding> {
+    findings.sort_by(|a, b| {
+        ai_relevance_rank(a, baseline_available)
+            .cmp(&ai_relevance_rank(b, baseline_available))
+            .then_with(|| priority_rank(&a.priority).cmp(&priority_rank(&b.priority)))
+            .then_with(|| a.subject.cmp(&b.subject))
+            .then_with(|| a.rule.cmp(&b.rule))
+    });
+    findings
+}
+
+fn ai_facts(finding: &Finding, guidance: AiRuleGuidance) -> Vec<String> {
+    let mut facts = vec![guidance.fact.to_owned()];
+    facts.extend(finding.evidence.iter().map(evidence_fact));
+    facts
+}
+
+fn evidence_fact(evidence: &crate::model::Evidence) -> String {
+    let mut fact = format!(
+        "{}: {}; comparison reference {} across {} comparable modules",
+        metric_label(&evidence.metric),
+        evidence.value,
+        evidence.reference,
+        evidence.population
+    );
+    if let Some(baseline) = evidence.baseline {
+        fact.push_str(&format!("; baseline {baseline}"));
+    }
+    if let Some(material_delta) = evidence.material_delta {
+        fact.push_str(&format!("; material growth threshold {material_delta}"));
+    }
+    fact.push('.');
+    fact
+}
+
+fn ai_rule_guidance(rule: &str) -> AiRuleGuidance {
+    match rule {
+        "structure.coupled_complexity_growth" => AiRuleGuidance {
+            fact: "Decision complexity and repository dependency breadth both crossed the configured regression rule for this changed module.",
+            interpretation: "The change increased two independent structural pressures in the same area, which can make future changes harder to reason about safely.",
+            recommended_inspection: &[
+                "Do the added decision paths represent responsibilities that can be separated?",
+                "Can any newly broadened repository dependencies stay behind an existing boundary?",
+            ],
+            limitations: &[
+                "Structural concentration does not prove the design is incorrect.",
+                "Repository dependency breadth does not measure runtime or compile-time cost.",
+            ],
+        },
+        "structure.current_coupled_outlier" => AiRuleGuidance {
+            fact: "Decision complexity and repository dependency breadth are both elevated relative to the comparable repository population.",
+            interpretation: "Two independent structural signals are concentrated in the same module, making it a useful place to inspect before adding more responsibility.",
+            recommended_inspection: &[
+                "Does this module own multiple responsibilities that change independently?",
+                "Can any repository dependencies be narrowed without changing behavior?",
+            ],
+            limitations: &[
+                "Structural concentration does not prove the design is incorrect.",
+                "The detector does not measure semantic complexity or change risk directly.",
+            ],
+        },
+        "structure.small_population_decision_concentration" => AiRuleGuidance {
+            fact: "Decision points are concentrated in this module relative to the small comparable population.",
+            interpretation: "The module contains a disproportionate share of branching, which may make behavior harder to understand if unrelated responsibilities are mixed together.",
+            recommended_inspection: &[
+                "Do the decision points describe one cohesive state machine or multiple independent responsibilities?",
+            ],
+            limitations: &[
+                "Decision-point count does not measure semantic complexity.",
+                "Small populations support concentration evidence, not a strong outlier claim.",
+            ],
+        },
+        "runtime.clone_for_iteration_candidate" => AiRuleGuidance {
+            fact: "A cloned value is used directly as a for-loop iterator.",
+            interpretation: "The copy exists immediately before iteration and may be unnecessary if the loop can borrow the original value.",
+            recommended_inspection: &[
+                "Is ownership of the cloned value required by the loop body?",
+                "Can the loop iterate over the original value by reference without changing semantics?",
+            ],
+            limitations: &[
+                "Runtime cost was not measured.",
+                "The detector does not establish that borrowing is valid here.",
+            ],
+        },
+        "runtime.clone_then_mutate_candidate" => AiRuleGuidance {
+            fact: "A whole value is cloned into a mutable local and a nested field on that clone is subsequently mutated.",
+            interpretation: "The operation may require ownership of only a changed subset rather than a copy of the entire aggregate.",
+            recommended_inspection: &[
+                "Is ownership of the entire aggregate required after the clone?",
+                "Can the changed subset be constructed without copying unrelated fields?",
+            ],
+            limitations: &[
+                "Runtime cost was not measured.",
+                "The detector does not know the aggregate's size or ownership constraints.",
+            ],
+        },
+        "build.rebuild_exposure_candidate" | "build.small_population_rebuild_concentration" => {
+            AiRuleGuidance {
+                fact: "This module has broad reverse repository dependency reach relative to the comparison population.",
+                interpretation: "A widely depended-on boundary can expose more of the repository to coordination or rebuild work when it changes.",
+                recommended_inspection: &[
+                    "Is this dependency boundary intentionally broad and stable?",
+                    "Would narrowing the boundary reduce change exposure without making the design less clear?",
+                ],
+                limitations: &[
+                    "Reverse repository dependency reach is a structural proxy and does not measure compile time.",
+                    "Broad dependency reach can be intentional for a stable shared abstraction.",
+                ],
+            }
+        }
+        "correctness.cargo_feature_resolution_without_resolve" => AiRuleGuidance {
+            fact: "Cargo metadata is requested without the resolved dependency graph while feature cfg reachability is decided separately.",
+            interpretation: "Requested feature names alone cannot establish the enabled feature set for every workspace package.",
+            recommended_inspection: &[
+                "Does feature reachability use Cargo's resolved per-package feature graph for the analyzed configuration?",
+            ],
+            limitations: &[
+                "The detector identifies the configuration-resolution mismatch; downstream impact depends on the repository's feature topology.",
+            ],
+        },
+        "correctness.symbolic_target_identity" => AiRuleGuidance {
+            fact: "A symbolic target label is used in persistent identity or evidence matching where the resolved target triple is available.",
+            interpretation: "Different host architectures or operating systems can otherwise share an identity despite different cfg-dependent code.",
+            recommended_inspection: &[
+                "Does persistent configuration identity use the resolved target triple while keeping symbolic labels display-only?",
+            ],
+            limitations: &[
+                "The practical impact appears only when the symbolic label can resolve to materially different targets.",
+            ],
+        },
+        "correctness.stdout_mode_unconditional_artifacts" => AiRuleGuidance {
+            fact: "A stdout-oriented AI mode is followed by unconditional artifact writes.",
+            interpretation: "A caller requesting machine-readable stdout can unexpectedly mutate the analyzed repository.",
+            recommended_inspection: &[
+                "Are artifact writes disabled by default in stdout-only AI mode and enabled only by an explicit request?",
+            ],
+            limitations: &[
+                "The detector establishes the write path, not whether an external wrapper later removes the artifacts.",
+            ],
+        },
+        "correctness.workspace_manifest_snapshot_gap" => AiRuleGuidance {
+            fact: "Workspace member manifests are read during analysis but are not all covered by the final Cargo-input stability verification.",
+            interpretation: "The published result can otherwise combine repository state from different points in time.",
+            recommended_inspection: &[
+                "Does the captured and reverified input set include every workspace manifest consumed by Cargo metadata?",
+            ],
+            limitations: &[
+                "The race matters only when relevant manifests change during the analysis window.",
+            ],
+        },
+        "correctness.lossy_git_path_decoding" => AiRuleGuidance {
+            fact: "Git path bytes are converted with lossy UTF-8 decoding.",
+            interpretation: "Distinct non-UTF-8 paths can be collapsed or misidentified when invalid bytes are replaced.",
+            recommended_inspection: &[
+                "Are non-UTF-8 Git paths preserved losslessly or rejected with an explicit analysis limitation?",
+            ],
+            limitations: &[
+                "The issue affects repositories containing paths that are not valid UTF-8.",
+            ],
+        },
+        "refactor.multi_signal_candidate" => AiRuleGuidance {
+            fact: "At least two independent structural signal families corroborate the same module.",
+            interpretation: "Corroborating signals make this area more useful to inspect than a module selected by one isolated metric.",
+            recommended_inspection: &[
+                "Do the complexity and dependency signals come from responsibilities that can be separated cleanly?",
+                "Would narrowing responsibility or dependency boundaries simplify future changes?",
+            ],
+            limitations: &[
+                "Corroborating structural signals do not prove that a refactor is required.",
+                "Ferric Lens does not know the intended architecture.",
+            ],
+        },
+        _ => AiRuleGuidance {
+            fact: "Ferric Lens matched this rule's deterministic evidence threshold for the subject.",
+            interpretation: "The evidence is sufficient to justify focused inspection, but surrounding code determines whether a change is appropriate.",
+            recommended_inspection: &[
+                "Inspect the cited evidence in context before deciding whether a code change is justified.",
+            ],
+            limitations: &[
+                "The practical impact depends on surrounding code and workload.",
+            ],
+        },
     }
 }
 
