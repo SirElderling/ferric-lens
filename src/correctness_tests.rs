@@ -242,6 +242,26 @@ fn filtered(world: &World) {
 }
 
 #[test]
+fn clone_detection_ignores_mutable_locals_without_initializers() {
+    let sources = vec![source(
+        "src/render/history.rs",
+        r#"
+fn filtered(world: &World) {
+    let mut selected: World;
+    selected = world.clone();
+    selected.events.retain(|event| event.year > 10);
+    render(&selected);
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_then_mutate_candidate"));
+}
+
+#[test]
 fn clone_then_mutate_detection_stops_when_the_binding_is_shadowed() {
     let sources = vec![source(
         "src/render/history.rs",
