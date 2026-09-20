@@ -182,12 +182,7 @@ impl<'cfg> MetricsVisitor<'cfg> {
         self.leave_decision();
     }
 
-    fn finish_function(
-        &mut self,
-        name: String,
-        kind: FunctionKind,
-        public_declared: bool,
-    ) {
+    fn finish_function(&mut self, name: String, kind: FunctionKind, public_declared: bool) {
         let complexity = self
             .function_complexity
             .pop()

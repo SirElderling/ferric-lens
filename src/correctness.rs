@@ -141,8 +141,21 @@ fn detect_contextual_copy_risks(sources: &[SourceFile], scan: &mut CorrectnessSc
 }
 
 const MUTATING_METHODS: [&str; 15] = [
-    "append", "clear", "dedup", "drain", "extend", "insert", "pop", "push", "remove",
-    "retain", "sort", "sort_by", "sort_by_key", "truncate", "swap_remove",
+    "append",
+    "clear",
+    "dedup",
+    "drain",
+    "extend",
+    "insert",
+    "pop",
+    "push",
+    "remove",
+    "retain",
+    "sort",
+    "sort_by",
+    "sort_by_key",
+    "truncate",
+    "swap_remove",
 ];
 
 struct ContextualCopyVisitor<'a> {
@@ -194,14 +207,10 @@ impl<'ast> syn::visit::Visit<'ast> for ContextualCopyVisitor<'_> {
             }
 
             if let Some(method) = mutation {
-                self.clone_then_mutate.push(self.at(
-                    clone_expr.span(),
-                    clone_expr.to_token_stream().to_string(),
-                ));
-                self.clone_then_mutate_mutations.push(self.at(
-                    method.span(),
-                    method.to_token_stream().to_string(),
-                ));
+                self.clone_then_mutate
+                    .push(self.at(clone_expr.span(), clone_expr.to_token_stream().to_string()));
+                self.clone_then_mutate_mutations
+                    .push(self.at(method.span(), method.to_token_stream().to_string()));
             }
         }
         syn::visit::visit_block(self, block);

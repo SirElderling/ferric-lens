@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use crate::{
     compare::{match_modules, Correspondence},
     git::ChangeSet,
-    model::{DeltaStatus, EvidenceClass, Finding, FunctionFact, FunctionKind, ModuleMetrics, Priority},
+    model::{
+        DeltaStatus, EvidenceClass, Finding, FunctionFact, FunctionKind, ModuleMetrics, Priority,
+    },
 };
 
 use super::{
@@ -798,7 +800,9 @@ fn unchanged_strong_refactor_evidence_stays_observational() {
 
 #[test]
 fn advisory_complexity_uses_max_function_decisions_not_module_sum() {
-    let mut modules = (0..20).map(|index| module(index, 10, 1)).collect::<Vec<_>>();
+    let mut modules = (0..20)
+        .map(|index| module(index, 10, 1))
+        .collect::<Vec<_>>();
     for module in &mut modules {
         module.functions = (0..10)
             .map(|index| FunctionFact {
@@ -825,18 +829,20 @@ fn advisory_complexity_uses_max_function_decisions_not_module_sum() {
 
     assert!(!current_snapshot_findings(&modules)
         .iter()
-        .any(|finding| finding.rule == "structure.current_coupled_outlier"
-            && finding.subject == "demo::m0"));
+        .any(
+            |finding| finding.rule == "structure.current_coupled_outlier"
+                && finding.subject == "demo::m0"
+        ));
 
     modules[0].functions[0].decision_sites = 20;
     let finding = current_snapshot_findings(&modules)
         .into_iter()
-        .find(|finding| finding.rule == "structure.current_coupled_outlier"
-            && finding.subject == "demo::m0")
+        .find(|finding| {
+            finding.rule == "structure.current_coupled_outlier" && finding.subject == "demo::m0"
+        })
         .expect("concentrated behavioral function should be visible");
     assert!(finding
         .evidence
         .iter()
-        .any(|evidence| evidence.metric == "max_function_decision_sites"
-            && evidence.value == 20));
+        .any(|evidence| evidence.metric == "max_function_decision_sites" && evidence.value == 20));
 }
