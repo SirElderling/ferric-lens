@@ -198,7 +198,6 @@ fn advisory_decision_value(module: &ModuleMetrics) -> usize {
         .unwrap_or(module.decision_sites)
 }
 
-
 fn structural_coupled_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
     let mut by_crate = BTreeMap::<&str, Vec<&ModuleMetrics>>::new();
     for module in modules.iter().filter(|module| module.parse_complete) {
