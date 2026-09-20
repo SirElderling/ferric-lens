@@ -304,8 +304,7 @@ fn findings_expose_exact_source_lines_and_bounded_excerpts() {
             .source_contexts
             .iter()
             .filter(|context| {
-                context.subject == "fixture::m0"
-                    && context.metric == "max_function_decision_sites"
+                context.subject == "fixture::m0" && context.metric == "max_function_decision_sites"
             })
             .count()
             <= 3
