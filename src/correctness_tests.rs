@@ -247,7 +247,7 @@ fn clone_detection_ignores_mutable_locals_without_initializers() {
         "src/render/history.rs",
         r#"
 fn filtered(world: &World) {
-    let mut selected: World;
+    let mut selected;
     selected = world.clone();
     selected.events.retain(|event| event.year > 10);
     render(&selected);
