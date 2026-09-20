@@ -177,7 +177,7 @@ fn library_and_binary_with_same_target_name_remain_distinct() {
 
 #[test]
 fn normalizes_cargo_names_for_rust_imports() {
-    assert_eq!(rust_name("jeko-core"), "jeko_core");
+    assert_eq!(rust_name("sample-core"), "sample_core");
     assert_eq!(rust_name("custom_name"), "custom_name");
 }
 

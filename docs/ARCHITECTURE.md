@@ -174,7 +174,7 @@ Initial performance targets: cold `analyze` within 10 seconds and 256 MiB peak p
 
 Before optimizing, profile acquisition, parsing, linking, rules, history, and rendering separately. Demonstrate near-linear source extraction/graph storage as input grows, and that optional history work remains capped as repository history grows. Add fine-grained incremental graphs, parallelism, compression, or alternate data structures only when a measured bottleneck justifies their maintenance cost.
 
-Use Jeko and Kronicle as private real-project validation inputs when available, without assuming their current structure or committing their source into this repository. Review every proposed gate finding for useful precision before enabling the initial rule in a release. If it is too noisy, keep it advisory and revise the documented predicate; do not ask users to compensate with thresholds.
+Use representative real-world Rust repositories as private validation inputs when available, without assuming their current structure or committing their source into this repository. Review every proposed gate finding for useful precision before enabling the initial rule in a release. If it is too noisy, keep it advisory and revise the documented predicate; do not ask users to compensate with thresholds.
 
 ## 9. Decision summary and deferred scope
 

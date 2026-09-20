@@ -8,7 +8,7 @@ Its purpose is to answer one practical question:
 
 > Where is this Rust codebase becoming structurally expensive, risky to change, slow, or unnecessarily costly, and what deterministic evidence supports that conclusion?
 
-Ferric Lens is intended for everyday development, code review, refactoring, and CI. It should help optimize projects such as Jeko, Kronicle, and future Rust codebases without requiring teams to maintain hand-tuned thresholds, architecture descriptions, or analysis configuration.
+Ferric Lens is intended for everyday development, code review, refactoring, and CI. It should help optimize Rust codebases without requiring teams to maintain hand-tuned thresholds, architecture descriptions, or analysis configuration.
 
 ## Product thesis
 

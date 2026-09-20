@@ -1,208 +1,279 @@
 # Ferric Lens
 
-Ferric Lens is a deterministic, zero-configuration structural analysis tool for Rust codebases.
+Ferric Lens is a deterministic, zero-configuration analysis tool for Rust repositories.
 
-The product contract is defined in [VISION.md](docs/VISION.md), [PROJECT_SPEC.md](docs/PROJECT_SPEC.md), and [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+It helps answer:
 
-## Current V1 implementation
+- What changed structurally?
+- What deserves attention first?
+- Did this change make an existing hotspot worse?
+- Are there architecture, complexity, dependency, copy-risk, or build-cost signals worth investigating?
+- Should this change pass the Ferric Lens CI gate?
 
-Ferric Lens currently:
+Ferric Lens is designed to be conservative. It reports evidence and limitations instead of treating every unusual metric as a defect.
 
-- inventories production Rust sources from Cargo library/binary target roots, follows reachable `mod` declarations, and resolves literal `#[path = "..."]` module overrides while keeping unsupported path forms explicitly incomplete,
-- excludes orphan `.rs` files from Cargo-backed production analysis and keeps same-named library/binary targets distinct,
-- parses Rust syntax without compiling or executing the target project,
-- measures module decision sites, declared public items, explicit imports, and resolvable local dependency breadth,
-- identifies advisory current-snapshot structural outliers,
-- synthesizes first-class refactoring candidates from compatible structural signals, while keeping candidate-only corroboration at Observe and refusing to treat raw `.clone()` concentration as architectural proof,
-- renders a human-first HTML report led by **What needs attention**, with plain-language consequences, next investigation steps, source evidence, and technical rule IDs kept secondary,
-- resolves a Git target and analyzes the unique merge base under the same rules as the current tree,
-- conservatively matches modules by stable identity, Git rename, then unique normalized structure,
-- gates the documented `structure.coupled_complexity_growth` regression only when both independent signals materially worsen,
-- evaluates standard Rust target cfg predicates for one concrete target profile per invocation,
-- resolves Cargo's enabled feature set per workspace package from the metadata resolve graph and evaluates `cfg(feature = "...")` against the package that owns the target,
-- preserves explicitly requested features when Cargo resolution is unavailable, while leaving unproven feature reachability unknown rather than inventing a feature powerset,
-- reports unresolved custom cfg evidence as `inconclusive` rather than pretending the gate passed,
-- reports five narrowly scoped deterministic correctness risks when strong source evidence establishes unsafe analysis/tooling patterns: missing Cargo feature resolution, symbolic-vs-resolved target identity, stdout modes with unconditional artifact writes, incomplete workspace-manifest snapshot verification, and lossy Git path decoding,
-- emits deterministic canonical JSON for complete machine/audit use,
-- emits a compact deterministic `--ai` JSON v2 view for agents that prioritizes branch-local change relevance, separates observed facts from interpretation, keeps bounded source evidence and rule limitations, and omits raw repository inventory,
-- emits one self-contained HTML/CSS report with no JavaScript,
-- prints a concise human-oriented CLI summary by default rather than a raw metric dump,
-- attaches deterministic source evidence to supported findings: repository-relative path, exact 1-based line span, and a bounded escaped excerpt, while retaining module navigation when no truthful syntax span exists,
-- reuses content-addressed raw syntax facts through a disposable 256 MiB repository cache,
-- enriches full `analyze` reports with bounded recent churn and co-change evidence,
-- keeps `check` on the fast core path without optional history or imported evidence,
-- reports resolved repository dependency edges and observed explicit-import cycles as architecture evidence,
-- accepts one validated, normalized local JSON evidence envelope for full-report enrichment,
-- supports fingerprinted, reasoned finding acceptances in a tool-managed repository file,
-- keeps accepted findings visible while excluding only exact accepted gate evidence from failure,
-- embeds the same semantic result digest in JSON and HTML so mixed artifact generations are detectable,
-- publishes JSON/HTML files through atomic replacement,
-- uses exit codes `0=pass`, `1=regression`, and `2=inconclusive/error`.
+## Quick start
 
-Existing unchanged debt does not fail a branch.
-
-## Usage
-
-Analyze a repository and write JSON plus HTML:
+If the binary is installed:
 
 ```bash
-cargo run -- analyze /path/to/rust/repository --base origin/main
+ferric-lens check .
 ```
 
-Analyze a concrete non-host target or enable additional Cargo features:
+When developing from this repository, replace `ferric-lens` with:
 
 ```bash
-cargo run -- analyze /path/to/rust/repository \
-  --base origin/main \
-  --target aarch64-apple-darwin \
-  --feature fast-path \
-  --feature telemetry
+cargo run -- 
 ```
 
-Each invocation analyzes one real profile. The default profile is the host target with Cargo default features. Repeated `--feature` options add explicit features to the default feature set. Ferric Lens records the resolved target, selected features, and canonical `rustc --print cfg` facts in the result.
+For example:
 
-This writes:
+```bash
+cargo run -- check .
+```
+
+## Common workflows
+
+### Check a pull request against main
+
+From the PR or feature-branch checkout:
+
+```bash
+git fetch origin main
+ferric-lens check . --base origin/main
+```
+
+Ferric Lens analyzes the current repository and its merge base with `origin/main`, then gates regressions introduced or materially worsened by the current change.
+
+This is the closest workflow to "check the PR only", but Ferric Lens does **not** scan only changed files. It still needs repository-wide facts for dependency graphs, reference populations, and correct attribution. Existing unchanged debt does not fail the PR merely because it exists.
+
+To save the complete machine-readable result as well:
+
+```bash
+ferric-lens check . --base origin/main --json ferric-lens.json
+```
+
+### Analyze a pull request in detail
+
+Use `analyze` when you want the full human report:
+
+```bash
+ferric-lens analyze . --base origin/main
+```
+
+By default this writes:
 
 ```text
 ferric-lens.json
 ferric-lens-report.html
 ```
 
-Run the CI-oriented path:
+Open the HTML report first. It is the easiest way to review introduced or worsened findings, existing findings, source evidence, and analysis limitations.
+
+### Analyze current main
+
+Checkout main and use the current commit as its own baseline:
 
 ```bash
-cargo run -- check /path/to/rust/repository --base origin/main --json ferric-lens.json
+git switch main
+ferric-lens analyze . --base HEAD
 ```
 
-For an AI agent or another tool that wants the actionable subset without the full repository inventory, add `--ai`:
+This is useful for inspecting the current repository state without treating historical debt as a new branch regression. Because the baseline and current commit are the same, change attribution is effectively unchanged/current-state analysis.
+
+### Compare the current branch with another branch or release
+
+Any Git ref can be used as the comparison target:
 
 ```bash
-cargo run -- analyze /path/to/rust/repository --base origin/main --ai
-cargo run -- check /path/to/rust/repository --base origin/main --ai
+ferric-lens check . --base origin/release
 ```
 
-`--ai` emits compact deterministic JSON v2 on stdout. Actionable findings are grouped into change-related, existing, and unattributed records; observations remain secondary context. Each record separates deterministic facts, bounded source evidence, Ferric Lens interpretation, focused inspection questions, finding-specific limitations, selection evidence, and rule provenance. The compact view includes at most five actionable findings and five observations, reports omitted counts, and keeps at most three source contexts per finding. It intentionally omits the full module/function/type inventory and complete capability dump. In `analyze --ai`, default JSON/HTML files are not created; pass `--json <path>` and/or `--html <path>` explicitly when those artifacts are also wanted. Canonical JSON remains the complete machine-readable record.
-
-`--base` is optional. Without it, Ferric Lens tries the GitHub PR target, the local remote-default branch, then local `main`. It always compares against the unique merge base, not the moving target tip.
-
-The initial blocking rule requires a baseline crate population of at least 20 production modules with complete required evidence. Smaller crates still receive descriptive/advisory output.
-
-Full `analyze` mode samples at most 2,000 recent non-merge commits and 100,000 changed-path records for advisory history context. Commits touching more than 200 paths are excluded from co-change calculations and reported as such. History never changes the gate verdict.
-
-
-## Deterministic correctness risks
-
-Ferric Lens is not a general correctness linter. V1 includes a deliberately small correctness-risk family for source patterns where the tool can establish a strong causal link to a concrete engineering failure mode without executing the target program.
-
-Current rules cover:
-
-- Cargo metadata queried without the resolve graph while source logic independently decides feature-gated reachability,
-- persistent or imported machine configuration matched using a symbolic target label despite an available resolved target triple,
-- stdout/AI-style modes that still perform unconditional default artifact writes,
-- snapshot verification that reads workspace-member manifests but revalidates only a narrower root Cargo-input set,
-- Git NUL-delimited path streams decoded through lossy UTF-8 conversion.
-
-These findings are deterministic and source-backed, but remain advisory in V1: they do not independently fail the CI gate. Ferric Lens does not turn generic syntax such as `unwrap()`, `.clone()`, file writes, or `from_utf8_lossy()` into correctness findings without the additional contextual evidence required by the rule.
-
-## Importing deterministic evidence
-
-Full `analyze` mode can attach an optional normalized local evidence envelope:
+or:
 
 ```bash
-cargo run -- analyze /path/to/repository \
+ferric-lens analyze . --base v1.0.0
+```
+
+Ferric Lens resolves the merge base between the current repository state and the supplied ref.
+
+### Let Ferric Lens choose the baseline
+
+```bash
+ferric-lens check .
+```
+
+Without `--base`, Ferric Lens tries the GitHub PR target, then the remote default branch, then local `main`.
+
+For important CI workflows, an explicit `--base` is usually easier to reason about.
+
+### Analyze a target and Cargo features
+
+Analyze a specific Rust target:
+
+```bash
+ferric-lens analyze . \
+  --base origin/main \
+  --target aarch64-apple-darwin
+```
+
+Enable one or more additional Cargo features:
+
+```bash
+ferric-lens analyze . \
+  --base origin/main \
+  --feature telemetry \
+  --feature fast-path
+```
+
+Each invocation analyzes one concrete target/profile. Run Ferric Lens more than once when you need separate platform or feature combinations.
+
+### Produce compact output for an AI agent
+
+```bash
+ferric-lens check . --base origin/main --ai
+```
+
+or:
+
+```bash
+ferric-lens analyze . --base origin/main --ai
+```
+
+`--ai` prints compact deterministic JSON to stdout. It prioritizes actionable findings, bounded source evidence, inspection questions, and limitations.
+
+With `analyze --ai`, JSON and HTML files are **not** written by default. Request them explicitly when needed:
+
+```bash
+ferric-lens analyze . \
+  --base origin/main \
+  --ai \
+  --json ferric-lens.json \
+  --html ferric-lens-report.html
+```
+
+### Add external measured evidence
+
+Full analysis can attach a normalized local evidence file:
+
+```bash
+ferric-lens analyze . \
   --base origin/main \
   --evidence measurements.json
 ```
 
-The V1 envelope is intentionally generic rather than vendor-specific:
+Imported evidence is advisory in V1. It can add context, but it does not change the `check` gate verdict.
 
-```json
-{
-  "schema_version": 1,
-  "producer": {"name": "my-benchmark", "version": "1.0"},
-  "source": {"content_digest": "<Ferric Lens snapshot digest>"},
-  "configuration": {"target": "x86_64-unknown-linux-gnu", "features": []},
-  "observations": [
-    {
-      "subject": "src/engine.rs",
-      "metric": "instructions",
-      "value": 123456,
-      "unit": "count",
-      "note": "representative simulation workload"
-    }
-  ]
-}
+## What Ferric Lens does
+
+Ferric Lens builds a deterministic model of the Rust repository and uses it to inspect areas such as:
+
+- module and dependency structure,
+- explicit repository dependency edges and cycles,
+- structural complexity,
+- dependency surface and blast radius,
+- changed-code regressions against a Git baseline,
+- refactor candidates supported by compatible evidence,
+- contextual copy-risk patterns such as clone-for-iteration and clone-then-mutate,
+- bounded Git churn and co-change context in full analysis,
+- build/rebuild exposure indicators,
+- a deliberately small set of deterministic correctness-risk patterns,
+- optional imported measurements.
+
+Findings keep observed facts separate from interpretation. Candidate evidence is not presented as a measured runtime bottleneck.
+
+## What Ferric Lens does not do
+
+Ferric Lens does not:
+
+- compile or run the analyzed project during normal source analysis,
+- execute build scripts,
+- profile runtime performance,
+- claim that static syntax proves an allocation or bottleneck,
+- expand procedural macros,
+- provide full Rust type inference or a complete semantic call graph,
+- replace Clippy, Miri, vulnerability scanners, or specialist correctness tools,
+- automatically rewrite or refactor source code,
+- require AI or a network service,
+- use one opaque repository quality score.
+
+When evidence is incomplete, Ferric Lens reports the limitation instead of inventing certainty.
+
+## Commands and options
+
+| Command / option | Purpose |
+| --- | --- |
+| `check [PATH]` | CI-oriented analysis. Prints a concise result and returns a gate exit code. |
+| `analyze [PATH]` | Full analysis with richer advisory evidence. Writes JSON and HTML by default. |
+| `accept <FINGERPRINT>` | Accept one exact current finding with a required reason. |
+| `PATH` | Repository path. Defaults to the current directory. |
+| `--base <REF>` | Compare against the merge base with a Git ref such as `origin/main`, `HEAD`, or a tag. |
+| `--target <TRIPLE>` | Analyze a specific Rust target triple. Defaults to the host target. |
+| `--feature <NAME>` | Enable an additional Cargo feature. Repeat for multiple features. |
+| `--json <PATH>` | Write canonical machine-readable JSON. |
+| `--html <PATH>` | `analyze` only: write the self-contained HTML report. |
+| `--evidence <PATH>` | `analyze` only: attach a normalized local evidence envelope. |
+| `--ai` | Print compact deterministic JSON intended for agents instead of the human CLI summary. |
+| `accept --reason <TEXT>` | Required explanation for accepting the exact finding. |
+| `accept --path <PATH>` | Repository path for `accept`; defaults to the current directory. |
+
+Use `ferric-lens <command> --help` for the CLI-generated help for the installed version.
+
+## Understanding the result
+
+Ferric Lens has three gate outcomes:
+
+- `Pass` — no enabled gate found a qualifying regression with the available evidence.
+- `Regression` — an enabled gate found a qualifying new or worsened regression.
+- `Inconclusive` — required evidence was missing or analysis could not establish a reliable gate result.
+
+Process exit codes are:
+
+```text
+0 = pass
+1 = regression
+2 = inconclusive or operational error
 ```
 
-Imports are limited to 16 MiB, require repository-relative subjects, and are sorted deterministically. Source/configuration matches are explicit: the evidence target must match the active resolved target triple and the feature list must match the active profile. Symbolic labels such as `host` are display context, not machine configuration identity. Mismatched evidence is retained only as unattached context.
+A pass is not a claim that the repository has no technical debt. It means the enabled gate did not establish a blocking regression for the analyzed comparison.
 
-Imported evidence is advisory in V1. It never changes the `check` gate verdict and Ferric Lens never invokes the producing tool automatically.
+## What to do with the output
 
-## Accepting an intentional finding
+Start with the human CLI summary or HTML report.
 
-Every finding has a deterministic fingerprint. To accept one exact current condition:
+For each finding:
+
+1. Check whether it is introduced/worsened by the current change or pre-existing.
+2. Read the observed facts and source evidence before the interpretation.
+3. Check the stated limitations; do not treat a candidate as a proven runtime problem.
+4. Follow the bounded inspection questions to decide whether the code needs a change.
+5. Re-run Ferric Lens after making the change and compare the result.
+
+Use the outputs for different jobs:
+
+- **HTML** — human review and investigation.
+- **Canonical JSON** — CI artifacts, auditing, automation, or downstream tooling.
+- **`--ai` JSON** — compact context for an AI coding/review agent.
+- **CLI exit code** — CI pass/fail/inconclusive control flow.
+
+If a finding is intentional and should remain visible but not block the exact current condition, accept its fingerprint:
 
 ```bash
-cargo run -- accept <fingerprint> \
-  --reason "Intentional boundary for the current design" \
+ferric-lens accept <fingerprint> \
+  --reason "Intentional boundary for this design" \
   --base origin/main
 ```
 
-Ferric Lens verifies that the fingerprint exists in a fresh local analysis, re-checks the source digest immediately before writing, and atomically updates:
+Ferric Lens writes the acceptance to:
 
 ```text
 .ferric-lens/acceptances.toml
 ```
 
-The file is intended to be reviewed and committed. Accepted findings remain visible in JSON and HTML with their reason.
+Review and commit that file when the acceptance is part of the repository policy. A material change to the evidence produces a different fingerprint, so an old acceptance does not broadly suppress future findings.
 
-An acceptance does not suppress a rule broadly. Material evidence changes produce a different fingerprint, so the finding becomes active again automatically. An unambiguous pure move can preserve the stable entity identity.
+## Documentation
 
-## Evidence limits
-
-Ferric Lens does not expand macros or pretend mutually exclusive platform `cfg` branches coexist. Standard target cfg predicates are evaluated from the selected target's stable `rustc --print cfg` output. When Cargo metadata resolution is available, enabled features are evaluated per workspace package, including default and transitive activation represented by Cargo's resolve graph. If that graph is unavailable, explicitly requested features remain usable but unproven feature reachability stays unknown. A changed gate subject or required baseline population affected by unsupported evidence makes the relevant gate inconclusive.
-
-Static findings are not runtime profiling claims.
-
-Finding source context is representative rather than an exhaustive source dump. V1 records at most three source contexts per supported evidence signal. Each excerpt is limited to three source lines and 600 Unicode characters; truncation is explicit. Current exact-span support covers decision-site, contextual copy-risk, resolved dependency, and reverse-dependency evidence. Line/excerpt metadata is presentation evidence and does not participate in finding fingerprints or acceptance identity.
-
-## Development
-
-```bash
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
-python3 -m unittest tools.test_perf_fixture tools.test_perf_acceptance
-cargo build --release --locked
-```
-
-GitHub Actions keeps draft-PR iteration lightweight: Linux performs formatting, Clippy with warnings denied, all tests, 100% source-centric coverage, release-acceptance tooling tests, and Ferric Lens self-analysis. macOS validation, release builds/binary publication, and the standard performance-acceptance workflow run when the PR is ready for review, on manual dispatch, or on `main`. The `ready_for_review` transition triggers that heavyweight validation explicitly.
-
-A separate performance-acceptance workflow generates a deterministic 20-crate, 100,000-production-line repository with 200 fixed history commits, runs cold `analyze` and warm `check`, records sampled process-tree RSS, wall/CPU time, cache/report sizes, toolchain and hardware, and uploads the evidence. The documented engineering targets are reported but never used as correctness gates on shared CI hardware.
-
-Run the same standard fixture locally after a release build:
-
-```bash
-python3 tools/perf_acceptance.py \
-  --binary target/release/ferric-lens \
-  --mode standard \
-  --output-dir target/perf-acceptance
-```
-
-The workflow can also be dispatched with `source-10x` (1,000,000 production Rust lines) or `history-10x` (2,000 history commits after baseline). Browser DOM/open cost and private-project precision checks remain explicit release-acceptance observations rather than hidden dependencies of the tool.
-
-Full pull-request validation also uploads the locked release executable from each Linux/macOS runner as a human-test artifact.
-
-
-## Output surfaces
-
-Ferric Lens has three intentionally different presentation surfaces built from the same canonical result:
-
-- **HTML for people** — starts with what deserves attention. When a baseline exists, active findings are separated into **Introduced or worsened by this change**, **Existing findings**, and **Attribution uncertain**. Each finding begins with observed facts, then explains why they matter, shows selection/source evidence, asks bounded inspection questions, and states what the detector does not establish. Lower-confidence `Observe` signals stay in a separate secondary **Observations** section and do not count as areas needing attention.
-- **Default CLI for people and CI logs** — concise verdict plus the highest-priority actionable findings, using the same plain-language titles and bounded inspection guidance as HTML. Lower-confidence observations are summarized by count instead of consuming the main CLI output.
-- **`--ai` for agents** — compact deterministic JSON v2 grouped by change relevance. It separates facts from interpretation, keeps exact bounded source evidence ahead of statistical selection evidence, asks inspection questions rather than prescribing fixes, reports finding-specific and analysis-wide limitations, and counts records omitted by compact-output limits.
-
-The full canonical JSON remains the lossless interface when a consumer needs every module, capability, imported observation, or structural fact.
-
-
-Small-cohort descriptive rules deliberately avoid treating "the largest value" as meaningful by itself. A unique maximum must also have a material lead over the next-highest module: at least half of the runner-up value, with a minimum absolute gap of two. The evidence reference for these observations is the runner-up rather than the median. This keeps near-ties such as 128 vs 119 decision sites from becoming alerts simply because one module must rank first. Raw clone-frequency concentration is retained as descriptive module data rather than emitted as a finding.
+- [Vision](docs/VISION.md)
+- [Project specification](docs/PROJECT_SPEC.md)
+- [Architecture and decision record](docs/ARCHITECTURE.md)
