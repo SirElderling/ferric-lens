@@ -77,6 +77,13 @@ struct UseObservation {
     span: LineSpan,
 }
 
+#[derive(Debug, Default)]
+struct FunctionComplexity {
+    decision_sites: usize,
+    nesting: usize,
+    max_nesting: usize,
+}
+
 struct MetricsVisitor<'cfg> {
     cfg: &'cfg HostCfg,
     decision_sites: usize,
@@ -91,6 +98,7 @@ struct MetricsVisitor<'cfg> {
     decision_spans: Vec<LineSpan>,
     clone_spans: Vec<LineSpan>,
     use_observations: Vec<UseObservation>,
+    function_complexity: Vec<FunctionComplexity>,
     gate_limitation: Option<String>,
 }
 
@@ -110,6 +118,7 @@ impl<'cfg> MetricsVisitor<'cfg> {
             decision_spans: Vec::new(),
             clone_spans: Vec::new(),
             use_observations: Vec::new(),
+            function_complexity: Vec::new(),
             gate_limitation: None,
         }
     }
@@ -152,9 +161,44 @@ impl<'cfg> MetricsVisitor<'cfg> {
         });
     }
 
-    fn record_decision(&mut self, span: Span) {
+    fn enter_decision(&mut self, span: Span) {
         self.decision_sites += 1;
         self.decision_spans.push(line_span(span));
+        if let Some(complexity) = self.function_complexity.last_mut() {
+            complexity.decision_sites += 1;
+            complexity.nesting += 1;
+            complexity.max_nesting = complexity.max_nesting.max(complexity.nesting);
+        }
+    }
+
+    fn leave_decision(&mut self) {
+        if let Some(complexity) = self.function_complexity.last_mut() {
+            complexity.nesting = complexity.nesting.saturating_sub(1);
+        }
+    }
+
+    fn record_leaf_decision(&mut self, span: Span) {
+        self.enter_decision(span);
+        self.leave_decision();
+    }
+
+    fn finish_function(
+        &mut self,
+        name: String,
+        kind: FunctionKind,
+        public_declared: bool,
+    ) {
+        let complexity = self
+            .function_complexity
+            .pop()
+            .expect("function complexity stack underflow");
+        self.functions.push(FunctionFact {
+            name,
+            kind,
+            public_declared,
+            decision_sites: complexity.decision_sites,
+            max_decision_nesting: complexity.max_nesting,
+        });
     }
 
     fn record_clone(&mut self, span: Span) {
@@ -199,12 +243,11 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
     }
 
     fn visit_item_fn(&mut self, item: &'ast ItemFn) {
-        self.functions.push(FunctionFact {
-            name: self.scoped_name(&item.sig.ident.to_string()),
-            kind: FunctionKind::Function,
-            public_declared: is_public_visibility(&item.vis),
-        });
+        let name = self.scoped_name(&item.sig.ident.to_string());
+        let public_declared = is_public_visibility(&item.vis);
+        self.function_complexity.push(FunctionComplexity::default());
         visit::visit_item_fn(self, item);
+        self.finish_function(name, FunctionKind::Function, public_declared);
     }
 
     fn visit_item_struct(&mut self, item: &'ast ItemStruct) {
@@ -248,12 +291,11 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
             .last()
             .expect("impl method visited without an impl owner")
             .clone();
-        self.functions.push(FunctionFact {
-            name: format!("{owner}::{}", item.sig.ident),
-            kind: FunctionKind::Method,
-            public_declared: is_public_visibility(&item.vis),
-        });
+        let name = format!("{owner}::{}", item.sig.ident);
+        let public_declared = is_public_visibility(&item.vis);
+        self.function_complexity.push(FunctionComplexity::default());
         visit::visit_impl_item_fn(self, item);
+        self.finish_function(name, FunctionKind::Method, public_declared);
     }
 
     fn visit_item_trait(&mut self, item: &'ast ItemTrait) {
@@ -274,12 +316,10 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
             .last()
             .expect("trait method visited without a trait owner")
             .clone();
-        self.functions.push(FunctionFact {
-            name: format!("{owner}::{}", item.sig.ident),
-            kind: FunctionKind::TraitMethod,
-            public_declared,
-        });
+        let name = format!("{owner}::{}", item.sig.ident);
+        self.function_complexity.push(FunctionComplexity::default());
         visit::visit_trait_item_fn(self, item);
+        self.finish_function(name, FunctionKind::TraitMethod, public_declared);
     }
 
     fn visit_foreign_item_fn(&mut self, item: &'ast ForeignItemFn) {
@@ -290,6 +330,8 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
             name: self.scoped_name(&item.sig.ident.to_string()),
             kind: FunctionKind::ForeignFunction,
             public_declared: is_public_visibility(&item.vis),
+            decision_sites: 0,
+            max_decision_nesting: 0,
         });
         visit::visit_foreign_item_fn(self, item);
     }
@@ -312,36 +354,41 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
     }
 
     fn visit_expr_if(&mut self, node: &'ast ExprIf) {
-        self.record_decision(node.if_token.span);
+        self.enter_decision(node.if_token.span);
         visit::visit_expr_if(self, node);
+        self.leave_decision();
     }
 
     fn visit_expr_for_loop(&mut self, node: &'ast ExprForLoop) {
-        self.record_decision(node.for_token.span);
+        self.enter_decision(node.for_token.span);
         visit::visit_expr_for_loop(self, node);
+        self.leave_decision();
     }
 
     fn visit_expr_while(&mut self, node: &'ast ExprWhile) {
-        self.record_decision(node.while_token.span);
+        self.enter_decision(node.while_token.span);
         visit::visit_expr_while(self, node);
+        self.leave_decision();
     }
 
     fn visit_expr_loop(&mut self, node: &'ast ExprLoop) {
-        self.record_decision(node.loop_token.span);
+        self.enter_decision(node.loop_token.span);
         visit::visit_expr_loop(self, node);
+        self.leave_decision();
     }
 
     fn visit_expr_match(&mut self, node: &'ast ExprMatch) {
         // Count the branch construct once rather than treating every exhaustive
         // arm as independent complexity. Large enum-to-label/state tables are
         // common Rust and otherwise dominate module-level decision counts.
-        self.record_decision(node.match_token.span);
+        self.enter_decision(node.match_token.span);
         for arm in &node.arms {
             if let Some((_, guard)) = &arm.guard {
-                self.record_decision(guard.span());
+                self.record_leaf_decision(guard.span());
             }
         }
         visit::visit_expr_match(self, node);
+        self.leave_decision();
     }
 
     fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
@@ -353,9 +400,12 @@ impl<'ast> Visit<'ast> for MetricsVisitor<'_> {
 
     fn visit_expr_binary(&mut self, node: &'ast ExprBinary) {
         if matches!(node.op, BinOp::And(_) | BinOp::Or(_)) {
-            self.record_decision(node.op.span());
+            self.enter_decision(node.op.span());
+            visit::visit_expr_binary(self, node);
+            self.leave_decision();
+        } else {
+            visit::visit_expr_binary(self, node);
         }
-        visit::visit_expr_binary(self, node);
     }
 }
 
@@ -487,7 +537,7 @@ enum SourceMetric {
 impl SourceMetric {
     fn parse(metric: &str) -> Option<Self> {
         match metric {
-            "decision_sites" => Some(Self::Decisions),
+            "decision_sites" | "max_function_decision_sites" => Some(Self::Decisions),
             "local_dependency_modules" => Some(Self::Dependencies),
             "clone_call_syntax_sites" => Some(Self::Clones),
             "reverse_repository_dependents" => Some(Self::ReverseDependents),

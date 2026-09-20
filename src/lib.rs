@@ -683,6 +683,15 @@ fn advisory_baseline_metric_value(
 ) -> Option<usize> {
     match metric {
         "decision_sites" => Some(module.decision_sites),
+        "max_function_decision_sites" => Some(
+            module
+                .functions
+                .iter()
+                .map(|function| function.decision_sites)
+                .max()
+                .filter(|value| *value > 0)
+                .unwrap_or(module.decision_sites),
+        ),
         "local_dependency_modules" => Some(module.local_dependency_modules.len()),
         "clone_call_syntax_sites" => Some(module.clone_calls),
         "reverse_repository_dependents" => Some(
@@ -706,7 +715,7 @@ fn advisory_growth_is_material(metric: &str, baseline: usize, current: usize) ->
     }
 
     let minimum = match metric {
-        "decision_sites" => 3,
+        "decision_sites" | "max_function_decision_sites" => 3,
         "local_dependency_modules"
         | "clone_call_syntax_sites"
         | "reverse_repository_dependents" => 2,

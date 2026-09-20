@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{input::SourceFile, model::ModuleMetrics};
 
-const RAW_FACT_SCHEMA: u32 = 3;
+const RAW_FACT_SCHEMA: u32 = 4;
 const MAX_CACHE_BYTES: u64 = 256 * 1024 * 1024;
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 

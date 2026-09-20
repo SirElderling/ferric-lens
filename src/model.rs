@@ -84,6 +84,10 @@ pub struct FunctionFact {
     pub name: String,
     pub kind: FunctionKind,
     pub public_declared: bool,
+    #[serde(default)]
+    pub decision_sites: usize,
+    #[serde(default)]
+    pub max_decision_nesting: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]

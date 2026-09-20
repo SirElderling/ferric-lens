@@ -1062,3 +1062,48 @@ fn source_line_priority_covers_clone_and_decision_context_classes() {
     );
     assert_eq!(super::source_line_priority("other", "if ready {"), 0);
 }
+
+#[test]
+fn function_facts_capture_decision_concentration_and_nesting() {
+    let metrics = extract(
+        &source(
+            r#"
+            fn mapping(value: u8) -> &'static str {
+                match value {
+                    0 => "zero",
+                    1 => "one",
+                    2 => "two",
+                    _ => "other",
+                }
+            }
+
+            fn behavioral(a: bool, b: bool, c: bool) {
+                if a {
+                    while b {
+                        if c {}
+                    }
+                }
+            }
+            "#,
+        ),
+        &host(),
+    )
+    .unwrap();
+
+    let mapping = metrics
+        .functions
+        .iter()
+        .find(|fact| fact.name == "mapping")
+        .expect("mapping");
+    assert_eq!(mapping.decision_sites, 1);
+    assert_eq!(mapping.max_decision_nesting, 1);
+
+    let behavioral = metrics
+        .functions
+        .iter()
+        .find(|fact| fact.name == "behavioral")
+        .expect("behavioral");
+    assert_eq!(behavioral.decision_sites, 3);
+    assert_eq!(behavioral.max_decision_nesting, 3);
+    assert_eq!(metrics.decision_sites, 4);
+}

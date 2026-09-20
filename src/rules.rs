@@ -131,7 +131,9 @@ pub fn refactor_candidates(findings: &[Finding]) -> Vec<Finding> {
 
 fn refactor_signal(metric: &str) -> Option<(&'static str, &'static str)> {
     match metric {
-        "decision_sites" => Some(("decision_complexity", "decision complexity")),
+        "decision_sites" | "max_function_decision_sites" => {
+            Some(("decision_complexity", "decision complexity"))
+        }
         "local_dependency_modules" | "reverse_repository_dependents" => {
             Some(("dependency_surface", "dependency surface"))
         }
@@ -186,6 +188,17 @@ fn refactor_direction(signals: BTreeSet<&str>) -> String {
     "consider splitting responsibilities and narrowing dependency surface without prescribing a final architecture".into()
 }
 
+fn advisory_decision_value(module: &ModuleMetrics) -> usize {
+    module
+        .functions
+        .iter()
+        .map(|function| function.decision_sites)
+        .max()
+        .filter(|value| *value > 0)
+        .unwrap_or(module.decision_sites)
+}
+
+
 fn structural_coupled_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
     let mut by_crate = BTreeMap::<&str, Vec<&ModuleMetrics>>::new();
     for module in modules.iter().filter(|module| module.parse_complete) {
@@ -200,7 +213,7 @@ fn structural_coupled_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
 
         let decision_values = population
             .iter()
-            .map(|module| module.decision_sites)
+            .map(|module| advisory_decision_value(module))
             .collect::<Vec<_>>();
         let dependency_values = population
             .iter()
@@ -211,7 +224,8 @@ fn structural_coupled_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
 
         for module in population {
             let dependencies = module.local_dependency_modules.len();
-            if module.decision_sites > decision_p90 && dependencies > dependency_p90 {
+            let decisions = advisory_decision_value(module);
+            if decisions > decision_p90 && dependencies > dependency_p90 {
                 let subject = subject(crate_name, &module.module_path);
                 findings.push(Finding {
                     fingerprint: String::new(),
@@ -229,8 +243,8 @@ fn structural_coupled_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
                     direction: "investigate whether responsibility and dependency surface can be reduced without changing behavior".into(),
                     evidence: vec![
                         Evidence {
-                            metric: "decision_sites".into(),
-                            value: module.decision_sites,
+                            metric: "max_function_decision_sites".into(),
+                            value: decisions,
                             reference: decision_p90,
                             population: decision_values.len(),
                             baseline: None,
@@ -266,7 +280,7 @@ fn small_population_decision_concentrations(modules: &[ModuleMetrics]) -> Vec<Fi
         }
         let values = population
             .iter()
-            .map(|module| module.decision_sites)
+            .map(|module| advisory_decision_value(module))
             .collect::<Vec<_>>();
         let Some((index, value, reference)) = dominant_unique_max(&values) else {
             continue;
@@ -288,7 +302,7 @@ fn small_population_decision_concentrations(modules: &[ModuleMetrics]) -> Vec<Fi
             summary: "module has a clearly separated highest observed decision-site count in a small cohort; this is descriptive concentration, not a statistical outlier".into(),
             direction: "inspect whether the module concentrates multiple responsibilities; the cohort is too small for percentile-based classification".into(),
             evidence: vec![Evidence {
-                metric: "decision_sites".into(),
+                metric: "max_function_decision_sites".into(),
                 value,
                 reference,
                 population: values.len(),
