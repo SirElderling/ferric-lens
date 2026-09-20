@@ -1,5 +1,6 @@
 // ferric-lens: ignore-correctness-risks
-use syn::{spanned::Spanned, Item};
+use quote::ToTokens;
+use syn::{spanned::Spanned, Block, Expr, ExprMethodCall, Item, Local, Pat, Stmt};
 
 use crate::{
     input::SourceFile,
@@ -75,118 +76,203 @@ pub fn scan(sources: &[SourceFile]) -> CorrectnessScan {
 }
 
 fn detect_contextual_copy_risks(sources: &[SourceFile], scan: &mut CorrectnessScan) {
-    const MUTATING_METHODS: [&str; 15] = [
-        ".append(",
-        ".clear(",
-        ".dedup(",
-        ".drain(",
-        ".extend(",
-        ".insert(",
-        ".pop(",
-        ".push(",
-        ".remove(",
-        ".retain(",
-        ".sort(",
-        ".sort_by(",
-        ".sort_by_key(",
-        ".truncate(",
-        ".swap_remove(",
-    ];
-
     for source in sources {
         let Ok(text) = std::str::from_utf8(&source.bytes) else {
             continue;
         };
-        let lines = text.lines().collect::<Vec<_>>();
+        let Ok(file) = syn::parse_file(text) else {
+            continue;
+        };
         let subject = if source.module_path.is_empty() {
             source.crate_name.clone()
         } else {
             format!("{}::{}", source.crate_name, source.module_path)
         };
 
-        let iteration = lines
-            .iter()
-            .enumerate()
-            .filter(|(_, line)| {
-                let trimmed = line.trim_start();
-                trimmed.starts_with("for ")
-                    && trimmed.contains(" in ")
-                    && trimmed.contains(".clone()")
-            })
-            .map(|(index, line)| Match {
-                path: source.relative_path.clone(),
-                line: index + 1,
-                excerpt: line.trim().to_owned(),
-            })
-            .collect::<Vec<_>>();
+        let mut visitor = ContextualCopyVisitor {
+            path: &source.relative_path,
+            iteration: Vec::new(),
+            clone_then_mutate: Vec::new(),
+            clone_then_mutate_mutations: Vec::new(),
+        };
+        syn::visit::visit_file(&mut visitor, &file);
 
-        if !iteration.is_empty() {
+        if !visitor.iteration.is_empty() {
             push_finding(
                 scan,
                 "runtime.clone_for_iteration_candidate",
                 &subject,
                 EvidenceClass::Candidate,
                 Priority::Observe,
-                "A cloned value is used directly as a for-loop iterator",
-                "inspect whether the loop can borrow or iterate the original collection; keep the clone when ownership or mutation semantics require it",
-                vec![evidence("clone_for_iteration_sites", iteration.len())],
-                vec![("clone_for_iteration_sites", iteration)],
+                "A clone expression is used directly as a for-loop iterator",
+                "inspect whether the loop needs an owned snapshot; keep the clone when ownership or mutation semantics require it",
+                vec![evidence("clone_for_iteration_sites", visitor.iteration.len())],
+                vec![("clone_for_iteration_sites", visitor.iteration)],
             );
         }
 
-        let mut clone_then_mutate = Vec::new();
-        for (index, line) in lines.iter().enumerate() {
-            let Some(name) = mutable_clone_binding(line) else {
-                continue;
-            };
-            let end = (index + 13).min(lines.len());
-            let prefix = format!("{name}.");
-            let mutated = lines[index + 1..end].iter().any(|candidate| {
-                let Some((_, after_root)) = candidate.split_once(&prefix) else {
-                    return false;
-                };
-                after_root.contains('.')
-                    && MUTATING_METHODS
-                        .iter()
-                        .any(|method| candidate.contains(method))
-            });
-            if mutated {
-                clone_then_mutate.push(Match {
-                    path: source.relative_path.clone(),
-                    line: index + 1,
-                    excerpt: line.trim().to_owned(),
-                });
-            }
-        }
-
-        if !clone_then_mutate.is_empty() {
+        if !visitor.clone_then_mutate.is_empty() {
+            let site_count = visitor.clone_then_mutate.len();
             push_finding(
                 scan,
                 "runtime.clone_then_mutate_candidate",
                 &subject,
                 EvidenceClass::Candidate,
                 Priority::Observe,
-                "A cloned aggregate is followed by mutation of one of its nested fields",
-                "inspect whether the operation can borrow the original aggregate and build only the filtered or changed subset instead of copying the whole value",
-                vec![evidence(
-                    "clone_then_mutate_sites",
-                    clone_then_mutate.len(),
-                )],
-                vec![("clone_then_mutate_sites", clone_then_mutate)],
+                "A mutable local is initialized from a clone and that same binding is later mutated",
+                "inspect whether the operation can borrow the original value and build only the changed subset; keep the clone when an owned working copy is intentional",
+                vec![
+                    evidence("clone_then_mutate_sites", site_count),
+                    evidence(
+                        "mutation_after_clone_sites",
+                        visitor.clone_then_mutate_mutations.len(),
+                    ),
+                ],
+                vec![
+                    ("clone_then_mutate_sites", visitor.clone_then_mutate),
+                    (
+                        "mutation_after_clone_sites",
+                        visitor.clone_then_mutate_mutations,
+                    ),
+                ],
             );
         }
     }
 }
 
-fn mutable_clone_binding(line: &str) -> Option<&str> {
-    let trimmed = line.trim();
-    let rest = trimmed.strip_prefix("let mut ")?;
-    let (name, value) = rest.split_once('=')?;
-    let name = name.trim();
-    if name.is_empty() || !name.chars().all(is_ident_char) || !value.contains(".clone()") {
+const MUTATING_METHODS: [&str; 15] = [
+    "append", "clear", "dedup", "drain", "extend", "insert", "pop", "push", "remove",
+    "retain", "sort", "sort_by", "sort_by_key", "truncate", "swap_remove",
+];
+
+struct ContextualCopyVisitor<'a> {
+    path: &'a str,
+    iteration: Vec<Match>,
+    clone_then_mutate: Vec<Match>,
+    clone_then_mutate_mutations: Vec<Match>,
+}
+
+impl ContextualCopyVisitor<'_> {
+    fn at(&self, span: proc_macro2::Span, excerpt: String) -> Match {
+        Match {
+            path: self.path.to_owned(),
+            line: span.start().line,
+            excerpt,
+        }
+    }
+}
+
+impl<'ast> syn::visit::Visit<'ast> for ContextualCopyVisitor<'_> {
+    fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
+        if direct_clone_expr(&node.expr).is_some() {
+            self.iteration
+                .push(self.at(node.expr.span(), node.expr.to_token_stream().to_string()));
+        }
+        syn::visit::visit_expr_for_loop(self, node);
+    }
+
+    fn visit_block(&mut self, block: &'ast Block) {
+        for (index, stmt) in block.stmts.iter().enumerate() {
+            let Some((name, clone_expr)) = mutable_clone_local(stmt) else {
+                continue;
+            };
+
+            let mut mutation = None;
+            for candidate in &block.stmts[index + 1..] {
+                if statement_binds_name(candidate, &name) {
+                    break;
+                }
+                let mut finder = MutationFinder {
+                    target: &name,
+                    found: None,
+                };
+                syn::visit::visit_stmt(&mut finder, candidate);
+                if finder.found.is_some() {
+                    mutation = finder.found;
+                    break;
+                }
+            }
+
+            if let Some(method) = mutation {
+                self.clone_then_mutate.push(self.at(
+                    clone_expr.span(),
+                    clone_expr.to_token_stream().to_string(),
+                ));
+                self.clone_then_mutate_mutations.push(self.at(
+                    method.span(),
+                    method.to_token_stream().to_string(),
+                ));
+            }
+        }
+        syn::visit::visit_block(self, block);
+    }
+}
+
+struct MutationFinder<'a> {
+    target: &'a str,
+    found: Option<ExprMethodCall>,
+}
+
+impl<'ast> syn::visit::Visit<'ast> for MutationFinder<'_> {
+    fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
+        if self.found.is_none()
+            && MUTATING_METHODS.iter().any(|method| node.method == *method)
+            && expr_root_ident(&node.receiver).is_some_and(|ident| ident == self.target)
+        {
+            self.found = Some(node.clone());
+            return;
+        }
+        syn::visit::visit_expr_method_call(self, node);
+    }
+}
+
+fn direct_clone_expr(expr: &Expr) -> Option<&ExprMethodCall> {
+    match expr {
+        Expr::MethodCall(call) if call.method == "clone" && call.args.is_empty() => Some(call),
+        Expr::Paren(paren) => direct_clone_expr(&paren.expr),
+        Expr::Group(group) => direct_clone_expr(&group.expr),
+        _ => None,
+    }
+}
+
+fn mutable_clone_local(stmt: &Stmt) -> Option<(String, &Expr)> {
+    let Stmt::Local(local) = stmt else {
+        return None;
+    };
+    let Pat::Ident(binding) = &local.pat else {
+        return None;
+    };
+    if binding.mutability.is_none() || binding.by_ref.is_some() {
         return None;
     }
-    Some(name)
+    let init = local.init.as_ref()?;
+    direct_clone_expr(&init.expr)?;
+    Some((binding.ident.to_string(), init.expr.as_ref()))
+}
+
+fn statement_binds_name(stmt: &Stmt, name: &str) -> bool {
+    let Stmt::Local(Local {
+        pat: Pat::Ident(binding),
+        ..
+    }) = stmt
+    else {
+        return false;
+    };
+    binding.ident == name
+}
+
+fn expr_root_ident(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Path(path) if path.qself.is_none() && path.path.segments.len() == 1 => {
+            Some(path.path.segments[0].ident.to_string())
+        }
+        Expr::Field(field) => expr_root_ident(&field.base),
+        Expr::Index(index) => expr_root_ident(&index.expr),
+        Expr::Paren(paren) => expr_root_ident(&paren.expr),
+        Expr::Group(group) => expr_root_ident(&group.expr),
+        Expr::Reference(reference) => expr_root_ident(&reference.expr),
+        _ => None,
+    }
 }
 
 fn detect_cargo_feature_resolution(sources: &[SourceFile], scan: &mut CorrectnessScan) {

@@ -242,28 +242,95 @@ fn filtered(world: &World) {
 }
 
 #[test]
-fn mutable_clone_binding_rejects_non_bindings_invalid_names_and_non_clones() {
-    assert_eq!(
-        super::mutable_clone_binding("let value = source.clone();"),
-        None
-    );
-    assert_eq!(super::mutable_clone_binding("let mut value;"), None);
-    assert_eq!(
-        super::mutable_clone_binding("let mut = source.clone();"),
-        None
-    );
-    assert_eq!(
-        super::mutable_clone_binding("let mut value-name = source.clone();"),
-        None
-    );
-    assert_eq!(
-        super::mutable_clone_binding("let mut value = source;"),
-        None
-    );
-    assert_eq!(
-        super::mutable_clone_binding("let mut value = source.clone();"),
-        Some("value")
-    );
+fn contextual_copy_detection_requires_the_same_binding_to_be_mutated() {
+    let sources = vec![source(
+        "src/render/history.rs",
+        r#"
+fn filtered(world: &World, other: &mut Other) {
+    let mut selected = world.clone();
+    other.events.retain(|event| event.year > 10);
+    render(&selected);
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_then_mutate_candidate"));
+}
+
+#[test]
+fn contextual_copy_detection_stops_at_shadowing_and_reports_both_locations() {
+    let shadowed = vec![source(
+        "src/render/history.rs",
+        r#"
+fn filtered(world: &World) {
+    let mut selected = world.clone();
+    let mut selected = Other::default();
+    selected.events.retain(|event| event.year > 10);
+}
+"#,
+    )];
+    assert!(!scan(&shadowed)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_then_mutate_candidate"));
+
+    let sources = vec![source(
+        "src/render/history.rs",
+        r#"
+fn filtered(world: &World) {
+    let mut selected = world.clone();
+    selected.events.retain(|event| event.year > 10);
+}
+"#,
+    )];
+    let result = scan(&sources);
+    let finding = result
+        .findings
+        .iter()
+        .find(|finding| finding.rule == "runtime.clone_then_mutate_candidate")
+        .expect("copy candidate");
+    assert!(finding
+        .evidence
+        .iter()
+        .any(|evidence| evidence.metric == "mutation_after_clone_sites"));
+    assert!(result.source_contexts.iter().any(|context| {
+        context.metric == "mutation_after_clone_sites" && context.excerpt.contains("retain")
+    }));
+}
+
+#[test]
+fn clone_iteration_detection_uses_expression_structure_not_line_text() {
+    let benign = vec![source(
+        "src/history_query.rs",
+        r#"
+fn replay(population: &Population) {
+    let text = "for cohort in population.cohorts.clone()";
+    observe(text);
+}
+"#,
+    )];
+    assert!(!scan(&benign)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_for_iteration_candidate"));
+
+    let direct = vec![source(
+        "src/history_query.rs",
+        r#"
+fn replay(population: &Population) {
+    for cohort in (population.cohorts.clone()) {
+        consume(cohort);
+    }
+}
+"#,
+    )];
+    assert!(scan(&direct)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_for_iteration_candidate"));
 }
 
 #[test]
