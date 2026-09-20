@@ -1575,7 +1575,7 @@ fn render_findings(
             html.push_str("</details>");
         }
 
-        html.push_str("<h4>What to inspect next</h4><ul class="inspection-list">");
+        html.push_str(r#"<h4>What to inspect next</h4><ul class="inspection-list">"#);
         for question in ai_guidance.recommended_inspection {
             html.push_str("<li>");
             html.push_str(&escape(question));
