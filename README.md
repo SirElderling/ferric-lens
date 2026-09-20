@@ -2,7 +2,7 @@
 
 Ferric Lens is a deterministic, zero-configuration structural analysis tool for Rust codebases.
 
-The product contract is defined in [VISION.md](docs/VISION.md), [PROJECT_SPEC.md](docs/PROJECT_SPEC.md), and [ARCHITECTURE.md](ARCHITECTURE.md).
+The product contract is defined in [VISION.md](docs/VISION.md), [PROJECT_SPEC.md](docs/PROJECT_SPEC.md), and [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Current V1 implementation
 

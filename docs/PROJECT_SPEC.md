@@ -8,7 +8,7 @@ It produces a unified structural model of a Rust repository, identifies evidence
 
 The initial product is static and offline. It does not modify source code and does not depend on AI, network services, or project-specific configuration.
 
-[ARCHITECTURE.md](../ARCHITECTURE.md) defines the proposed implementation and records decision rationale. This specification defines behavior; the vision defines intent. Neither document claims that performance or rule precision has already been measured.
+[ARCHITECTURE.md](ARCHITECTURE.md) defines the proposed implementation and records decision rationale. This specification defines behavior; the vision defines intent. Neither document claims that performance or rule precision has already been measured.
 
 ## 2. Primary goals
 

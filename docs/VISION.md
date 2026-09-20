@@ -20,7 +20,7 @@ It builds one coherent model of the current Rust codebase and combines independe
 
 Ferric Lens should be useful even when run with no configuration.
 
-The behavioral contract lives in [PROJECT_SPEC.md](PROJECT_SPEC.md). The implemented V1 boundaries, trade-offs, decision rationale, and release-validation criteria live in [ARCHITECTURE.md](../ARCHITECTURE.md).
+The behavioral contract lives in [PROJECT_SPEC.md](PROJECT_SPEC.md). The implemented V1 boundaries, trade-offs, decision rationale, and release-validation criteria live in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Core principles
 

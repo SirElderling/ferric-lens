@@ -1,6 +1,6 @@
 # Ferric Lens architecture and decision record
 
-Status: implemented for Ferric Lens V1 in PR #2. This document records the implemented architecture, decision rationale, deliberate V1 limits, and pre-release validation criteria. Behavioral requirements are in [PROJECT_SPEC.md](docs/PROJECT_SPEC.md); product intent is in [VISION.md](docs/VISION.md). Performance/resource targets and real-project precision remain release-acceptance measurements and are not implied by implementation status.
+Status: implemented for Ferric Lens V1 in PR #2. This document records the implemented architecture, decision rationale, deliberate V1 limits, and pre-release validation criteria. Behavioral requirements are in [PROJECT_SPEC.md](PROJECT_SPEC.md); product intent is in [VISION.md](VISION.md). Performance/resource targets and real-project precision remain release-acceptance measurements and are not implied by implementation status.
 
 ## 1. Architecture in one page
 
