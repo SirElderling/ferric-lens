@@ -255,7 +255,6 @@ fn direct_clone_expr(expr: &Expr) -> Option<&ExprMethodCall> {
     }
 }
 
-#[allow(clippy::question_mark)]
 fn mutable_clone_local(stmt: &Stmt) -> Option<(String, &Expr)> {
     let Stmt::Local(local) = stmt else {
         return None;
@@ -266,9 +265,7 @@ fn mutable_clone_local(stmt: &Stmt) -> Option<(String, &Expr)> {
     if binding.mutability.is_none() || binding.by_ref.is_some() {
         return None;
     }
-    let Some(init) = local.init.as_ref() else {
-        return None;
-    };
+    let init = local.init.as_ref()?;
     direct_clone_expr(&init.expr)?;
     Some((binding.ident.to_string(), init.expr.as_ref()))
 }
