@@ -540,6 +540,11 @@ article.finding-card.gate {{
   border-left-color: var(--danger);
   box-shadow: 0 0 0 1px rgb(255 123 114 / 8%);
 }}
+article.finding-card.accepted {{
+  border-left-color: var(--border-strong);
+  background: var(--surface-soft);
+}}
+article.finding-card.accepted .priority-badge {{ color: var(--muted); background: var(--neutral-bg); border-color: var(--border); }}
 .finding-card.delta-worsened h3::before {{ content: "↑ "; color: var(--danger); }}
 .finding-card.delta-new h3::before {{ content: "+ "; color: var(--warning); }}
 .finding-header {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }}
@@ -1069,6 +1074,9 @@ fn render_findings(
         html.push_str(&delta_class);
         if finding.gate {
             html.push_str(" gate");
+        }
+        if finding.accepted {
+            html.push_str(" accepted");
         }
         html.push_str(r#"" id=""#);
         html.push_str(&finding_anchor);
@@ -1791,6 +1799,77 @@ mod tests {
     }
 
     #[test]
+    fn html_dark_theme_uses_semantic_verdict_and_priority_cues() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        let mut result = minimal_result();
+        result.verdict = GateVerdict::Regression;
+        result.findings = vec![
+            Finding {
+                fingerprint: "urgent".into(),
+                rule: "structure.current_coupled_outlier".into(),
+                subject: "demo::urgent".into(),
+                identity: "demo::urgent".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::ActFirst,
+                delta: DeltaStatus::Worsened,
+                gate: true,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "urgent".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            },
+            Finding {
+                fingerprint: "investigate".into(),
+                rule: "refactor.multi_signal_candidate".into(),
+                subject: "demo::investigate".into(),
+                identity: "demo::investigate".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::Investigate,
+                delta: DeltaStatus::New,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "investigate".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            },
+            Finding {
+                fingerprint: "observe".into(),
+                rule: "runtime.clone_for_iteration_candidate".into(),
+                subject: "demo::observe".into(),
+                identity: "demo::observe".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "observe".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            },
+        ];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("color-scheme: dark"));
+        assert!(rendered.contains("verdict verdict-regression"));
+        assert!(rendered.contains("finding-card priority-actfirst delta-worsened gate"));
+        assert!(rendered.contains("finding-card priority-investigate delta-new"));
+        assert!(rendered.contains("finding-card priority-observe delta-current"));
+        assert!(rendered.contains("badge priority-badge"));
+        assert!(rendered.contains("--danger: #ff7b72"));
+        assert!(rendered.contains("--warning: #e3b341"));
+        assert!(rendered.contains("--info: #79c0ff"));
+        assert!(rendered.contains("--success: #7ee787"));
+    }
+
+    #[test]
     fn cli_summary_prioritizes_plain_language_actions_over_internal_rule_names() {
         use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
 
@@ -1887,6 +1966,14 @@ mod tests {
         assert_eq!(
             super::metric_label("clone_call_syntax_sites"),
             "Clone call sites"
+        );
+        assert_eq!(
+            super::metric_label("clone_for_iteration_sites"),
+            "Clone-for-iteration sites"
+        );
+        assert_eq!(
+            super::metric_label("clone_then_mutate_sites"),
+            "Whole-aggregate clone then nested mutation sites"
         );
         assert_eq!(
             super::metric_label("reverse_repository_dependents"),
