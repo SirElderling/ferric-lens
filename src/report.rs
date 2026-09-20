@@ -1086,7 +1086,9 @@ fn render_findings(
         html.push_str(&escape(&path));
         html.push_str("</code><br><small>");
         html.push_str(&escape(&finding.subject));
-        html.push_str(r#"</small></p></div><div class="badges"><span class="badge priority-badge">"#);
+        html.push_str(
+            r#"</small></p></div><div class="badges"><span class="badge priority-badge">"#,
+        );
         html.push_str(priority_label(&finding.priority));
         html.push_str(r#"</span><span class="badge evidence-badge">"#);
         html.push_str(evidence_label(&finding.evidence_class));
