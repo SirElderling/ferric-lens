@@ -66,16 +66,26 @@ struct AiChangeAttribution<'a> {
 }
 
 #[derive(Serialize)]
+struct AiSourceContext<'a> {
+    metric: &'a str,
+    path: &'a str,
+    start_line: usize,
+    end_line: usize,
+    excerpt: &'a str,
+    excerpt_truncated: bool,
+}
+
+#[derive(Serialize)]
 struct AiFinding<'a> {
     change_relevance: &'static str,
-    priority: &'static str,
-    evidence_strength: &'static str,
+    priority: &'a Priority,
+    evidence_strength: &'a EvidenceClass,
     gate: bool,
     title: &'static str,
     subject: &'a str,
     path: String,
     facts: Vec<String>,
-    source: Vec<&'a SourceContext>,
+    source: Vec<AiSourceContext<'a>>,
     additional_source_contexts_omitted: usize,
     interpretation: &'static str,
     recommended_inspection: &'static [&'static str],
@@ -214,12 +224,20 @@ fn ai_finding<'a>(
     let source = all_source
         .into_iter()
         .take(AI_SOURCE_CONTEXT_LIMIT)
+        .map(|context| AiSourceContext {
+            metric: &context.metric,
+            path: &context.path,
+            start_line: context.start_line,
+            end_line: context.end_line,
+            excerpt: &context.excerpt,
+            excerpt_truncated: context.excerpt_truncated,
+        })
         .collect();
 
     AiFinding {
         change_relevance: change_relevance(finding, baseline_available),
-        priority: priority_label(&finding.priority),
-        evidence_strength: evidence_label(&finding.evidence_class),
+        priority: &finding.priority,
+        evidence_strength: &finding.evidence_class,
         gate: finding.gate,
         title: guidance.title,
         subject: &finding.subject,
