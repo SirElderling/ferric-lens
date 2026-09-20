@@ -1107,3 +1107,27 @@ fn function_facts_capture_decision_concentration_and_nesting() {
     assert_eq!(behavioral.max_decision_nesting, 3);
     assert_eq!(metrics.decision_sites, 4);
 }
+
+#[test]
+fn module_level_decisions_do_not_create_phantom_function_complexity() {
+    let metrics = extract(
+        &source(
+            r#"
+            const VALUE: usize = if true { 1 } else { 2 };
+
+            fn ordinary() {}
+            "#,
+        ),
+        &host(),
+    )
+    .unwrap();
+
+    assert_eq!(metrics.decision_sites, 1);
+    let ordinary = metrics
+        .functions
+        .iter()
+        .find(|fact| fact.name == "ordinary")
+        .expect("ordinary");
+    assert_eq!(ordinary.decision_sites, 0);
+    assert_eq!(ordinary.max_decision_nesting, 0);
+}

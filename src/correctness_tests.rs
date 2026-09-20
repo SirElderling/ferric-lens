@@ -372,6 +372,66 @@ fn normalize(node: &Node) {
 }
 
 #[test]
+fn contextual_copy_detection_handles_nested_index_reference_and_non_ident_patterns() {
+    let indexed = vec![source(
+        "src/render/history.rs",
+        r#"
+fn filtered(world: &World) {
+    let mut selected = world.clone();
+    selected.groups[0].retain(|event| event.year > 10);
+}
+"#,
+    )];
+    assert!(scan(&indexed)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_then_mutate_candidate"));
+
+    let direct_reference = vec![source(
+        "src/input.rs",
+        r#"
+fn normalize(node: &Node) {
+    let mut features = node.features.clone();
+    (&mut features).sort();
+}
+"#,
+    )];
+    assert!(!scan(&direct_reference)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_then_mutate_candidate"));
+
+    let call_receiver = vec![source(
+        "src/input.rs",
+        r#"
+fn normalize(world: &World) {
+    let mut selected = world.clone();
+    factory().events.retain(|event| event.keep);
+}
+"#,
+    )];
+    assert!(!scan(&call_receiver)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_then_mutate_candidate"));
+
+    let destructured = vec![source(
+        "src/input.rs",
+        r#"
+fn normalize(pair: &Pair) {
+    let (mut left, mut right) = pair.clone();
+    left.sort();
+    right.sort();
+}
+"#,
+    )];
+    assert!(!scan(&destructured)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_then_mutate_candidate"));
+}
+
+#[test]
 fn ordinary_owned_output_clones_do_not_emit_runtime_copy_findings() {
     let sources = vec![source(
         "src/render.rs",

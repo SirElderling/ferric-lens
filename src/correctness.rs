@@ -251,7 +251,6 @@ fn direct_clone_expr(expr: &Expr) -> Option<&ExprMethodCall> {
     match expr {
         Expr::MethodCall(call) if call.method == "clone" && call.args.is_empty() => Some(call),
         Expr::Paren(paren) => direct_clone_expr(&paren.expr),
-        Expr::Group(group) => direct_clone_expr(&group.expr),
         _ => None,
     }
 }
@@ -288,7 +287,6 @@ fn expr_is_ident(expr: &Expr, target: &str) -> bool {
             path.path.segments[0].ident == target
         }
         Expr::Paren(paren) => expr_is_ident(&paren.expr, target),
-        Expr::Group(group) => expr_is_ident(&group.expr, target),
         Expr::Reference(reference) => expr_is_ident(&reference.expr, target),
         _ => false,
     }
@@ -302,7 +300,6 @@ fn expr_root_ident(expr: &Expr) -> Option<String> {
         Expr::Field(field) => expr_root_ident(&field.base),
         Expr::Index(index) => expr_root_ident(&index.expr),
         Expr::Paren(paren) => expr_root_ident(&paren.expr),
-        Expr::Group(group) => expr_root_ident(&group.expr),
         Expr::Reference(reference) => expr_root_ident(&reference.expr),
         _ => None,
     }
