@@ -1628,10 +1628,12 @@ fn render_findings(
 fn metric_label(metric: &str) -> &'static str {
     match metric {
         "decision_sites" => "Decision points",
+        "max_function_decision_sites" => "Maximum decision points in one function",
         "local_dependency_modules" => "Repository dependencies",
         "clone_call_syntax_sites" => "Clone call sites",
         "clone_for_iteration_sites" => "Clone-for-iteration sites",
         "clone_then_mutate_sites" => "Whole-aggregate clone then nested mutation sites",
+        "mutation_after_clone_sites" => "Nested mutations after cloning",
         "reverse_repository_dependents" => "Modules depending on this area",
         "public_items" => "Public items",
         "cargo_metadata_no_deps_sites" => "Cargo metadata calls without resolve graph",
@@ -2610,6 +2612,10 @@ mod tests {
 
         assert_eq!(super::metric_label("decision_sites"), "Decision points");
         assert_eq!(
+            super::metric_label("max_function_decision_sites"),
+            "Maximum decision points in one function"
+        );
+        assert_eq!(
             super::metric_label("local_dependency_modules"),
             "Repository dependencies"
         );
@@ -2624,6 +2630,10 @@ mod tests {
         assert_eq!(
             super::metric_label("clone_then_mutate_sites"),
             "Whole-aggregate clone then nested mutation sites"
+        );
+        assert_eq!(
+            super::metric_label("mutation_after_clone_sites"),
+            "Nested mutations after cloning"
         );
         assert_eq!(
             super::metric_label("reverse_repository_dependents"),

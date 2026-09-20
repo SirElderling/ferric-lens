@@ -91,6 +91,7 @@ fn detect_contextual_copy_risks(sources: &[SourceFile], scan: &mut CorrectnessSc
 
         let mut visitor = ContextualCopyVisitor {
             path: &source.relative_path,
+            text,
             iteration: Vec::new(),
             clone_then_mutate: Vec::new(),
             clone_then_mutate_mutations: Vec::new(),
@@ -120,7 +121,7 @@ fn detect_contextual_copy_risks(sources: &[SourceFile], scan: &mut CorrectnessSc
                 EvidenceClass::Candidate,
                 Priority::Observe,
                 "A mutable local is initialized from a clone and that same binding is later mutated",
-                "inspect whether the operation can borrow the original value and build only the changed subset; keep the clone when an owned working copy is intentional",
+                "inspect whether the operation can borrow the original value and build only the filtered or changed subset; keep the clone when an owned working copy is intentional",
                 vec![
                     evidence("clone_then_mutate_sites", site_count),
                     evidence(
@@ -160,16 +161,26 @@ const MUTATING_METHODS: [&str; 15] = [
 
 struct ContextualCopyVisitor<'a> {
     path: &'a str,
+    text: &'a str,
     iteration: Vec<Match>,
     clone_then_mutate: Vec<Match>,
     clone_then_mutate_mutations: Vec<Match>,
 }
 
 impl ContextualCopyVisitor<'_> {
-    fn at(&self, span: proc_macro2::Span, excerpt: String) -> Match {
+    fn at(&self, span: proc_macro2::Span, fallback: String) -> Match {
+        let line = span.start().line;
+        let excerpt = self
+            .text
+            .lines()
+            .nth(line.saturating_sub(1))
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .unwrap_or(fallback);
         Match {
             path: self.path.to_owned(),
-            line: span.start().line,
+            line,
             excerpt,
         }
     }
@@ -227,6 +238,7 @@ impl<'ast> syn::visit::Visit<'ast> for MutationFinder<'_> {
         if self.found.is_none()
             && MUTATING_METHODS.iter().any(|method| node.method == *method)
             && expr_root_ident(&node.receiver).is_some_and(|ident| ident == self.target)
+            && !expr_is_ident(&node.receiver, self.target)
         {
             self.found = Some(node.clone());
             return;
@@ -268,6 +280,18 @@ fn statement_binds_name(stmt: &Stmt, name: &str) -> bool {
         return false;
     };
     binding.ident == name
+}
+
+fn expr_is_ident(expr: &Expr, target: &str) -> bool {
+    match expr {
+        Expr::Path(path) if path.qself.is_none() && path.path.segments.len() == 1 => {
+            path.path.segments[0].ident == target
+        }
+        Expr::Paren(paren) => expr_is_ident(&paren.expr, target),
+        Expr::Group(group) => expr_is_ident(&group.expr, target),
+        Expr::Reference(reference) => expr_is_ident(&reference.expr, target),
+        _ => false,
+    }
 }
 
 fn expr_root_ident(expr: &Expr) -> Option<String> {

@@ -342,6 +342,25 @@ fn normalize(node: &Node) {
     let mut features = node.features.clone();
     features.sort();
     features.dedup();
+    features.push(Node::default());
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_then_mutate_candidate"));
+}
+
+#[test]
+fn clone_then_mutate_ignores_parenthesized_direct_receiver() {
+    let sources = vec![source(
+        "src/input.rs",
+        r#"
+fn normalize(node: &Node) {
+    let mut features = node.features.clone();
+    (features).sort();
 }
 "#,
     )];
