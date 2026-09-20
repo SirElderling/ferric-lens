@@ -14,7 +14,7 @@ Use one synchronous Rust application with a library core and a thin CLI, initial
 | `model` | Stable IDs, indexes, typed edges, configuration-specific graphs | Store UI state or compiler ASTs indefinitely |
 | `rules` | Pure fact-to-finding functions and capability requirements | Read files, launch processes, or render HTML |
 | `compare` | Conservative movement matching, deltas, material fingerprints, acceptances, gate verdict | Infer semantic equivalence from fuzzy similarity |
-| `report` | Canonical JSON, static HTML, compact CLI summary | Recompute rule semantics |
+| `report` | Canonical JSON, static HTML, compact CLI summary, derived AI view with bounded evidence/interpretation metadata | Recompute detector or gate semantics |
 | `cache` | Disposable, versioned content-addressed fact storage | Become a required baseline or source of truth |
 
 The orchestrator freezes inputs, extracts/reuses facts, builds graphs, evaluates and compares core rules, optionally enriches advisories, then serializes one immutable result. Both commands call this pipeline with different requested outputs/enrichment, not different analyzers. Keep the frozen gate result separate from advisory ranking.
