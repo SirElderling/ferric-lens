@@ -445,51 +445,188 @@ pub fn html(result: &AnalysisResult) -> String {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ferric Lens report</title>
 <style>
-:root {{ color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }}
+:root {{
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --bg: #0d1117;
+  --surface: #151b23;
+  --surface-raised: #1b222c;
+  --surface-soft: #111820;
+  --border: #30363d;
+  --border-strong: #46505c;
+  --text: #e6edf3;
+  --muted: #9da7b3;
+  --link: #79c0ff;
+  --danger: #ff7b72;
+  --danger-bg: #2a1719;
+  --danger-border: #7d3035;
+  --warning: #e3b341;
+  --warning-bg: #27200f;
+  --warning-border: #6f5718;
+  --info: #79c0ff;
+  --info-bg: #10243a;
+  --info-border: #275b84;
+  --success: #7ee787;
+  --success-bg: #10291a;
+  --success-border: #2e6b3b;
+  --neutral-bg: #1a2029;
+}}
 * {{ box-sizing: border-box; }}
-body {{ max-width: 1180px; margin: 0 auto; padding: 2rem; line-height: 1.55; }}
-header {{ border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); margin-bottom: 2rem; padding-bottom: 1rem; }}
-h1, h2, h3 {{ line-height: 1.2; }}
-.verdict {{ font-size: 1.35rem; font-weight: 750; margin-bottom: .35rem; }}
-.muted, .finding-meta, .location {{ opacity: .78; }}
+html {{ background: var(--bg); }}
+body {{
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 2rem;
+  line-height: 1.6;
+  background: var(--bg);
+  color: var(--text);
+}}
+header {{
+  background: linear-gradient(180deg, #141b24 0%, #10161e 100%);
+  border: 1px solid var(--border);
+  border-radius: .85rem;
+  margin-bottom: 2rem;
+  padding: 1.2rem 1.35rem;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 18%);
+}}
+h1, h2, h3 {{ line-height: 1.2; color: #f0f6fc; }}
+h2 {{ margin-top: 2rem; }}
+.verdict {{
+  display: inline-block;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: .025em;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: .3rem .75rem;
+  margin: .15rem 0 .45rem;
+  background: var(--neutral-bg);
+}}
+.verdict-pass {{ color: var(--success); background: var(--success-bg); border-color: var(--success-border); }}
+.verdict-regression {{ color: var(--danger); background: var(--danger-bg); border-color: var(--danger-border); }}
+.verdict-inconclusive {{ color: var(--warning); background: var(--warning-bg); border-color: var(--warning-border); }}
+.muted, .finding-meta, .location {{ color: var(--muted); }}
 .attention-grid, .overview-grid {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap: 1rem; }}
 .card, article, details {{ min-width: 0; overflow-wrap: anywhere; }}
-.card, article.finding-card, .analysis-details, .explorer-module {{ border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: .7rem; padding: 1rem; margin: .8rem 0; }}
-article.finding-card.gate {{ border-width: 2px; }}
+.card, article.finding-card, .analysis-details, .explorer-module {{
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: .75rem;
+  padding: 1rem;
+  margin: .8rem 0;
+}}
+.card {{ box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%); }}
+article.finding-card {{
+  position: relative;
+  border-left-width: 4px;
+  border-left-color: var(--border-strong);
+  background: linear-gradient(90deg, rgb(255 255 255 / 2%) 0%, transparent 22%), var(--surface);
+}}
+article.finding-card.priority-actfirst {{
+  border-left-color: var(--danger);
+  background: linear-gradient(90deg, rgb(255 123 114 / 9%) 0%, transparent 28%), var(--surface);
+}}
+article.finding-card.priority-investigate {{
+  border-left-color: var(--warning);
+  background: linear-gradient(90deg, rgb(227 179 65 / 8%) 0%, transparent 28%), var(--surface);
+}}
+article.finding-card.priority-observe {{
+  border-left-color: var(--info);
+  background: linear-gradient(90deg, rgb(121 192 255 / 6%) 0%, transparent 24%), var(--surface);
+}}
+article.finding-card.gate {{
+  border-width: 1px 1px 1px 4px;
+  border-color: var(--danger-border);
+  border-left-color: var(--danger);
+  box-shadow: 0 0 0 1px rgb(255 123 114 / 8%);
+}}
+.finding-card.delta-worsened h3::before {{ content: "↑ "; color: var(--danger); }}
+.finding-card.delta-new h3::before {{ content: "+ "; color: var(--warning); }}
 .finding-header {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }}
+.finding-header h3 {{ margin-top: .1rem; margin-bottom: .35rem; }}
 .badges {{ display: flex; flex-wrap: wrap; gap: .4rem; }}
-.badge {{ border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 999px; padding: .15rem .55rem; font-size: .82rem; }}
+.badge {{
+  border: 1px solid var(--border-strong);
+  background: var(--neutral-bg);
+  border-radius: 999px;
+  padding: .18rem .58rem;
+  font-size: .8rem;
+  font-weight: 650;
+  color: #c9d1d9;
+}}
+.priority-actfirst .priority-badge, .gate .gate-badge {{ color: var(--danger); background: var(--danger-bg); border-color: var(--danger-border); }}
+.priority-investigate .priority-badge {{ color: var(--warning); background: var(--warning-bg); border-color: var(--warning-border); }}
+.priority-observe .priority-badge {{ color: var(--info); background: var(--info-bg); border-color: var(--info-border); }}
+.delta-worsened .delta-badge {{ color: var(--danger); border-color: var(--danger-border); }}
+.delta-new .delta-badge {{ color: var(--warning); border-color: var(--warning-border); }}
 .guidance {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: .8rem; margin: 1rem 0; }}
-.guidance > div {{ border-left: 3px solid color-mix(in srgb, currentColor 25%, transparent); padding-left: .8rem; }}
-.guidance h4 {{ margin: 0 0 .3rem; }}
-summary {{ cursor: pointer; }}
-.source-evidence {{ margin: .8rem 0; }}
+.guidance > div {{
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: .45rem;
+  padding: .75rem .85rem;
+}}
+.priority-actfirst .guidance > div {{ border-left-color: var(--danger-border); }}
+.priority-investigate .guidance > div {{ border-left-color: var(--warning-border); }}
+.priority-observe .guidance > div {{ border-left-color: var(--info-border); }}
+.guidance h4 {{ margin: 0 0 .3rem; color: #f0f6fc; }}
+summary {{ cursor: pointer; color: #dbe4ee; }}
+summary:hover {{ color: #ffffff; }}
+.analysis-details {{ background: var(--surface-soft); }}
+.source-evidence {{ margin: .8rem 0; border-color: var(--border); background: var(--surface-soft); }}
 .source-context {{ margin: .7rem 0; }}
-.source-context pre {{ margin: .35rem 0; padding: .7rem; overflow-x: auto; white-space: pre-wrap; background: color-mix(in srgb, currentColor 6%, transparent); border-radius: .4rem; }}
+.source-context pre {{
+  margin: .35rem 0;
+  padding: .8rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  background: #090d12;
+  border: 1px solid #252c35;
+  border-radius: .45rem;
+  color: #d7e0ea;
+}}
 .metric-list {{ margin: .5rem 0; padding-left: 1.2rem; }}
-.metric-list li {{ margin: .25rem 0; }}
-.explorer-intro {{ max-width: 760px; }}
+.metric-list li {{ margin: .3rem 0; }}
+.explorer-intro {{ max-width: 760px; color: var(--muted); }}
+.explorer-module {{ background: #121821; }}
 .explorer-summary {{ display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }}
-.explorer-status {{ font-weight: 650; }}
-.explorer-metrics {{ display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin: .8rem 0; }}
-.explorer-metrics span {{ white-space: nowrap; }}
-.explorer-detail {{ margin-top: .8rem; }}
+.explorer-status {{ font-weight: 700; color: #c9d1d9; }}
+.explorer-metrics {{ display: flex; flex-wrap: wrap; gap: .5rem .65rem; margin: .8rem 0; }}
+.explorer-metrics span {{
+  white-space: nowrap;
+  background: var(--neutral-bg);
+  border: 1px solid var(--border);
+  border-radius: .4rem;
+  padding: .25rem .5rem;
+}}
+.explorer-detail {{ margin-top: .8rem; background: transparent; }}
 .analysis-details .detail-grid {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(250px,1fr)); gap: 1rem; }}
 .technical-list {{ padding-left: 1.2rem; }}
 .technical-list li {{ margin: .35rem 0; overflow-wrap: anywhere; }}
 .digest {{ word-break: break-all; }}
-code {{ overflow-wrap: anywhere; }}
-a {{ color: inherit; }}
+code {{
+  overflow-wrap: anywhere;
+  color: #d2a8ff;
+  background: rgb(110 80 140 / 10%);
+  border-radius: .25rem;
+  padding: .04rem .2rem;
+}}
+pre code {{ color: inherit; background: transparent; padding: 0; }}
+a {{ color: var(--link); text-decoration-thickness: .08em; text-underline-offset: .16em; }}
+a:hover {{ color: #a5d6ff; }}
+::selection {{ background: #264f78; color: #fff; }}
 @media (max-width: 650px) {{
   body {{ padding: 1rem; }}
   .guidance, .attention-grid, .overview-grid {{ grid-template-columns: 1fr; }}
+  header {{ padding: 1rem; }}
 }}
 </style>
 </head>
 <body>
 <header>
 <h1>Ferric Lens</h1>
-<p class="verdict">Analysis result: {verdict}</p>
+<p class="verdict verdict-{verdict_class}">Analysis result: {verdict}</p>
 <p>{reason}</p>
 </header>
 
@@ -527,6 +664,7 @@ a {{ color: inherit; }}
 </details>
 </body></html>"#,
         verdict = verdict_label(&result.verdict),
+        verdict_class = verdict_label(&result.verdict).to_ascii_lowercase(),
         reason = escape(&result.verdict_reason),
         triage = render_triage_summary(result),
         overview = render_repository_overview(result),
@@ -923,11 +1061,16 @@ fn render_findings(
         let path = finding_path(finding, modules, source_contexts);
         let finding_anchor = anchor_id("finding", &finding.fingerprint);
 
-        html.push_str(if finding.gate {
-            r#"<article class="finding-card gate" id=""#
-        } else {
-            r#"<article class="finding-card" id=""#
-        });
+        let priority_class = format!("{:?}", finding.priority).to_ascii_lowercase();
+        let delta_class = format!("{:?}", finding.delta).to_ascii_lowercase();
+        html.push_str(r#"<article class="finding-card priority-"#);
+        html.push_str(&priority_class);
+        html.push_str(" delta-");
+        html.push_str(&delta_class);
+        if finding.gate {
+            html.push_str(" gate");
+        }
+        html.push_str(r#"" id=""#);
         html.push_str(&finding_anchor);
         html.push_str(r#""><div class="finding-header"><div><h3>"#);
         html.push_str(&escape(guidance.title));
@@ -935,15 +1078,15 @@ fn render_findings(
         html.push_str(&escape(&path));
         html.push_str("</code><br><small>");
         html.push_str(&escape(&finding.subject));
-        html.push_str(r#"</small></p></div><div class="badges"><span class="badge">"#);
+        html.push_str(r#"</small></p></div><div class="badges"><span class="badge priority-badge">"#);
         html.push_str(priority_label(&finding.priority));
-        html.push_str(r#"</span><span class="badge">"#);
+        html.push_str(r#"</span><span class="badge evidence-badge">"#);
         html.push_str(evidence_label(&finding.evidence_class));
-        html.push_str(r#"</span><span class="badge">"#);
+        html.push_str(r#"</span><span class="badge delta-badge">"#);
         html.push_str(delta_label(&finding.delta));
         html.push_str("</span>");
         if finding.gate {
-            html.push_str(r#"<span class="badge">CI gate</span>"#);
+            html.push_str(r#"<span class="badge gate-badge">CI gate</span>"#);
         }
         if finding.accepted {
             html.push_str(r#"<span class="badge">accepted</span>"#);
@@ -1047,6 +1190,8 @@ fn metric_label(metric: &str) -> &'static str {
         "decision_sites" => "Decision points",
         "local_dependency_modules" => "Repository dependencies",
         "clone_call_syntax_sites" => "Clone call sites",
+        "clone_for_iteration_sites" => "Clone-for-iteration sites",
+        "clone_then_mutate_sites" => "Whole-aggregate clone then nested mutation sites",
         "reverse_repository_dependents" => "Modules depending on this area",
         "public_items" => "Public items",
         "cargo_metadata_no_deps_sites" => "Cargo metadata calls without resolve graph",
