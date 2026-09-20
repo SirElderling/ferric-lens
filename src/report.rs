@@ -274,13 +274,14 @@ pub fn cli_summary(result: &AnalysisResult) -> String {
         for finding in actionable.iter().take(5) {
             let guidance = finding_guidance(finding);
             let path = finding_path(finding, &result.modules, &result.source_contexts);
+            let inspection = ai_rule_guidance(&finding.rule).recommended_inspection[0];
             output.push_str(&format!(
-                "\n[{}] {} — {}\nWhy it matters: {}\nNext: {}\n",
+                "\n[{}] {} — {}\nWhy it matters: {}\nInspect: {}\n",
                 priority_label(&finding.priority),
                 guidance.title,
                 path,
                 guidance.why_care,
-                finding.direction
+                inspection
             ));
         }
         if actionable.len() > 5 {
@@ -2068,7 +2069,10 @@ mod tests {
         assert!(rendered.contains("This module may be harder to change safely"));
         assert!(rendered.contains("Why this matters"));
         assert!(rendered.contains("If ignored"));
-        assert!(rendered.contains("What to investigate next"));
+        assert!(rendered.contains("Observed facts"));
+        assert!(rendered.contains("What to inspect next"));
+        assert!(rendered.contains("What this does not establish"));
+        assert!(rendered.contains("Change attribution unavailable"));
         assert!(rendered.contains("Repository explorer"));
         assert!(rendered.contains("Use this after a finding points you to an area"));
         assert!(rendered.contains("Worth investigating"));
@@ -2161,24 +2165,184 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(value["format"], "ferric_lens_ai");
-        assert!(value["findings"].as_array().unwrap().is_empty());
-        assert_eq!(value["observations"].as_array().unwrap().len(), 1);
+        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["change_attribution"]["status"], "unavailable");
+        assert!(value["change_findings"].as_array().unwrap().is_empty());
+        assert!(value["existing_findings"].as_array().unwrap().is_empty());
+        assert!(value["unattributed_findings"].as_array().unwrap().is_empty());
+        assert_eq!(value["context"]["observations"].as_array().unwrap().len(), 1);
         assert_eq!(
-            value["observations"][0]["title"],
+            value["context"]["observations"][0]["title"],
             "A collection is cloned just to iterate it"
         );
-        assert_eq!(value["observations"][0]["path"], "src/engine.rs");
         assert_eq!(
-            value["observations"][0]["source_contexts"][0]["start_line"],
+            value["context"]["observations"][0]["change_relevance"],
+            "unattributed"
+        );
+        assert_eq!(
+            value["context"]["observations"][0]["path"],
+            "src/engine.rs"
+        );
+        assert_eq!(
+            value["context"]["observations"][0]["source"][0]["start_line"],
             12
         );
-        assert!(value["observations"][0]["why_care"]
+        assert_eq!(
+            value["context"]["observations"][0]["facts"][0],
+            "A cloned value is used directly as a for-loop iterator."
+        );
+        assert!(value["context"]["observations"][0]["interpretation"]
             .as_str()
             .unwrap()
-            .contains("copy"));
+            .contains("iteration"));
+        assert!(!value["context"]["observations"][0]["recommended_inspection"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(!value["context"]["observations"][0]["limitations"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(value["context"]["observations"][0].get("why_care").is_none());
+        assert!(value["context"]["observations"][0].get("next_step").is_none());
+        assert!(value.get("findings").is_none());
+        assert!(value.get("observations").is_none());
         assert!(value.get("modules").is_none());
         assert!(value.get("capabilities").is_none());
         assert_eq!(value["summary"]["accepted_findings"], 1);
+    }
+
+    #[test]
+    fn ai_v2_prioritizes_change_relevance_bounds_output_and_reports_omissions() {
+        use crate::model::{
+            BaselineContext, DeltaStatus, EvidenceClass, Finding, Priority, SourceContext,
+        };
+
+        let mut result = minimal_result();
+        result.baseline = Some(BaselineContext {
+            target_ref: "main".into(),
+            target_oid: "a".repeat(40),
+            merge_base: "b".repeat(40),
+            source_files: 1,
+            content_digest: "baseline".into(),
+        });
+
+        let make = |fingerprint: &str, delta: DeltaStatus, priority: Priority| Finding {
+            fingerprint: fingerprint.into(),
+            rule: "structure.current_coupled_outlier".into(),
+            subject: format!("demo::{fingerprint}"),
+            identity: format!("demo::{fingerprint}"),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Strong,
+            priority,
+            delta,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "summary".into(),
+            direction: "direction".into(),
+            evidence: Vec::new(),
+        };
+
+        result.findings = vec![
+            make("new-a", DeltaStatus::New, Priority::Investigate),
+            make("new-b", DeltaStatus::New, Priority::ActFirst),
+            make("worse", DeltaStatus::Worsened, Priority::ActFirst),
+            make("old", DeltaStatus::Unchanged, Priority::Investigate),
+            make("current", DeltaStatus::Current, Priority::Investigate),
+            make("unknown", DeltaStatus::Unknown, Priority::Investigate),
+        ];
+        for index in 0..6 {
+            result.findings.push(Finding {
+                fingerprint: format!("observe-{index}"),
+                rule: "runtime.clone_for_iteration_candidate".into(),
+                subject: format!("demo::observe{index}"),
+                identity: format!("demo::observe{index}"),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "observe".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            });
+        }
+
+        result.source_contexts = (1..=4)
+            .map(|line| SourceContext {
+                subject: "demo::new-a".into(),
+                metric: "decision_sites".into(),
+                path: "src/new_a.rs".into(),
+                start_line: line,
+                end_line: line,
+                excerpt: format!("if condition_{line} {{}}"),
+                excerpt_truncated: false,
+            })
+            .collect();
+        result.findings[0].evidence = vec![crate::model::Evidence {
+            metric: "decision_sites".into(),
+            value: 30,
+            reference: 10,
+            population: 20,
+            baseline: Some(20),
+            material_delta: Some(5),
+        }];
+
+        let value: serde_json::Value =
+            serde_json::from_str(&super::ai_json(&result)).unwrap();
+
+        assert_eq!(value["change_attribution"]["status"], "available");
+        assert_eq!(value["change_attribution"]["baseline"], "main");
+        assert_eq!(value["additional_actionable_findings_omitted"], 1);
+        assert_eq!(value["change_findings"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            value["change_findings"][0]["change_relevance"],
+            "introduced"
+        );
+        assert_eq!(
+            value["change_findings"][2]["change_relevance"],
+            "worsened"
+        );
+        assert_eq!(value["existing_findings"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            value["existing_findings"][0]["change_relevance"],
+            "existing"
+        );
+        assert_eq!(value["unattributed_findings"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            value["unattributed_findings"][0]["change_relevance"],
+            "unattributed"
+        );
+        assert_eq!(
+            value["context"]["observations"].as_array().unwrap().len(),
+            5
+        );
+        assert_eq!(value["context"]["additional_observations_omitted"], 1);
+
+        let new_a = value["change_findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|finding| finding["subject"] == "demo::new-a")
+            .unwrap();
+        assert_eq!(new_a["source"].as_array().unwrap().len(), 3);
+        assert_eq!(new_a["additional_source_contexts_omitted"], 1);
+        assert!(new_a["facts"][1]
+            .as_str()
+            .unwrap()
+            .contains("baseline 20"));
+        assert!(new_a["facts"][1]
+            .as_str()
+            .unwrap()
+            .contains("material growth threshold 5"));
+
+        result.findings.truncate(1);
+        let rendered = html(&result);
+        assert!(rendered.contains("Introduced or worsened by this change"));
+        assert!(rendered.contains("Review these first"));
     }
 
     #[test]
@@ -2319,12 +2483,12 @@ mod tests {
         assert!(rendered.contains("1 area worth reviewing"));
         assert!(rendered.contains("Possible refactoring opportunity"));
         assert!(rendered.contains("Why it matters:"));
-        assert!(rendered.contains("Next:"));
+        assert!(rendered.contains("Inspect:"));
         assert!(!rendered.contains("refactor.multi_signal_candidate"));
-        assert_eq!(ai["findings"].as_array().unwrap().len(), 1);
-        assert!(ai["observations"].as_array().unwrap().is_empty());
+        assert_eq!(ai["unattributed_findings"].as_array().unwrap().len(), 1);
+        assert!(ai["context"]["observations"].as_array().unwrap().is_empty());
         assert_eq!(
-            ai["findings"][0]["title"],
+            ai["unattributed_findings"][0]["title"],
             "Possible refactoring opportunity"
         );
     }
@@ -2378,6 +2542,28 @@ mod tests {
         ] {
             finding.rule = rule.into();
             assert_eq!(super::finding_guidance(&finding).title, expected_title);
+        }
+
+        for rule in [
+            "structure.coupled_complexity_growth",
+            "structure.current_coupled_outlier",
+            "structure.small_population_decision_concentration",
+            "runtime.clone_for_iteration_candidate",
+            "runtime.clone_then_mutate_candidate",
+            "build.rebuild_exposure_candidate",
+            "correctness.cargo_feature_resolution_without_resolve",
+            "correctness.symbolic_target_identity",
+            "correctness.stdout_mode_unconditional_artifacts",
+            "correctness.workspace_manifest_snapshot_gap",
+            "correctness.lossy_git_path_decoding",
+            "refactor.multi_signal_candidate",
+            "unknown.rule",
+        ] {
+            let guidance = super::ai_rule_guidance(rule);
+            assert!(!guidance.fact.is_empty());
+            assert!(!guidance.interpretation.is_empty());
+            assert!(!guidance.recommended_inspection.is_empty());
+            assert!(!guidance.limitations.is_empty());
         }
 
         assert_eq!(super::metric_label("decision_sites"), "Decision points");
@@ -2446,6 +2632,29 @@ mod tests {
             "src/context.rs"
         );
         assert_eq!(super::finding_path(&finding, &[], &[]), "demo::missing");
+
+        finding.delta = DeltaStatus::New;
+        assert_eq!(super::change_relevance(&finding, true), "introduced");
+        finding.delta = DeltaStatus::Worsened;
+        assert_eq!(super::change_relevance(&finding, true), "worsened");
+        finding.delta = DeltaStatus::Unchanged;
+        assert_eq!(super::change_relevance(&finding, true), "existing");
+        finding.delta = DeltaStatus::Unknown;
+        assert_eq!(super::change_relevance(&finding, true), "unattributed");
+        assert_eq!(super::change_relevance(&finding, false), "unattributed");
+
+        let fact = super::evidence_fact(&crate::model::Evidence {
+            metric: "decision_sites".into(),
+            value: 12,
+            reference: 8,
+            population: 20,
+            baseline: None,
+            material_delta: None,
+        });
+        assert_eq!(
+            fact,
+            "Decision points: 12; comparison reference 8 across 20 comparable modules."
+        );
 
         let mut result = minimal_result();
         result.capabilities = vec![
