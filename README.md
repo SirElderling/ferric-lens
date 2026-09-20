@@ -24,7 +24,7 @@ Ferric Lens currently:
 - reports unresolved custom cfg evidence as `inconclusive` rather than pretending the gate passed,
 - reports five narrowly scoped deterministic correctness risks when strong source evidence establishes unsafe analysis/tooling patterns: missing Cargo feature resolution, symbolic-vs-resolved target identity, stdout modes with unconditional artifact writes, incomplete workspace-manifest snapshot verification, and lossy Git path decoding,
 - emits deterministic canonical JSON for complete machine/audit use,
-- emits a compact deterministic `--ai` JSON view for agents that keeps actionable findings, evidence, source contexts, result identity, and analysis limitations while omitting raw repository inventory,
+- emits a compact deterministic `--ai` JSON v2 view for agents that prioritizes branch-local change relevance, separates observed facts from interpretation, keeps bounded source evidence and rule limitations, and omits raw repository inventory,
 - emits one self-contained HTML/CSS report with no JavaScript,
 - prints a concise human-oriented CLI summary by default rather than a raw metric dump,
 - attaches deterministic source evidence to supported findings: repository-relative path, exact 1-based line span, and a bounded escaped excerpt, while retaining module navigation when no truthful syntax span exists,
@@ -81,7 +81,7 @@ cargo run -- analyze /path/to/rust/repository --base origin/main --ai
 cargo run -- check /path/to/rust/repository --base origin/main --ai
 ```
 
-`--ai` emits compact deterministic JSON on stdout containing the verdict, result digest, active findings, plain-language meaning, core evidence, exact source contexts where available, recommended next investigation step, and non-complete analysis capabilities. It intentionally omits the full module/function/type inventory and complete capability dump. In `analyze --ai`, default JSON/HTML files are not created; pass `--json <path>` and/or `--html <path>` explicitly when those artifacts are also wanted. Canonical JSON remains the complete machine-readable record.
+`--ai` emits compact deterministic JSON v2 on stdout. Actionable findings are grouped into change-related, existing, and unattributed records; observations remain secondary context. Each record separates deterministic facts, bounded source evidence, Ferric Lens interpretation, focused inspection questions, finding-specific limitations, selection evidence, and rule provenance. The compact view includes at most five actionable findings and five observations, reports omitted counts, and keeps at most three source contexts per finding. It intentionally omits the full module/function/type inventory and complete capability dump. In `analyze --ai`, default JSON/HTML files are not created; pass `--json <path>` and/or `--html <path>` explicitly when those artifacts are also wanted. Canonical JSON remains the complete machine-readable record.
 
 `--base` is optional. Without it, Ferric Lens tries the GitHub PR target, the local remote-default branch, then local `main`. It always compares against the unique merge base, not the moving target tip.
 
@@ -198,9 +198,9 @@ Full pull-request validation also uploads the locked release executable from eac
 
 Ferric Lens has three intentionally different presentation surfaces built from the same canonical result:
 
-- **HTML for people** — starts with what deserves attention. `Act first` and `Investigate` findings explain what Ferric Lens noticed, why it matters, what could happen if the concern grows, what evidence supports it, what to investigate next, and where to look in source. Lower-confidence `Observe` signals are kept in a separate secondary **Observations** section and do not count as areas needing attention. Repository metrics without a finding are explicitly context, not warnings.
-- **Default CLI for people and CI logs** — concise verdict plus the highest-priority actionable findings, using the same plain-language titles and next steps as HTML. Lower-confidence observations are summarized by count instead of consuming the main CLI output.
-- **`--ai` for agents** — compact deterministic JSON with actionable `findings` and a separate `observations` collection. Agents do not need the explanatory page layout or the full repository inventory, but they still receive evidence, source locations, rule identity, limitations, and the canonical result digest.
+- **HTML for people** — starts with what deserves attention. When a baseline exists, active findings are separated into **Introduced or worsened by this change**, **Existing findings**, and **Attribution uncertain**. Each finding begins with observed facts, then explains why they matter, shows selection/source evidence, asks bounded inspection questions, and states what the detector does not establish. Lower-confidence `Observe` signals stay in a separate secondary **Observations** section and do not count as areas needing attention.
+- **Default CLI for people and CI logs** — concise verdict plus the highest-priority actionable findings, using the same plain-language titles and bounded inspection guidance as HTML. Lower-confidence observations are summarized by count instead of consuming the main CLI output.
+- **`--ai` for agents** — compact deterministic JSON v2 grouped by change relevance. It separates facts from interpretation, keeps exact bounded source evidence ahead of statistical selection evidence, asks inspection questions rather than prescribing fixes, reports finding-specific and analysis-wide limitations, and counts records omitted by compact-output limits.
 
 The full canonical JSON remains the lossless interface when a consumer needs every module, capability, imported observation, or structural fact.
 
