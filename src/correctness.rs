@@ -255,6 +255,7 @@ fn direct_clone_expr(expr: &Expr) -> Option<&ExprMethodCall> {
     }
 }
 
+#[allow(clippy::question_mark)]
 fn mutable_clone_local(stmt: &Stmt) -> Option<(String, &Expr)> {
     let Stmt::Local(local) = stmt else {
         return None;
