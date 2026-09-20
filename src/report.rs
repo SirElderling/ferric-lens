@@ -2644,10 +2644,7 @@ mod tests {
         same_subject_a.delta = DeltaStatus::Current;
         let mut same_subject_b = same_subject_a.clone();
         same_subject_b.rule = "a.rule".into();
-        let ordered = super::ai_ordered_findings(
-            vec![&same_subject_a, &same_subject_b],
-            false,
-        );
+        let ordered = super::ai_ordered_findings(vec![&same_subject_a, &same_subject_b], false);
         assert_eq!(ordered[0].rule, "a.rule");
 
         let fact = super::evidence_fact(&crate::model::Evidence {
