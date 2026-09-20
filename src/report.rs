@@ -153,8 +153,7 @@ pub fn ai_json(result: &AnalysisResult) -> String {
         }
     }
 
-    let additional_observations_omitted =
-        observations.len().saturating_sub(AI_OBSERVATION_LIMIT);
+    let additional_observations_omitted = observations.len().saturating_sub(AI_OBSERVATION_LIMIT);
     let observations = observations
         .into_iter()
         .take(AI_OBSERVATION_LIMIT)
@@ -371,10 +370,7 @@ fn ai_relevance_rank(finding: &Finding, baseline_available: bool) -> u8 {
     }
 }
 
-fn ai_ordered_findings(
-    mut findings: Vec<&Finding>,
-    baseline_available: bool,
-) -> Vec<&Finding> {
+fn ai_ordered_findings(mut findings: Vec<&Finding>, baseline_available: bool) -> Vec<&Finding> {
     findings.sort_by(|a, b| {
         ai_relevance_rank(a, baseline_available)
             .cmp(&ai_relevance_rank(b, baseline_available))
@@ -1014,12 +1010,7 @@ fn render_attention_findings(result: &AnalysisResult, findings: &[&Finding]) -> 
     }
 
     if result.baseline.is_none() {
-        let body = render_findings(
-            findings,
-            "",
-            &result.modules,
-            &result.source_contexts,
-        );
+        let body = render_findings(findings, "", &result.modules, &result.source_contexts);
         return format!(
             r#"<div class="finding-group"><div class="finding-group-heading"><h3>Current findings</h3><span class="muted">Change attribution unavailable</span></div><p class="muted">No comparable baseline was available, so Ferric Lens cannot say whether these findings were introduced by the current change.</p>{body}</div>"#
         );
@@ -1500,7 +1491,9 @@ fn render_findings(
         }
         html.push_str("</div></div>");
 
-        html.push_str(r#"<div class="finding-facts"><h4>Observed facts</h4><ul class="fact-list">"#);
+        html.push_str(
+            r#"<div class="finding-facts"><h4>Observed facts</h4><ul class="fact-list">"#,
+        );
         for fact in &facts {
             html.push_str("<li>");
             html.push_str(&escape(fact));
@@ -2169,8 +2162,14 @@ mod tests {
         assert_eq!(value["change_attribution"]["status"], "unavailable");
         assert!(value["change_findings"].as_array().unwrap().is_empty());
         assert!(value["existing_findings"].as_array().unwrap().is_empty());
-        assert!(value["unattributed_findings"].as_array().unwrap().is_empty());
-        assert_eq!(value["context"]["observations"].as_array().unwrap().len(), 1);
+        assert!(value["unattributed_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            value["context"]["observations"].as_array().unwrap().len(),
+            1
+        );
         assert_eq!(
             value["context"]["observations"][0]["title"],
             "A collection is cloned just to iterate it"
@@ -2179,10 +2178,7 @@ mod tests {
             value["context"]["observations"][0]["change_relevance"],
             "unattributed"
         );
-        assert_eq!(
-            value["context"]["observations"][0]["path"],
-            "src/engine.rs"
-        );
+        assert_eq!(value["context"]["observations"][0]["path"], "src/engine.rs");
         assert_eq!(
             value["context"]["observations"][0]["source"][0]["start_line"],
             12
@@ -2195,16 +2191,22 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("iteration"));
-        assert!(!value["context"]["observations"][0]["recommended_inspection"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            !value["context"]["observations"][0]["recommended_inspection"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert!(!value["context"]["observations"][0]["limitations"]
             .as_array()
             .unwrap()
             .is_empty());
-        assert!(value["context"]["observations"][0].get("why_care").is_none());
-        assert!(value["context"]["observations"][0].get("next_step").is_none());
+        assert!(value["context"]["observations"][0]
+            .get("why_care")
+            .is_none());
+        assert!(value["context"]["observations"][0]
+            .get("next_step")
+            .is_none());
         assert!(value.get("findings").is_none());
         assert!(value.get("observations").is_none());
         assert!(value.get("modules").is_none());
@@ -2291,8 +2293,7 @@ mod tests {
             material_delta: Some(5),
         }];
 
-        let value: serde_json::Value =
-            serde_json::from_str(&super::ai_json(&result)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&super::ai_json(&result)).unwrap();
 
         assert_eq!(value["change_attribution"]["status"], "available");
         assert_eq!(value["change_attribution"]["baseline"], "main");
@@ -2302,10 +2303,7 @@ mod tests {
             value["change_findings"][0]["change_relevance"],
             "introduced"
         );
-        assert_eq!(
-            value["change_findings"][2]["change_relevance"],
-            "worsened"
-        );
+        assert_eq!(value["change_findings"][2]["change_relevance"], "worsened");
         assert_eq!(value["existing_findings"].as_array().unwrap().len(), 1);
         assert_eq!(
             value["existing_findings"][0]["change_relevance"],
@@ -2330,10 +2328,7 @@ mod tests {
             .unwrap();
         assert_eq!(new_a["source"].as_array().unwrap().len(), 3);
         assert_eq!(new_a["additional_source_contexts_omitted"], 1);
-        assert!(new_a["facts"][1]
-            .as_str()
-            .unwrap()
-            .contains("baseline 20"));
+        assert!(new_a["facts"][1].as_str().unwrap().contains("baseline 20"));
         assert!(new_a["facts"][1]
             .as_str()
             .unwrap()
