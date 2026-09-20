@@ -529,6 +529,7 @@ struct ContextFacts {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum SourceMetric {
     Decisions,
+    FunctionDecisions,
     Dependencies,
     Clones,
     ReverseDependents,
@@ -537,7 +538,8 @@ enum SourceMetric {
 impl SourceMetric {
     fn parse(metric: &str) -> Option<Self> {
         match metric {
-            "decision_sites" | "max_function_decision_sites" => Some(Self::Decisions),
+            "decision_sites" => Some(Self::Decisions),
+            "max_function_decision_sites" => Some(Self::FunctionDecisions),
             "local_dependency_modules" => Some(Self::Dependencies),
             "clone_call_syntax_sites" => Some(Self::Clones),
             "reverse_repository_dependents" => Some(Self::ReverseDependents),
@@ -548,6 +550,7 @@ impl SourceMetric {
     fn as_str(self) -> &'static str {
         match self {
             Self::Decisions => "decision_sites",
+            Self::FunctionDecisions => "max_function_decision_sites",
             Self::Dependencies => "local_dependency_modules",
             Self::Clones => "clone_call_syntax_sites",
             Self::ReverseDependents => "reverse_repository_dependents",
@@ -626,7 +629,7 @@ pub fn source_contexts_for_findings(
         for metric in metrics {
             let metric_name = metric.as_str();
             match metric {
-                SourceMetric::Decisions => {
+                SourceMetric::Decisions | SourceMetric::FunctionDecisions => {
                     if let (Some(module), Some(facts)) =
                         (by_subject.get(&subject), facts.get(&subject))
                     {

@@ -239,7 +239,7 @@ fn structural_coupled_outliers(modules: &[ModuleMetrics]) -> Vec<Finding> {
                     gate: false,
                     accepted: false,
                     acceptance_reason: None,
-                    summary: "module is simultaneously an outlier for decision sites and local dependency breadth".into(),
+                    summary: "module is simultaneously an outlier for maximum per-function decision sites and local dependency breadth".into(),
                     direction: "investigate whether responsibility and dependency surface can be reduced without changing behavior".into(),
                     evidence: vec![
                         Evidence {
@@ -299,7 +299,7 @@ fn small_population_decision_concentrations(modules: &[ModuleMetrics]) -> Vec<Fi
             gate: false,
             accepted: false,
             acceptance_reason: None,
-            summary: "module has a clearly separated highest observed decision-site count in a small cohort; this is descriptive concentration, not a statistical outlier".into(),
+            summary: "module has a clearly separated highest observed per-function decision-site count in a small cohort; this is descriptive concentration, not a statistical outlier".into(),
             direction: "inspect whether the module concentrates multiple responsibilities; the cohort is too small for percentile-based classification".into(),
             evidence: vec![Evidence {
                 metric: "max_function_decision_sites".into(),
