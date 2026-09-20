@@ -2,7 +2,7 @@
 
 Ferric Lens is a deterministic, zero-configuration structural analysis tool for Rust codebases.
 
-The product contract is defined in [VISION.md](VISION.md), [PROJECT_SPEC.md](PROJECT_SPEC.md), and [ARCHITECTURE.md](ARCHITECTURE.md).
+The product contract is defined in [VISION.md](docs/VISION.md), [PROJECT_SPEC.md](docs/PROJECT_SPEC.md), and [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Current V1 implementation
 
@@ -191,7 +191,7 @@ python3 tools/perf_acceptance.py \
 
 The workflow can also be dispatched with `source-10x` (1,000,000 production Rust lines) or `history-10x` (2,000 history commits after baseline). Browser DOM/open cost and private-project precision checks remain explicit release-acceptance observations rather than hidden dependencies of the tool.
 
-Full pull-request validation also uploads the locked release executable from each Linux/macOS runner as a human-test artifact. See [HUMAN_TESTING.md](HUMAN_TESTING.md) for the Jeko/Kronicle validation protocol and finding scorecard.
+Full pull-request validation also uploads the locked release executable from each Linux/macOS runner as a human-test artifact.
 
 
 ## Output surfaces
