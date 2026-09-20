@@ -279,7 +279,7 @@ fn findings_expose_exact_source_lines_and_bounded_excerpts() {
         .iter()
         .find(|context| {
             context.subject == "fixture::m0"
-                && context.metric == "decision_sites"
+                && context.metric == "max_function_decision_sites"
                 && context.start_line == 10
         })
         .expect("decision-site source context");
@@ -304,7 +304,8 @@ fn findings_expose_exact_source_lines_and_bounded_excerpts() {
             .source_contexts
             .iter()
             .filter(|context| {
-                context.subject == "fixture::m0" && context.metric == "decision_sites"
+                context.subject == "fixture::m0"
+                    && context.metric == "max_function_decision_sites"
             })
             .count()
             <= 3
