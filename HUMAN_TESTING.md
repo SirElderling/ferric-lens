@@ -121,6 +121,6 @@ Also compare the compact agent output with the same run:
 /path/to/ferric-lens analyze /path/to/project --base origin/main --ai
 ```
 
-Verify that actionable `Act first` / `Investigate` items appear under `findings`, lower-confidence `Observe` signals appear separately under `observations`, and neither group loses its evidence, source contexts, next steps, result digest, or relevant analysis limitations. Confirm that an observation does not inflate the "areas worth reviewing" count. The full canonical JSON remains the reference if anything needs deeper inspection.
+Verify that AI schema v2 separates actionable records into `change_findings`, `existing_findings`, and `unattributed_findings`; lower-confidence `Observe` signals must remain under `context.observations`. For each included record, confirm that deterministic `facts` and bounded `source` evidence are distinct from `interpretation`, `recommended_inspection`, and finding-specific `limitations`. Confirm that output caps report omission counts rather than silently dropping records, an observation does not inflate the "areas worth reviewing" count, and no inspection guidance prescribes a rewrite that the evidence cannot prove safe. The full canonical JSON remains the complete reference if anything needs deeper inspection.
 
 After that, run the documented 10x source/history stress fixtures, browser DOM/open measurement, and recorded release-environment performance acceptance.
