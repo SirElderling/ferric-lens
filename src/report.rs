@@ -1576,15 +1576,13 @@ fn render_findings(
         }
         html.push_str("</ul>");
 
-        if !ai_guidance.limitations.is_empty() {
-            html.push_str(r#"<div class="finding-limit"><h4>What this does not establish</h4><ul class="limit-list">"#);
-            for limitation in ai_guidance.limitations {
-                html.push_str("<li>");
-                html.push_str(&escape(limitation));
-                html.push_str("</li>");
-            }
-            html.push_str("</ul></div>");
+        html.push_str(r#"<div class="finding-limit"><h4>What this does not establish</h4><ul class="limit-list">"#);
+        for limitation in ai_guidance.limitations {
+            html.push_str("<li>");
+            html.push_str(&escape(limitation));
+            html.push_str("</li>");
         }
+        html.push_str("</ul></div>");
 
         if let Some(reason) = &finding.acceptance_reason {
             html.push_str("<p><strong>Acceptance:</strong> ");
@@ -2334,10 +2332,13 @@ mod tests {
             .unwrap()
             .contains("material growth threshold 5"));
 
-        result.findings.truncate(1);
         let rendered = html(&result);
         assert!(rendered.contains("Introduced or worsened by this change"));
         assert!(rendered.contains("Review these first"));
+        assert!(rendered.contains("Existing findings"));
+        assert!(rendered.contains("Not introduced by this change"));
+        assert!(rendered.contains("Attribution uncertain"));
+        assert!(rendered.contains("Baseline comparison could not classify these findings"));
     }
 
     #[test]
@@ -2637,6 +2638,17 @@ mod tests {
         finding.delta = DeltaStatus::Unknown;
         assert_eq!(super::change_relevance(&finding, true), "unattributed");
         assert_eq!(super::change_relevance(&finding, false), "unattributed");
+
+        let mut same_subject_a = finding.clone();
+        same_subject_a.rule = "z.rule".into();
+        same_subject_a.delta = DeltaStatus::Current;
+        let mut same_subject_b = same_subject_a.clone();
+        same_subject_b.rule = "a.rule".into();
+        let ordered = super::ai_ordered_findings(
+            vec![&same_subject_a, &same_subject_b],
+            false,
+        );
+        assert_eq!(ordered[0].rule, "a.rule");
 
         let fact = super::evidence_fact(&crate::model::Evidence {
             metric: "decision_sites".into(),
