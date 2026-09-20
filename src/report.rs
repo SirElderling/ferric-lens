@@ -1,0 +1,3392 @@
+use std::{
+    fs,
+    path::Path,
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+use serde::Serialize;
+
+use crate::model::{
+    AnalysisResult, DeltaStatus, EvidenceClass, Finding, GateVerdict, ModuleMetrics, Priority,
+    SourceContext,
+};
+
+static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+pub fn result_digest(result: &AnalysisResult) -> String {
+    let bytes = serde_json::to_vec(result)
+        .expect("analysis result schema contains only JSON-serializable values");
+    blake3::hash(&bytes).to_hex().to_string()
+}
+
+pub fn json(result: &AnalysisResult) -> String {
+    let digest = result_digest(result);
+    let mut value =
+        serde_json::to_value(result).expect("analysis result schema is JSON-serializable");
+    let object = value
+        .as_object_mut()
+        .expect("analysis result serializes as a JSON object");
+    object.insert("result_digest".into(), serde_json::Value::String(digest));
+    serde_json::to_string_pretty(&value).expect("analysis result JSON value is serializable")
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FindingGuidance {
+    title: &'static str,
+    why_care: &'static str,
+    if_ignored: &'static str,
+}
+
+const AI_ACTIONABLE_LIMIT: usize = 5;
+const AI_OBSERVATION_LIMIT: usize = 5;
+const AI_SOURCE_CONTEXT_LIMIT: usize = 3;
+
+#[derive(Serialize)]
+struct AiSummary {
+    areas_worth_reviewing: usize,
+    act_first: usize,
+    investigate: usize,
+    observe: usize,
+    blocking_findings: usize,
+    accepted_findings: usize,
+}
+
+#[derive(Serialize)]
+struct AiLimit<'a> {
+    capability: &'a str,
+    status: &'static str,
+    detail: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct AiChangeAttribution<'a> {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct AiSourceContext<'a> {
+    metric: &'a str,
+    path: &'a str,
+    start_line: usize,
+    end_line: usize,
+    excerpt: &'a str,
+    excerpt_truncated: bool,
+}
+
+#[derive(Serialize)]
+struct AiFinding<'a> {
+    change_relevance: &'static str,
+    priority: &'a Priority,
+    evidence_strength: &'a EvidenceClass,
+    gate: bool,
+    title: &'static str,
+    subject: &'a str,
+    path: String,
+    facts: Vec<String>,
+    source: Vec<AiSourceContext<'a>>,
+    additional_source_contexts_omitted: usize,
+    interpretation: &'static str,
+    recommended_inspection: &'static [&'static str],
+    limitations: &'static [&'static str],
+    selection_evidence: &'a [crate::model::Evidence],
+    rule: &'a str,
+}
+
+#[derive(Serialize)]
+struct AiContext<'a> {
+    observations: Vec<AiFinding<'a>>,
+    additional_observations_omitted: usize,
+}
+
+#[derive(Serialize)]
+struct AiOutput<'a> {
+    format: &'static str,
+    schema_version: u32,
+    result_digest: String,
+    verdict: &'static str,
+    verdict_reason: &'a str,
+    change_attribution: AiChangeAttribution<'a>,
+    summary: AiSummary,
+    change_findings: Vec<AiFinding<'a>>,
+    existing_findings: Vec<AiFinding<'a>>,
+    unattributed_findings: Vec<AiFinding<'a>>,
+    additional_actionable_findings_omitted: usize,
+    context: AiContext<'a>,
+    analysis_limits: Vec<AiLimit<'a>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AiRuleGuidance {
+    fact: &'static str,
+    interpretation: &'static str,
+    recommended_inspection: &'static [&'static str],
+    limitations: &'static [&'static str],
+}
+
+pub fn ai_json(result: &AnalysisResult) -> String {
+    let baseline_available = result.baseline.is_some();
+    let actionable = ai_ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| !finding.accepted && finding.priority != Priority::Observe)
+            .collect(),
+        baseline_available,
+    );
+    let observations = ai_ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| !finding.accepted && finding.priority == Priority::Observe)
+            .collect(),
+        baseline_available,
+    );
+
+    let additional_actionable_findings_omitted =
+        actionable.len().saturating_sub(AI_ACTIONABLE_LIMIT);
+    let included_actionable = actionable
+        .into_iter()
+        .take(AI_ACTIONABLE_LIMIT)
+        .collect::<Vec<_>>();
+
+    let mut change_findings = Vec::new();
+    let mut existing_findings = Vec::new();
+    let mut unattributed_findings = Vec::new();
+    for finding in included_actionable {
+        let rendered = ai_finding(finding, result, baseline_available);
+        match change_relevance(finding, baseline_available) {
+            "introduced" | "worsened" => change_findings.push(rendered),
+            "existing" => existing_findings.push(rendered),
+            _ => unattributed_findings.push(rendered),
+        }
+    }
+
+    let additional_observations_omitted = observations.len().saturating_sub(AI_OBSERVATION_LIMIT);
+    let observations = observations
+        .into_iter()
+        .take(AI_OBSERVATION_LIMIT)
+        .map(|finding| ai_finding(finding, result, baseline_available))
+        .collect();
+
+    let output = AiOutput {
+        format: "ferric_lens_ai",
+        schema_version: 2,
+        result_digest: result_digest(result),
+        verdict: verdict_label(&result.verdict),
+        verdict_reason: &result.verdict_reason,
+        change_attribution: AiChangeAttribution {
+            status: if baseline_available {
+                "available"
+            } else {
+                "unavailable"
+            },
+            baseline: result
+                .baseline
+                .as_ref()
+                .map(|baseline| baseline.target_ref.as_str()),
+        },
+        summary: ai_summary(result),
+        change_findings,
+        existing_findings,
+        unattributed_findings,
+        additional_actionable_findings_omitted,
+        context: AiContext {
+            observations,
+            additional_observations_omitted,
+        },
+        analysis_limits: result
+            .capabilities
+            .iter()
+            .filter(|capability| capability.status != crate::model::CapabilityStatus::Complete)
+            .map(|capability| AiLimit {
+                capability: &capability.name,
+                status: capability_status_label(&capability.status),
+                detail: capability.detail.as_deref(),
+            })
+            .collect(),
+    };
+
+    serde_json::to_string_pretty(&output).expect("AI output is JSON-serializable")
+}
+
+fn ai_finding<'a>(
+    finding: &'a Finding,
+    result: &'a AnalysisResult,
+    baseline_available: bool,
+) -> AiFinding<'a> {
+    let guidance = finding_guidance(finding);
+    let ai_guidance = ai_rule_guidance(&finding.rule);
+    let all_source = contexts_for_finding(finding, &result.source_contexts);
+    let additional_source_contexts_omitted =
+        all_source.len().saturating_sub(AI_SOURCE_CONTEXT_LIMIT);
+    let source = all_source
+        .into_iter()
+        .take(AI_SOURCE_CONTEXT_LIMIT)
+        .map(|context| AiSourceContext {
+            metric: &context.metric,
+            path: &context.path,
+            start_line: context.start_line,
+            end_line: context.end_line,
+            excerpt: &context.excerpt,
+            excerpt_truncated: context.excerpt_truncated,
+        })
+        .collect();
+
+    AiFinding {
+        change_relevance: change_relevance(finding, baseline_available),
+        priority: &finding.priority,
+        evidence_strength: &finding.evidence_class,
+        gate: finding.gate,
+        title: guidance.title,
+        subject: &finding.subject,
+        path: finding_path(finding, &result.modules, &result.source_contexts),
+        facts: ai_facts(finding, ai_guidance),
+        source,
+        additional_source_contexts_omitted,
+        interpretation: ai_guidance.interpretation,
+        recommended_inspection: ai_guidance.recommended_inspection,
+        limitations: ai_guidance.limitations,
+        selection_evidence: &finding.evidence,
+        rule: &finding.rule,
+    }
+}
+
+pub fn cli_summary(result: &AnalysisResult) -> String {
+    let actionable = ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| !finding.accepted && finding.priority != Priority::Observe)
+            .collect(),
+    );
+    let summary = ai_summary(result);
+    let mut output = String::new();
+    output.push_str(&format!(
+        "Ferric Lens: {}\n{}\n",
+        cli_verdict_label(&result.verdict),
+        result.verdict_reason
+    ));
+    if let Some(baseline) = &result.baseline {
+        output.push_str(&format!(
+            "Baseline: {} (merge base {})\n",
+            baseline.target_ref, baseline.merge_base
+        ));
+    }
+    output.push_str(&format!(
+        "{}\n",
+        count_phrase(
+            summary.areas_worth_reviewing,
+            "area worth reviewing",
+            "areas worth reviewing"
+        )
+    ));
+
+    if actionable.is_empty() {
+        output.push_str(
+            "No active finding currently has enough evidence to recommend investigation.\n",
+        );
+    } else {
+        for finding in actionable.iter().take(5) {
+            let guidance = finding_guidance(finding);
+            let path = finding_path(finding, &result.modules, &result.source_contexts);
+            let inspection = ai_rule_guidance(&finding.rule).recommended_inspection[0];
+            output.push_str(&format!(
+                "\n[{}] {} — {}\nWhy it matters: {}\nInspect: {}\n",
+                priority_label(&finding.priority),
+                guidance.title,
+                path,
+                guidance.why_care,
+                inspection
+            ));
+        }
+        if actionable.len() > 5 {
+            output.push_str(&format!(
+                "\n{} additional active finding(s) are available in the HTML/full JSON report.\n",
+                actionable.len() - 5
+            ));
+        }
+    }
+
+    if summary.observe > 0 {
+        output.push_str(&format!(
+            "\n{} available in the HTML or --ai output; these are contextual signals and do not currently justify action.\n",
+            count_phrase(
+                summary.observe,
+                "lower-confidence observation",
+                "lower-confidence observations"
+            )
+        ));
+    }
+
+    let limits = result
+        .capabilities
+        .iter()
+        .filter(|capability| capability.status != crate::model::CapabilityStatus::Complete)
+        .count();
+    if limits > 0 {
+        output.push_str(&format!(
+            "\nAnalysis note: {limits} capability limitation(s) were recorded; see the HTML analysis details or canonical JSON for technical detail.\n"
+        ));
+    }
+    output
+}
+
+fn ai_summary(result: &AnalysisResult) -> AiSummary {
+    let active = result
+        .findings
+        .iter()
+        .filter(|finding| !finding.accepted)
+        .collect::<Vec<_>>();
+    AiSummary {
+        areas_worth_reviewing: active
+            .iter()
+            .filter(|finding| finding.priority != Priority::Observe)
+            .map(|finding| finding.subject.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        act_first: active
+            .iter()
+            .filter(|finding| finding.priority == Priority::ActFirst)
+            .count(),
+        investigate: active
+            .iter()
+            .filter(|finding| finding.priority == Priority::Investigate)
+            .count(),
+        observe: active
+            .iter()
+            .filter(|finding| finding.priority == Priority::Observe)
+            .count(),
+        blocking_findings: active.iter().filter(|finding| finding.gate).count(),
+        accepted_findings: result
+            .findings
+            .iter()
+            .filter(|finding| finding.accepted)
+            .count(),
+    }
+}
+
+fn change_relevance(finding: &Finding, baseline_available: bool) -> &'static str {
+    if !baseline_available {
+        return "unattributed";
+    }
+    match finding.delta {
+        DeltaStatus::New => "introduced",
+        DeltaStatus::Worsened => "worsened",
+        DeltaStatus::Unchanged => "existing",
+        DeltaStatus::Current | DeltaStatus::Unknown => "unattributed",
+    }
+}
+
+fn ai_relevance_rank(finding: &Finding, baseline_available: bool) -> u8 {
+    match change_relevance(finding, baseline_available) {
+        "introduced" => 0,
+        "worsened" => 1,
+        "existing" => 2,
+        _ => 3,
+    }
+}
+
+fn ai_ordered_findings(mut findings: Vec<&Finding>, baseline_available: bool) -> Vec<&Finding> {
+    findings.sort_by(|a, b| {
+        ai_relevance_rank(a, baseline_available)
+            .cmp(&ai_relevance_rank(b, baseline_available))
+            .then_with(|| priority_rank(&a.priority).cmp(&priority_rank(&b.priority)))
+            .then_with(|| a.subject.cmp(&b.subject))
+            .then_with(|| a.rule.cmp(&b.rule))
+    });
+    findings
+}
+
+fn ai_facts(finding: &Finding, guidance: AiRuleGuidance) -> Vec<String> {
+    let mut facts = vec![guidance.fact.to_owned()];
+    facts.extend(finding.evidence.iter().map(evidence_fact));
+    facts
+}
+
+fn evidence_fact(evidence: &crate::model::Evidence) -> String {
+    let mut fact = format!(
+        "{}: {}; comparison reference {} across {} comparable modules",
+        metric_label(&evidence.metric),
+        evidence.value,
+        evidence.reference,
+        evidence.population
+    );
+    if let Some(baseline) = evidence.baseline {
+        fact.push_str(&format!("; baseline {baseline}"));
+    }
+    if let Some(material_delta) = evidence.material_delta {
+        fact.push_str(&format!("; material growth threshold {material_delta}"));
+    }
+    fact.push('.');
+    fact
+}
+
+fn ai_rule_guidance(rule: &str) -> AiRuleGuidance {
+    match rule {
+        "structure.coupled_complexity_growth" => AiRuleGuidance {
+            fact: "Decision complexity and repository dependency breadth both crossed the configured regression rule for this changed module.",
+            interpretation: "The change increased two independent structural pressures in the same area, which can make future changes harder to reason about safely.",
+            recommended_inspection: &[
+                "Do the added decision paths represent responsibilities that can be separated?",
+                "Can any newly broadened repository dependencies stay behind an existing boundary?",
+            ],
+            limitations: &[
+                "Structural concentration does not prove the design is incorrect.",
+                "Repository dependency breadth does not measure runtime or compile-time cost.",
+            ],
+        },
+        "structure.current_coupled_outlier" => AiRuleGuidance {
+            fact: "Decision complexity and repository dependency breadth are both elevated relative to the comparable repository population.",
+            interpretation: "Two independent structural signals are concentrated in the same module, making it a useful place to inspect before adding more responsibility.",
+            recommended_inspection: &[
+                "Does this module own multiple responsibilities that change independently?",
+                "Can any repository dependencies be narrowed without changing behavior?",
+            ],
+            limitations: &[
+                "Structural concentration does not prove the design is incorrect.",
+                "The detector does not measure semantic complexity or change risk directly.",
+            ],
+        },
+        "structure.small_population_decision_concentration" => AiRuleGuidance {
+            fact: "Decision points are concentrated in this module relative to the small comparable population.",
+            interpretation: "The module contains a disproportionate share of branching, which may make behavior harder to understand if unrelated responsibilities are mixed together.",
+            recommended_inspection: &[
+                "Do the decision points describe one cohesive state machine or multiple independent responsibilities?",
+            ],
+            limitations: &[
+                "Decision-point count does not measure semantic complexity.",
+                "Small populations support concentration evidence, not a strong outlier claim.",
+            ],
+        },
+        "runtime.clone_for_iteration_candidate" => AiRuleGuidance {
+            fact: "A cloned value is used directly as a for-loop iterator.",
+            interpretation: "The copy exists immediately before iteration and may be unnecessary if the loop can borrow the original value.",
+            recommended_inspection: &[
+                "Is ownership of the cloned value required by the loop body?",
+                "Can the loop iterate over the original value by reference without changing semantics?",
+            ],
+            limitations: &[
+                "Runtime cost was not measured.",
+                "The detector does not establish that borrowing is valid here.",
+            ],
+        },
+        "runtime.clone_then_mutate_candidate" => AiRuleGuidance {
+            fact: "A whole value is cloned into a mutable local and a nested field on that clone is subsequently mutated.",
+            interpretation: "The operation may require ownership of only a changed subset rather than a copy of the entire aggregate.",
+            recommended_inspection: &[
+                "Is ownership of the entire aggregate required after the clone?",
+                "Can the changed subset be constructed without copying unrelated fields?",
+            ],
+            limitations: &[
+                "Runtime cost was not measured.",
+                "The detector does not know the aggregate's size or ownership constraints.",
+            ],
+        },
+        "build.rebuild_exposure_candidate" | "build.small_population_rebuild_concentration" => {
+            AiRuleGuidance {
+                fact: "This module has broad reverse repository dependency reach relative to the comparison population.",
+                interpretation: "A widely depended-on boundary can expose more of the repository to coordination or rebuild work when it changes.",
+                recommended_inspection: &[
+                    "Is this dependency boundary intentionally broad and stable?",
+                    "Would narrowing the boundary reduce change exposure without making the design less clear?",
+                ],
+                limitations: &[
+                    "Reverse repository dependency reach is a structural proxy and does not measure compile time.",
+                    "Broad dependency reach can be intentional for a stable shared abstraction.",
+                ],
+            }
+        }
+        "correctness.cargo_feature_resolution_without_resolve" => AiRuleGuidance {
+            fact: "Cargo metadata is requested without the resolved dependency graph while feature cfg reachability is decided separately.",
+            interpretation: "Requested feature names alone cannot establish the enabled feature set for every workspace package.",
+            recommended_inspection: &[
+                "Does feature reachability use Cargo's resolved per-package feature graph for the analyzed configuration?",
+            ],
+            limitations: &[
+                "The detector identifies the configuration-resolution mismatch; downstream impact depends on the repository's feature topology.",
+            ],
+        },
+        "correctness.symbolic_target_identity" => AiRuleGuidance {
+            fact: "A symbolic target label is used in persistent identity or evidence matching where the resolved target triple is available.",
+            interpretation: "Different host architectures or operating systems can otherwise share an identity despite different cfg-dependent code.",
+            recommended_inspection: &[
+                "Does persistent configuration identity use the resolved target triple while keeping symbolic labels display-only?",
+            ],
+            limitations: &[
+                "The practical impact appears only when the symbolic label can resolve to materially different targets.",
+            ],
+        },
+        "correctness.stdout_mode_unconditional_artifacts" => AiRuleGuidance {
+            fact: "A stdout-oriented AI mode is followed by unconditional artifact writes.",
+            interpretation: "A caller requesting machine-readable stdout can unexpectedly mutate the analyzed repository.",
+            recommended_inspection: &[
+                "Are artifact writes disabled by default in stdout-only AI mode and enabled only by an explicit request?",
+            ],
+            limitations: &[
+                "The detector establishes the write path, not whether an external wrapper later removes the artifacts.",
+            ],
+        },
+        "correctness.workspace_manifest_snapshot_gap" => AiRuleGuidance {
+            fact: "Workspace member manifests are read during analysis but are not all covered by the final Cargo-input stability verification.",
+            interpretation: "The published result can otherwise combine repository state from different points in time.",
+            recommended_inspection: &[
+                "Does the captured and reverified input set include every workspace manifest consumed by Cargo metadata?",
+            ],
+            limitations: &[
+                "The race matters only when relevant manifests change during the analysis window.",
+            ],
+        },
+        "correctness.lossy_git_path_decoding" => AiRuleGuidance {
+            fact: "Git path bytes are converted with lossy UTF-8 decoding.",
+            interpretation: "Distinct non-UTF-8 paths can be collapsed or misidentified when invalid bytes are replaced.",
+            recommended_inspection: &[
+                "Are non-UTF-8 Git paths preserved losslessly or rejected with an explicit analysis limitation?",
+            ],
+            limitations: &[
+                "The issue affects repositories containing paths that are not valid UTF-8.",
+            ],
+        },
+        "refactor.multi_signal_candidate" => AiRuleGuidance {
+            fact: "At least two independent structural signal families corroborate the same module.",
+            interpretation: "Corroborating signals make this area more useful to inspect than a module selected by one isolated metric.",
+            recommended_inspection: &[
+                "Do the complexity and dependency signals come from responsibilities that can be separated cleanly?",
+                "Would narrowing responsibility or dependency boundaries simplify future changes?",
+            ],
+            limitations: &[
+                "Corroborating structural signals do not prove that a refactor is required.",
+                "Ferric Lens does not know the intended architecture.",
+            ],
+        },
+        _ => AiRuleGuidance {
+            fact: "Ferric Lens matched this rule's deterministic evidence threshold for the subject.",
+            interpretation: "The evidence is sufficient to justify focused inspection, but surrounding code determines whether a change is appropriate.",
+            recommended_inspection: &[
+                "Inspect the cited evidence in context before deciding whether a code change is justified.",
+            ],
+            limitations: &[
+                "The practical impact depends on surrounding code and workload.",
+            ],
+        },
+    }
+}
+
+fn ordered_findings(mut findings: Vec<&Finding>) -> Vec<&Finding> {
+    findings.sort_by(|a, b| {
+        priority_rank(&a.priority)
+            .cmp(&priority_rank(&b.priority))
+            .then_with(|| delta_rank(&a.delta).cmp(&delta_rank(&b.delta)))
+            .then_with(|| a.subject.cmp(&b.subject))
+            .then_with(|| a.rule.cmp(&b.rule))
+    });
+    findings
+}
+
+fn finding_guidance(finding: &Finding) -> FindingGuidance {
+    match finding.rule.as_str() {
+        "structure.coupled_complexity_growth" | "structure.current_coupled_outlier" => {
+            FindingGuidance {
+                title: "This module may be harder to change safely",
+                why_care: "It combines unusually complex control flow with a broad repository dependency surface. Changes here can require understanding more execution paths and more neighboring modules at the same time.",
+                if_ignored: "If responsibilities continue to accumulate, routine changes can become slower to review and test and can carry a larger risk of unintended side effects.",
+            }
+        }
+        "structure.small_population_decision_concentration" => FindingGuidance {
+            title: "Complex logic is concentrated here",
+            why_care: "A disproportionate amount of branching is concentrated in this module relative to the small comparable population. That can make behavior harder to reason about even when the repository is too small for a stronger outlier claim.",
+            if_ignored: "Additional branching can make future behavior changes harder to understand and test, especially if unrelated responsibilities collect in the same area.",
+        },
+        "runtime.clone_for_iteration_candidate" => FindingGuidance {
+            title: "A collection is cloned just to iterate it",
+            why_care: "Ferric Lens observed a clone used directly as a for-loop iterator. That is more specific than clone frequency: the copy exists immediately before iteration and may be avoidable when borrowing is sufficient.",
+            if_ignored: "If the collection is large or the path runs often, the extra copy can add allocation and memory traffic. Ownership requirements may still make the clone intentional.",
+        },
+        "runtime.clone_then_mutate_candidate" => FindingGuidance {
+            title: "A cloned aggregate is changed through one of its fields",
+            why_care: "Ferric Lens observed a whole value cloned into a mutable local and then a nested field changed with a known mutating operation. This is narrower than ordinary collection normalization and can indicate that only a filtered or changed subset needed ownership.",
+            if_ignored: "Copying a large aggregate before changing one nested collection can create avoidable allocation and memory traffic. Ferric Lens has not measured runtime cost.",
+        },
+        "build.rebuild_exposure_candidate" | "build.small_population_rebuild_concentration" => FindingGuidance {
+            title: "Changes here may affect many parts of the repository",
+            why_care: "Many repository modules depend on this area. A frequently changing shared boundary can increase the amount of code that must be reconsidered or rebuilt after a change.",
+            if_ignored: "A broad, unstable dependency boundary can gradually increase change coordination and incremental-build cost. This finding is structural evidence, not a measured compile-time claim.",
+        },
+        "correctness.cargo_feature_resolution_without_resolve" => FindingGuidance {
+            title: "Feature-gated code may be analyzed under the wrong configuration",
+            why_care: "The code asks Cargo for metadata without the resolved dependency graph while separately deciding cfg(feature) reachability. Requested feature names are not enough to establish the enabled feature set for every workspace package.",
+            if_ignored: "Ferric Lens can omit production modules that Cargo would compile, include modules for the wrong package configuration, or mark valid code as unresolved.",
+        },
+        "correctness.symbolic_target_identity" => FindingGuidance {
+            title: "Machine configuration identity can collide across host targets",
+            why_care: "A symbolic label such as host is being used in persistent identity or evidence matching even though the actual resolved target triple is available.",
+            if_ignored: "Acceptances or imported evidence can be reused across architectures or operating-system targets whose cfg-dependent code is different.",
+        },
+        "correctness.stdout_mode_unconditional_artifacts" => FindingGuidance {
+            title: "A stdout-only mode still writes files",
+            why_care: "A compact/agent output mode is followed by unconditional artifact writes. Callers reasonably expect stdout-only operation not to create default files in the analyzed repository.",
+            if_ignored: "Automation can unexpectedly mutate or dirty repositories, overwrite files, or require cleanup even when the caller only requested machine-readable stdout.",
+        },
+        "correctness.workspace_manifest_snapshot_gap" => FindingGuidance {
+            title: "The analyzed snapshot can mix different workspace manifest states",
+            why_care: "Workspace member manifests are read during analysis, but the final stability check only covers a narrower Cargo-input set.",
+            if_ignored: "A manifest can change during analysis and Ferric Lens may publish a result assembled from inconsistent repository states.",
+        },
+        "correctness.lossy_git_path_decoding" => FindingGuidance {
+            title: "Distinct repository paths can be silently collapsed",
+            why_care: "Git path bytes are converted with lossy UTF-8 decoding. Invalid byte sequences are replaced instead of preserved or rejected explicitly.",
+            if_ignored: "Rename, history, or path identity can become incorrect for repositories containing non-UTF-8 path names.",
+        },
+        "refactor.multi_signal_candidate" => FindingGuidance {
+            title: "Possible refactoring opportunity",
+            why_care: "Multiple independent signals point to the same module. Corroborating evidence makes it more useful to inspect than a module flagged by only one isolated metric.",
+            if_ignored: "If the signals reflect accumulating responsibilities, the module can become progressively harder to understand, change, and isolate. Ferric Lens does not prescribe a final architecture.",
+        },
+        _ => FindingGuidance {
+            title: "This area is worth reviewing",
+            why_care: "Ferric Lens found deterministic evidence that meets the rule's investigation threshold. Review the evidence in context before deciding whether a change is needed.",
+            if_ignored: "The practical impact depends on the code and workload. Treat this as a focused investigation prompt rather than proof that the design is wrong.",
+        },
+    }
+}
+
+fn finding_path(
+    finding: &Finding,
+    modules: &[ModuleMetrics],
+    source_contexts: &[SourceContext],
+) -> String {
+    modules
+        .iter()
+        .find(|module| module_subject(module) == finding.subject)
+        .map(|module| module.path.clone())
+        .or_else(|| {
+            source_contexts
+                .iter()
+                .find(|context| context.subject == finding.subject)
+                .map(|context| context.path.clone())
+        })
+        .unwrap_or_else(|| finding.subject.clone())
+}
+
+fn contexts_for_finding<'a>(
+    finding: &Finding,
+    source_contexts: &'a [SourceContext],
+) -> Vec<&'a SourceContext> {
+    let evidence_metrics = finding
+        .evidence
+        .iter()
+        .map(|evidence| evidence.metric.as_str())
+        .collect::<Vec<_>>();
+    source_contexts
+        .iter()
+        .filter(|context| {
+            context.subject == finding.subject
+                && evidence_metrics.contains(&context.metric.as_str())
+        })
+        .collect()
+}
+
+fn capability_status_label(status: &crate::model::CapabilityStatus) -> &'static str {
+    match status {
+        crate::model::CapabilityStatus::Complete => "complete",
+        crate::model::CapabilityStatus::Partial => "partial",
+        crate::model::CapabilityStatus::Unavailable => "unavailable",
+    }
+}
+
+fn verdict_label(verdict: &GateVerdict) -> &'static str {
+    match verdict {
+        GateVerdict::Pass => "PASS",
+        GateVerdict::Regression => "REGRESSION",
+        GateVerdict::Inconclusive => "INCONCLUSIVE",
+    }
+}
+
+fn cli_verdict_label(verdict: &GateVerdict) -> &'static str {
+    match verdict {
+        GateVerdict::Pass => "Pass",
+        GateVerdict::Regression => "Regression",
+        GateVerdict::Inconclusive => "Inconclusive",
+    }
+}
+
+pub fn html(result: &AnalysisResult) -> String {
+    let result_digest = result_digest(result);
+    let active_findings = ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| !finding.accepted && finding.priority != Priority::Observe)
+            .collect(),
+    );
+    let observations = ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| !finding.accepted && finding.priority == Priority::Observe)
+            .collect(),
+    );
+    let accepted_findings = ordered_findings(
+        result
+            .findings
+            .iter()
+            .filter(|finding| finding.accepted)
+            .collect(),
+    );
+    let active_html = render_attention_findings(result, &active_findings);
+    let observation_html = render_findings(
+        &observations,
+        "No lower-confidence observations were emitted.",
+        &result.modules,
+        &result.source_contexts,
+    );
+    let accepted_html = render_findings(
+        &accepted_findings,
+        "No findings have been explicitly accepted.",
+        &result.modules,
+        &result.source_contexts,
+    );
+
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ferric Lens report</title>
+<style>
+:root {{
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --bg: #0d1117;
+  --surface: #151b23;
+  --surface-raised: #1b222c;
+  --surface-soft: #111820;
+  --border: #30363d;
+  --border-strong: #46505c;
+  --text: #e6edf3;
+  --muted: #9da7b3;
+  --link: #79c0ff;
+  --danger: #ff7b72;
+  --danger-bg: #2a1719;
+  --danger-border: #7d3035;
+  --warning: #e3b341;
+  --warning-bg: #27200f;
+  --warning-border: #6f5718;
+  --info: #79c0ff;
+  --info-bg: #10243a;
+  --info-border: #275b84;
+  --success: #7ee787;
+  --success-bg: #10291a;
+  --success-border: #2e6b3b;
+  --neutral-bg: #1a2029;
+}}
+* {{ box-sizing: border-box; }}
+html {{ background: var(--bg); }}
+body {{
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 2rem;
+  line-height: 1.6;
+  background: var(--bg);
+  color: var(--text);
+}}
+header {{
+  background: linear-gradient(180deg, #141b24 0%, #10161e 100%);
+  border: 1px solid var(--border);
+  border-radius: .85rem;
+  margin-bottom: 2rem;
+  padding: 1.2rem 1.35rem;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 18%);
+}}
+h1, h2, h3 {{ line-height: 1.2; color: #f0f6fc; }}
+h2 {{ margin-top: 2rem; }}
+.verdict {{
+  display: inline-block;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: .025em;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: .3rem .75rem;
+  margin: .15rem 0 .45rem;
+  background: var(--neutral-bg);
+}}
+.verdict-pass {{ color: var(--success); background: var(--success-bg); border-color: var(--success-border); }}
+.verdict-regression {{ color: var(--danger); background: var(--danger-bg); border-color: var(--danger-border); }}
+.verdict-inconclusive {{ color: var(--warning); background: var(--warning-bg); border-color: var(--warning-border); }}
+.muted, .finding-meta, .location {{ color: var(--muted); }}
+.attention-grid, .overview-grid {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap: 1rem; }}
+.card, article, details {{ min-width: 0; overflow-wrap: anywhere; }}
+.card, article.finding-card, .analysis-details, .explorer-module {{
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: .75rem;
+  padding: 1rem;
+  margin: .8rem 0;
+}}
+.card {{ box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%); }}
+article.finding-card {{
+  position: relative;
+  border-left-width: 4px;
+  border-left-color: var(--border-strong);
+  background: linear-gradient(90deg, rgb(255 255 255 / 2%) 0%, transparent 22%), var(--surface);
+}}
+article.finding-card.priority-actfirst {{
+  border-left-color: var(--danger);
+  background: linear-gradient(90deg, rgb(255 123 114 / 9%) 0%, transparent 28%), var(--surface);
+}}
+article.finding-card.priority-investigate {{
+  border-left-color: var(--warning);
+  background: linear-gradient(90deg, rgb(227 179 65 / 8%) 0%, transparent 28%), var(--surface);
+}}
+article.finding-card.priority-observe {{
+  border-left-color: var(--info);
+  background: linear-gradient(90deg, rgb(121 192 255 / 6%) 0%, transparent 24%), var(--surface);
+}}
+article.finding-card.gate {{
+  border-width: 1px 1px 1px 4px;
+  border-color: var(--danger-border);
+  border-left-color: var(--danger);
+  box-shadow: 0 0 0 1px rgb(255 123 114 / 8%);
+}}
+article.finding-card.accepted {{
+  border-left-color: var(--border-strong);
+  background: var(--surface-soft);
+}}
+article.finding-card.accepted .priority-badge {{ color: var(--muted); background: var(--neutral-bg); border-color: var(--border); }}
+.finding-card.delta-worsened h3::before {{ content: "↑ "; color: var(--danger); }}
+.finding-card.delta-new h3::before {{ content: "+ "; color: var(--warning); }}
+.finding-header {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }}
+.finding-header h3 {{ margin-top: .1rem; margin-bottom: .35rem; }}
+.badges {{ display: flex; flex-wrap: wrap; gap: .4rem; }}
+.badge {{
+  border: 1px solid var(--border-strong);
+  background: var(--neutral-bg);
+  border-radius: 999px;
+  padding: .18rem .58rem;
+  font-size: .8rem;
+  font-weight: 650;
+  color: #c9d1d9;
+}}
+.priority-actfirst .priority-badge, .gate .gate-badge {{ color: var(--danger); background: var(--danger-bg); border-color: var(--danger-border); }}
+.priority-investigate .priority-badge {{ color: var(--warning); background: var(--warning-bg); border-color: var(--warning-border); }}
+.priority-observe .priority-badge {{ color: var(--info); background: var(--info-bg); border-color: var(--info-border); }}
+.delta-worsened .delta-badge {{ color: var(--danger); border-color: var(--danger-border); }}
+.delta-new .delta-badge {{ color: var(--warning); border-color: var(--warning-border); }}
+.guidance {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: .8rem; margin: 1rem 0; }}
+.guidance > div {{
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: .45rem;
+  padding: .75rem .85rem;
+}}
+.priority-actfirst .guidance > div {{ border-left-color: var(--danger-border); }}
+.priority-investigate .guidance > div {{ border-left-color: var(--warning-border); }}
+.priority-observe .guidance > div {{ border-left-color: var(--info-border); }}
+.guidance h4 {{ margin: 0 0 .3rem; color: #f0f6fc; }}
+.finding-group {{ margin: 1.35rem 0 1.8rem; }}
+.finding-group-heading {{
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: .45rem;
+  margin-bottom: .65rem;
+}}
+.finding-group-heading h3 {{ margin: 0; }}
+.finding-facts {{
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: .45rem;
+  padding: .75rem .9rem;
+  margin: .9rem 0;
+}}
+.finding-facts h4, .finding-limit h4 {{ margin: 0 0 .35rem; }}
+.fact-list, .inspection-list, .limit-list {{ margin: .35rem 0; padding-left: 1.2rem; }}
+.fact-list li, .inspection-list li, .limit-list li {{ margin: .3rem 0; }}
+.finding-limit {{
+  background: #10151c;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--info-border);
+  border-radius: .45rem;
+  padding: .7rem .85rem;
+  margin: .9rem 0;
+  color: var(--muted);
+}}
+summary {{ cursor: pointer; color: #dbe4ee; }}
+summary:hover {{ color: #ffffff; }}
+.analysis-details {{ background: var(--surface-soft); }}
+.source-evidence {{ margin: .8rem 0; border-color: var(--border); background: var(--surface-soft); }}
+.source-context {{ margin: .7rem 0; }}
+.source-context pre {{
+  margin: .35rem 0;
+  padding: .8rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  background: #090d12;
+  border: 1px solid #252c35;
+  border-radius: .45rem;
+  color: #d7e0ea;
+}}
+.metric-list {{ margin: .5rem 0; padding-left: 1.2rem; }}
+.metric-list li {{ margin: .3rem 0; }}
+.explorer-intro {{ max-width: 760px; color: var(--muted); }}
+.explorer-module {{ background: #121821; }}
+.explorer-summary {{ display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }}
+.explorer-status {{ font-weight: 700; color: #c9d1d9; }}
+.explorer-metrics {{ display: flex; flex-wrap: wrap; gap: .5rem .65rem; margin: .8rem 0; }}
+.explorer-metrics span {{
+  white-space: nowrap;
+  background: var(--neutral-bg);
+  border: 1px solid var(--border);
+  border-radius: .4rem;
+  padding: .25rem .5rem;
+}}
+.explorer-detail {{ margin-top: .8rem; background: transparent; }}
+.analysis-details .detail-grid {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(250px,1fr)); gap: 1rem; }}
+.technical-list {{ padding-left: 1.2rem; }}
+.technical-list li {{ margin: .35rem 0; overflow-wrap: anywhere; }}
+.digest {{ word-break: break-all; }}
+code {{
+  overflow-wrap: anywhere;
+  color: #d2a8ff;
+  background: rgb(110 80 140 / 10%);
+  border-radius: .25rem;
+  padding: .04rem .2rem;
+}}
+pre code {{ color: inherit; background: transparent; padding: 0; }}
+a {{ color: var(--link); text-decoration-thickness: .08em; text-underline-offset: .16em; }}
+a:hover {{ color: #a5d6ff; }}
+::selection {{ background: #264f78; color: #fff; }}
+@media (max-width: 650px) {{
+  body {{ padding: 1rem; }}
+  .guidance, .attention-grid, .overview-grid {{ grid-template-columns: 1fr; }}
+  header {{ padding: 1rem; }}
+}}
+</style>
+</head>
+<body>
+<header>
+<h1>Ferric Lens</h1>
+<p class="verdict verdict-{verdict_class}">Analysis result: {verdict}</p>
+<p>{reason}</p>
+</header>
+
+<section>
+<h2>What needs attention</h2>
+<div class="attention-grid"><div class="card">{triage}</div></div>
+{active_html}
+</section>
+
+<details class="analysis-details">
+<summary><strong>Observations</strong> ({observation_count}) — weaker contextual signals that do not currently justify action</summary>
+<p class="muted">These can be useful for context or future measurement, but Ferric Lens has not established that a change is needed.</p>
+{observation_html}
+</details>
+
+<section>
+<h2>Repository overview</h2>
+{overview}
+</section>
+
+<section>
+<h2>Repository explorer</h2>
+<p class="explorer-intro">Use this after a finding points you to an area, or when you want structural context for a module. Metrics here are context, not problems by themselves.</p>
+{explorer}
+</section>
+
+<details class="analysis-details">
+<summary><strong>Analysis details</strong> — baseline, configuration, history, capabilities, and provenance</summary>
+{details}
+</details>
+
+<details class="analysis-details">
+<summary><strong>Accepted findings</strong> ({accepted_count})</summary>
+{accepted_html}
+</details>
+</body></html>"#,
+        verdict = verdict_label(&result.verdict),
+        verdict_class = verdict_label(&result.verdict).to_ascii_lowercase(),
+        reason = escape(&result.verdict_reason),
+        triage = render_triage_summary(result),
+        overview = render_repository_overview(result),
+        explorer = render_repository_explorer(result),
+        details = render_analysis_details(result, &result_digest),
+        observation_count = observations.len(),
+        accepted_count = accepted_findings.len(),
+    )
+}
+
+fn render_attention_findings(result: &AnalysisResult, findings: &[&Finding]) -> String {
+    if findings.is_empty() {
+        return "<p>No active finding currently has enough evidence to recommend investigation.</p>"
+            .to_owned();
+    }
+
+    if result.baseline.is_none() {
+        let body = render_findings(findings, "", &result.modules, &result.source_contexts);
+        return format!(
+            r#"<div class="finding-group"><div class="finding-group-heading"><h3>Current findings</h3><span class="muted">Change attribution unavailable</span></div><p class="muted">No comparable baseline was available, so Ferric Lens cannot say whether these findings were introduced by the current change.</p>{body}</div>"#
+        );
+    }
+
+    let changed = findings
+        .iter()
+        .copied()
+        .filter(|finding| matches!(finding.delta, DeltaStatus::New | DeltaStatus::Worsened))
+        .collect::<Vec<_>>();
+    let existing = findings
+        .iter()
+        .copied()
+        .filter(|finding| finding.delta == DeltaStatus::Unchanged)
+        .collect::<Vec<_>>();
+    let unattributed = findings
+        .iter()
+        .copied()
+        .filter(|finding| matches!(finding.delta, DeltaStatus::Current | DeltaStatus::Unknown))
+        .collect::<Vec<_>>();
+
+    let mut html = String::new();
+    if !changed.is_empty() {
+        html.push_str(r#"<div class="finding-group"><div class="finding-group-heading"><h3>Introduced or worsened by this change</h3><span class="muted">Review these first</span></div>"#);
+        html.push_str(&render_findings(
+            &ai_ordered_findings(changed, true),
+            "",
+            &result.modules,
+            &result.source_contexts,
+        ));
+        html.push_str("</div>");
+    }
+    if !existing.is_empty() {
+        html.push_str(r#"<div class="finding-group"><div class="finding-group-heading"><h3>Existing findings</h3><span class="muted">Not introduced by this change</span></div>"#);
+        html.push_str(&render_findings(
+            &existing,
+            "",
+            &result.modules,
+            &result.source_contexts,
+        ));
+        html.push_str("</div>");
+    }
+    if !unattributed.is_empty() {
+        html.push_str(r#"<div class="finding-group"><div class="finding-group-heading"><h3>Attribution uncertain</h3><span class="muted">Baseline comparison could not classify these findings</span></div>"#);
+        html.push_str(&render_findings(
+            &unattributed,
+            "",
+            &result.modules,
+            &result.source_contexts,
+        ));
+        html.push_str("</div>");
+    }
+    html
+}
+
+fn render_repository_overview(result: &AnalysisResult) -> String {
+    let subjects = active_subjects(result);
+    let partial_capabilities = result
+        .capabilities
+        .iter()
+        .filter(|capability| capability.status != crate::model::CapabilityStatus::Complete)
+        .count();
+
+    let quality = if result.architecture.incomplete_modules == 0 && partial_capabilities == 0 {
+        "Ferric Lens completed the available evidence checks for this run. Metrics without findings are context only.".to_owned()
+    } else {
+        format!(
+            "Some evidence is incomplete: {} of {} modules have incomplete graph evidence and {} capability limitation(s) were recorded. Missing evidence is not treated as proof that an area is healthy.",
+            result.architecture.incomplete_modules,
+            result.architecture.modules,
+            partial_capabilities
+        )
+    };
+    let cycle_text = if result.architecture.cycles.is_empty() {
+        "No explicit-import dependency cycles were observed.".to_owned()
+    } else {
+        format!(
+            "{} explicit-import dependency cycle(s) were observed and may deserve architectural review.",
+            result.architecture.cycles.len()
+        )
+    };
+
+    format!(
+        r#"<div class="overview-grid">
+<div class="card"><h3>Attention</h3><p><strong>{areas}</strong></p><p class="muted">Only areas with enough evidence to justify investigation are counted here.</p></div>
+<div class="card"><h3>Structure</h3><p><strong>{modules} modules</strong><br>{edges} resolved repository dependency edges</p><p>{cycles}</p></div>
+<div class="card"><h3>Analysis confidence</h3><p>{quality}</p></div>
+</div>"#,
+        areas = count_phrase(
+            subjects.len(),
+            "area worth reviewing",
+            "areas worth reviewing",
+        ),
+        modules = result.architecture.modules,
+        edges = result.architecture.explicit_dependency_edges,
+        cycles = escape(&cycle_text),
+        quality = escape(&quality),
+    )
+}
+
+fn render_repository_explorer(result: &AnalysisResult) -> String {
+    let active = result
+        .findings
+        .iter()
+        .filter(|finding| !finding.accepted)
+        .collect::<Vec<_>>();
+    let mut modules = result.modules.iter().collect::<Vec<_>>();
+    modules.sort_by(|a, b| {
+        let a_subject = module_subject(a);
+        let b_subject = module_subject(b);
+        let a_findings = active
+            .iter()
+            .filter(|finding| finding.subject == a_subject)
+            .copied()
+            .collect::<Vec<_>>();
+        let b_findings = active
+            .iter()
+            .filter(|finding| finding.subject == b_subject)
+            .copied()
+            .collect::<Vec<_>>();
+        best_priority_rank(&a_findings)
+            .cmp(&best_priority_rank(&b_findings))
+            .then_with(|| b_findings.len().cmp(&a_findings.len()))
+            .then_with(|| a.path.cmp(&b.path))
+    });
+
+    let mut html = String::new();
+    for module in modules {
+        let subject = module_subject(module);
+        let module_findings = active
+            .iter()
+            .filter(|finding| finding.subject == subject)
+            .copied()
+            .collect::<Vec<_>>();
+        let actionable_findings = module_findings
+            .iter()
+            .copied()
+            .filter(|finding| finding.priority != Priority::Observe)
+            .collect::<Vec<_>>();
+        let observations = module_findings
+            .iter()
+            .copied()
+            .filter(|finding| finding.priority == Priority::Observe)
+            .collect::<Vec<_>>();
+        let anchor = anchor_id("module", &subject);
+        let status = if !actionable_findings.is_empty() {
+            format!(
+                "Worth investigating — {}",
+                count_phrase(actionable_findings.len(), "finding", "findings")
+            )
+        } else if !observations.is_empty() {
+            format!(
+                "{} — no action established",
+                count_phrase(observations.len(), "observation", "observations")
+            )
+        } else {
+            "No issue currently identified".to_owned()
+        };
+
+        html.push_str(r#"<details class="explorer-module" id=""#);
+        html.push_str(&anchor);
+        html.push_str(r#""><summary><span class="explorer-summary"><span><code>"#);
+        html.push_str(&escape(&module.path));
+        html.push_str("</code><br><small>");
+        html.push_str(&escape(&subject));
+        html.push_str(r#"</small></span><span class="explorer-status">"#);
+        html.push_str(&escape(&status));
+        html.push_str("</span></span></summary>");
+
+        if module_findings.is_empty() {
+            html.push_str("<p>These metrics are shown for context. Ferric Lens did not find enough evidence to recommend investigating this module.</p>");
+        } else if actionable_findings.is_empty() {
+            html.push_str("<p>This module has contextual observations, but Ferric Lens has not established that action is needed. Use the explorer only for background or follow-up measurement.</p><p>");
+        } else {
+            html.push_str(
+                "<p>Start with the relevant findings above. This explorer shows structural context for the affected area.</p><p>",
+            );
+            for (index, finding) in module_findings.iter().enumerate() {
+                if index > 0 {
+                    html.push_str(" · ");
+                }
+                html.push_str(r##"<a href="#"##);
+                html.push_str(&anchor_id("finding", &finding.fingerprint));
+                html.push_str(r#"">View finding</a>"#);
+            }
+            html.push_str("</p>");
+        }
+
+        html.push_str(r#"<div class="explorer-metrics">"#);
+        html.push_str(&format!(
+            "<span><strong>{}</strong> decision points</span><span><strong>{}</strong> repository dependencies</span><span><strong>{}</strong> public items</span><span><strong>{}</strong> clone sites</span><span><strong>{}</strong> lines</span>",
+            module.decision_sites,
+            module.local_dependency_modules.len(),
+            module.public_items,
+            module.clone_calls,
+            module.lines
+        ));
+        html.push_str("</div>");
+
+        if !module.gate_complete {
+            html.push_str(r#"<p class="muted">Some gate-relevant evidence for this module is incomplete.</p>"#);
+        }
+        if !module.local_dependency_modules.is_empty() {
+            html.push_str(r#"<details class="explorer-detail"><summary>Dependencies ("#);
+            html.push_str(&module.local_dependency_modules.len().to_string());
+            html.push_str(")</summary><ul>");
+            for dependency in &module.local_dependency_modules {
+                html.push_str("<li><code>");
+                html.push_str(&escape(dependency));
+                html.push_str("</code></li>");
+            }
+            html.push_str("</ul></details>");
+        }
+        if !module.functions.is_empty() {
+            html.push_str(r#"<details class="explorer-detail"><summary>Functions ("#);
+            html.push_str(&module.functions.len().to_string());
+            html.push_str(")</summary><ul>");
+            for function in &module.functions {
+                html.push_str("<li><code>");
+                html.push_str(&escape(&function.name));
+                html.push_str("</code> · ");
+                html.push_str(&escape(&format!("{:?}", function.kind).to_lowercase()));
+                html.push_str(" · ");
+                html.push_str(if function.public_declared {
+                    "public"
+                } else {
+                    "private"
+                });
+                html.push_str("</li>");
+            }
+            html.push_str("</ul></details>");
+        }
+        if !module.types.is_empty() {
+            html.push_str(r#"<details class="explorer-detail"><summary>Types ("#);
+            html.push_str(&module.types.len().to_string());
+            html.push_str(")</summary><ul>");
+            for item_type in &module.types {
+                html.push_str("<li><code>");
+                html.push_str(&escape(&item_type.name));
+                html.push_str("</code> · ");
+                html.push_str(&escape(&format!("{:?}", item_type.kind).to_lowercase()));
+                html.push_str(" · ");
+                html.push_str(if item_type.public_declared {
+                    "public"
+                } else {
+                    "private"
+                });
+                html.push_str("</li>");
+            }
+            html.push_str("</ul></details>");
+        }
+        if let Some(history) = &module.history {
+            html.push_str(
+                r#"<details class="explorer-detail"><summary>History context</summary><p>"#,
+            );
+            html.push_str(&escape(&format!(
+                "Changed in {} of {} sampled non-merge commits.",
+                history.change_commits, history.sampled_commits
+            )));
+            if !history.cochange.is_empty() {
+                html.push_str("</p><p>Often changed with: ");
+                for (index, related) in history.cochange.iter().enumerate() {
+                    if index > 0 {
+                        html.push_str(", ");
+                    }
+                    html.push_str("<code>");
+                    html.push_str(&escape(&related.path));
+                    html.push_str("</code>");
+                }
+            }
+            html.push_str("</p></details>");
+        }
+        html.push_str("</details>");
+    }
+    html
+}
+
+fn render_analysis_details(result: &AnalysisResult, digest: &str) -> String {
+    let baseline = result.baseline.as_ref().map_or_else(
+        || "<p>No comparable baseline was available.</p>".to_owned(),
+        |baseline| {
+            format!(
+                r#"<p><strong>Target:</strong> <code>{}</code><br><strong>Merge base:</strong> <code class="digest">{}</code><br>{} baseline source files</p>"#,
+                escape(&baseline.target_ref),
+                escape(&baseline.merge_base),
+                baseline.source_files
+            )
+        },
+    );
+    let profile = format!(
+        "<p><strong>{}</strong><br>resolved target <code>{}</code><br>{}</p>",
+        escape(&result.profile.id),
+        escape(&result.profile.resolved_target),
+        if result.profile.features.is_empty() {
+            "default features only".to_owned()
+        } else {
+            format!(
+                "default + explicit features <code>{}</code>",
+                escape(&result.profile.features.join(","))
+            )
+        }
+    );
+    let history = result.history.as_ref().map_or_else(
+        || "<p>Not collected for this analysis mode.</p>".to_owned(),
+        |history| {
+            format!(
+                "<p>{} sampled non-merge commits<br>{} changed-path records<br>{} broad commits excluded from co-change{}</p>",
+                history.sampled_commits,
+                history.changed_path_records,
+                history.broad_commits_excluded_from_cochange,
+                if history.truncated {
+                    "<br><strong>Sample truncated at deterministic work limit.</strong>"
+                } else {
+                    ""
+                }
+            )
+        },
+    );
+    let external = result.imported_evidence.as_ref().map_or_else(
+        || "<p>No external evidence imported.</p>".to_owned(),
+        |evidence| {
+            let mut html = format!(
+                "<p><strong>{}</strong> {}<br>{}<br>{}</p>",
+                escape(&evidence.producer),
+                escape(&evidence.producer_version),
+                if evidence.attached {
+                    "attached to current analysis"
+                } else {
+                    "unattached context only"
+                },
+                escape(&evidence.attachment_reason)
+            );
+            if !evidence.observations.is_empty() {
+                html.push_str("<details><summary>");
+                html.push_str(&format!(
+                    "{} imported observation(s)</summary><ul>",
+                    evidence.observations.len()
+                ));
+                for observation in &evidence.observations {
+                    html.push_str("<li><code>");
+                    html.push_str(&escape(&observation.subject));
+                    html.push_str("</code> · ");
+                    html.push_str(&escape(&observation.metric));
+                    html.push_str(" = ");
+                    html.push_str(&escape(&format!(
+                        "{} {}",
+                        observation.value, observation.unit
+                    )));
+                    if let Some(note) = &observation.note {
+                        html.push_str(" — ");
+                        html.push_str(&escape(note));
+                    }
+                    html.push_str("</li>");
+                }
+                html.push_str("</ul></details>");
+            }
+            html
+        },
+    );
+
+    let mut capabilities = String::new();
+    for capability in &result.capabilities {
+        capabilities.push_str("<li><strong>");
+        capabilities.push_str(&escape(&capability.name));
+        capabilities.push_str("</strong>: ");
+        capabilities.push_str(capability_status_label(&capability.status));
+        if let Some(detail) = &capability.detail {
+            capabilities.push_str(" — ");
+            capabilities.push_str(&escape(detail));
+        }
+        capabilities.push_str("</li>");
+    }
+
+    format!(
+        r#"<div class="detail-grid">
+<div><h3>Baseline</h3>{baseline}</div>
+<div><h3>Analysis profile</h3>{profile}</div>
+<div><h3>History</h3>{history}</div>
+<div><h3>External evidence</h3>{external}</div>
+<div><h3>Provenance</h3><p><strong>Result digest</strong><br><code class="digest">{result_digest}</code></p><p><strong>Source digest</strong><br><code class="digest">{source_digest}</code></p></div>
+</div>
+<details><summary><strong>Technical capability details</strong> ({capability_count})</summary><ul class="technical-list">{capabilities}</ul></details>"#,
+        result_digest = escape(digest),
+        source_digest = escape(&result.snapshot.content_digest),
+        capability_count = result.capabilities.len(),
+    )
+}
+
+fn render_triage_summary(result: &AnalysisResult) -> String {
+    let summary = ai_summary(result);
+    format!(
+        r#"<h3>{}</h3><p>{} · {} · {}</p><p class="muted">Ferric Lens only recommends investigation when deterministic evidence meets a rule threshold. Large metric values alone are not treated as problems.</p>"#,
+        count_phrase(
+            summary.areas_worth_reviewing,
+            "area worth reviewing",
+            "areas worth reviewing"
+        ),
+        count_phrase(summary.act_first, "act first", "act first"),
+        count_phrase(summary.investigate, "investigate", "investigate"),
+        count_phrase(summary.observe, "observation", "observations"),
+    )
+}
+
+fn active_subjects(result: &AnalysisResult) -> std::collections::BTreeSet<&str> {
+    result
+        .findings
+        .iter()
+        .filter(|finding| !finding.accepted && finding.priority != Priority::Observe)
+        .map(|finding| finding.subject.as_str())
+        .collect()
+}
+
+fn best_priority_rank(findings: &[&Finding]) -> u8 {
+    findings
+        .iter()
+        .map(|finding| priority_rank(&finding.priority))
+        .min()
+        .unwrap_or(u8::MAX)
+}
+
+fn count_phrase(count: usize, singular: &str, plural: &str) -> String {
+    format!("{count} {}", if count == 1 { singular } else { plural })
+}
+
+fn render_findings(
+    findings: &[&Finding],
+    empty: &str,
+    modules: &[ModuleMetrics],
+    source_contexts: &[SourceContext],
+) -> String {
+    if findings.is_empty() {
+        return format!("<p>{}</p>", escape(empty));
+    }
+
+    let ordered = ordered_findings(findings.to_vec());
+    let mut html = String::new();
+    for finding in ordered {
+        let guidance = finding_guidance(finding);
+        let ai_guidance = ai_rule_guidance(&finding.rule);
+        let facts = ai_facts(finding, ai_guidance);
+        let path = finding_path(finding, modules, source_contexts);
+        let finding_anchor = anchor_id("finding", &finding.fingerprint);
+
+        let priority_class = format!("{:?}", finding.priority).to_ascii_lowercase();
+        let delta_class = format!("{:?}", finding.delta).to_ascii_lowercase();
+        html.push_str(r#"<article class="finding-card priority-"#);
+        html.push_str(&priority_class);
+        html.push_str(" delta-");
+        html.push_str(&delta_class);
+        if finding.gate {
+            html.push_str(" gate");
+        }
+        if finding.accepted {
+            html.push_str(" accepted");
+        }
+        html.push_str(r#"" id=""#);
+        html.push_str(&finding_anchor);
+        html.push_str(r#""><div class="finding-header"><div><h3>"#);
+        html.push_str(&escape(guidance.title));
+        html.push_str("</h3><p><code>");
+        html.push_str(&escape(&path));
+        html.push_str("</code><br><small>");
+        html.push_str(&escape(&finding.subject));
+        html.push_str(
+            r#"</small></p></div><div class="badges"><span class="badge priority-badge">"#,
+        );
+        html.push_str(priority_label(&finding.priority));
+        html.push_str(r#"</span><span class="badge evidence-badge">"#);
+        html.push_str(evidence_label(&finding.evidence_class));
+        html.push_str(r#"</span><span class="badge delta-badge">"#);
+        html.push_str(delta_label(&finding.delta));
+        html.push_str("</span>");
+        if finding.gate {
+            html.push_str(r#"<span class="badge gate-badge">CI gate</span>"#);
+        }
+        if finding.accepted {
+            html.push_str(r#"<span class="badge">accepted</span>"#);
+        }
+        html.push_str("</div></div>");
+
+        html.push_str(
+            r#"<div class="finding-facts"><h4>Observed facts</h4><ul class="fact-list">"#,
+        );
+        for fact in &facts {
+            html.push_str("<li>");
+            html.push_str(&escape(fact));
+            html.push_str("</li>");
+        }
+        html.push_str("</ul></div>");
+
+        html.push_str(r#"<div class="guidance"><div><h4>Why this matters</h4><p>"#);
+        html.push_str(&escape(guidance.why_care));
+        html.push_str(r#"</p></div><div><h4>If ignored</h4><p>"#);
+        html.push_str(&escape(guidance.if_ignored));
+        html.push_str("</p></div></div>");
+
+        if !finding.evidence.is_empty() {
+            html.push_str("<h4>Selection evidence</h4>");
+            html.push_str(r#"<ul class="metric-list">"#);
+            for evidence in &finding.evidence {
+                html.push_str("<li><strong>");
+                html.push_str(metric_label(&evidence.metric));
+                html.push_str(":</strong> ");
+                html.push_str(&evidence.value.to_string());
+                html.push_str(r#" <span class="muted">(comparison reference "#);
+                html.push_str(&evidence.reference.to_string());
+                html.push_str(" across ");
+                html.push_str(&evidence.population.to_string());
+                html.push_str(" comparable modules");
+                if let Some(baseline) = evidence.baseline {
+                    html.push_str(", baseline ");
+                    html.push_str(&baseline.to_string());
+                }
+                if let Some(material) = evidence.material_delta {
+                    html.push_str(", material growth threshold ");
+                    html.push_str(&material.to_string());
+                }
+                html.push_str(")</span></li>");
+            }
+            html.push_str("</ul>");
+        }
+
+        if let Some(module) = modules
+            .iter()
+            .find(|module| module_subject(module) == finding.subject)
+        {
+            let anchor = anchor_id("module", &finding.subject);
+            html.push_str(r#"<p class="location"><strong>Affected area:</strong> <code>"#);
+            html.push_str(&escape(&module.path));
+            html.push_str(r##"</code> · <a href="#"##);
+            html.push_str(&anchor);
+            html.push_str(r#"">View in repository explorer</a></p>"#);
+        }
+
+        let contexts = contexts_for_finding(finding, source_contexts);
+        if !contexts.is_empty() {
+            html.push_str(
+                r#"<details class="source-evidence"><summary>Relevant source evidence ("#,
+            );
+            html.push_str(&contexts.len().to_string());
+            html.push_str(")</summary>");
+            for context in contexts {
+                html.push_str(r#"<div class="source-context"><p><strong>"#);
+                html.push_str(metric_label(&context.metric));
+                html.push_str("</strong> · <code>");
+                html.push_str(&escape(&source_location_label(context)));
+                html.push_str("</code></p><pre><code>");
+                html.push_str(&escape(&context.excerpt));
+                html.push_str("</code></pre>");
+                if context.excerpt_truncated {
+                    html.push_str("<p><small>Excerpt bounded for report size; the exact source span is preserved above.</small></p>");
+                }
+                html.push_str("</div>");
+            }
+            html.push_str("</details>");
+        }
+
+        html.push_str(r#"<h4>What to inspect next</h4><ul class="inspection-list">"#);
+        for question in ai_guidance.recommended_inspection {
+            html.push_str("<li>");
+            html.push_str(&escape(question));
+            html.push_str("</li>");
+        }
+        html.push_str("</ul>");
+
+        html.push_str(r#"<div class="finding-limit"><h4>What this does not establish</h4><ul class="limit-list">"#);
+        for limitation in ai_guidance.limitations {
+            html.push_str("<li>");
+            html.push_str(&escape(limitation));
+            html.push_str("</li>");
+        }
+        html.push_str("</ul></div>");
+
+        if let Some(reason) = &finding.acceptance_reason {
+            html.push_str("<p><strong>Acceptance:</strong> ");
+            html.push_str(&escape(reason));
+            html.push_str("</p>");
+        }
+
+        html.push_str(
+            "<details><summary>Technical details</summary><p><strong>Rule:</strong> <code>",
+        );
+        html.push_str(&escape(&finding.rule));
+        html.push_str("</code><br><strong>Fingerprint:</strong> <code>");
+        html.push_str(&escape(&finding.fingerprint));
+        html.push_str("</code><br><strong>Configuration:</strong> <code>");
+        html.push_str(&escape(&finding.configuration));
+        html.push_str("</code><br><strong>Rule summary:</strong> ");
+        html.push_str(&escape(&finding.summary));
+        html.push_str("<br><strong>Original direction:</strong> ");
+        html.push_str(&escape(&finding.direction));
+        html.push_str("</p></details></article>");
+    }
+    html
+}
+
+fn metric_label(metric: &str) -> &'static str {
+    match metric {
+        "decision_sites" => "Decision points",
+        "max_function_decision_sites" => "Maximum decision points in one function",
+        "local_dependency_modules" => "Repository dependencies",
+        "clone_call_syntax_sites" => "Clone call sites",
+        "clone_for_iteration_sites" => "Clone-for-iteration sites",
+        "clone_then_mutate_sites" => "Whole-aggregate clone then nested mutation sites",
+        "mutation_after_clone_sites" => "Nested mutations after cloning",
+        "reverse_repository_dependents" => "Modules depending on this area",
+        "public_items" => "Public items",
+        "cargo_metadata_no_deps_sites" => "Cargo metadata calls without resolve graph",
+        "cfg_feature_resolution_sites" => "Feature cfg resolution sites",
+        "symbolic_target_identity_sites" => "Symbolic target identity sites",
+        "symbolic_target_match_sites" => "Symbolic target comparison sites",
+        "unconditional_output_write_sites" => "Unconditional output writes",
+        "root_only_cargo_input_sites" => "Root-only Cargo input digests",
+        "workspace_manifest_read_sites" => "Workspace manifest reads",
+        "lossy_git_path_decode_sites" => "Lossy Git path decodes",
+        _ => "Evidence value",
+    }
+}
+
+fn priority_rank(priority: &Priority) -> u8 {
+    match priority {
+        Priority::ActFirst => 0,
+        Priority::Investigate => 1,
+        Priority::Observe => 2,
+    }
+}
+
+fn delta_rank(delta: &DeltaStatus) -> u8 {
+    match delta {
+        DeltaStatus::Worsened => 0,
+        DeltaStatus::New => 1,
+        DeltaStatus::Current => 2,
+        DeltaStatus::Unchanged => 3,
+        DeltaStatus::Unknown => 4,
+    }
+}
+
+fn priority_label(priority: &Priority) -> &'static str {
+    match priority {
+        Priority::ActFirst => "Priority 1 — act first",
+        Priority::Investigate => "Priority 2 — investigate",
+        Priority::Observe => "Observe",
+    }
+}
+
+fn evidence_label(evidence: &EvidenceClass) -> &'static str {
+    match evidence {
+        EvidenceClass::Proven => "proven evidence",
+        EvidenceClass::Strong => "strong evidence",
+        EvidenceClass::Candidate => "candidate evidence",
+    }
+}
+
+fn delta_label(delta: &DeltaStatus) -> &'static str {
+    match delta {
+        DeltaStatus::Current => "current",
+        DeltaStatus::New => "new",
+        DeltaStatus::Worsened => "worsened",
+        DeltaStatus::Unchanged => "unchanged",
+        DeltaStatus::Unknown => "unknown",
+    }
+}
+
+fn module_subject(module: &ModuleMetrics) -> String {
+    if module.module_path.is_empty() {
+        module.crate_name.clone()
+    } else {
+        format!("{}::{}", module.crate_name, module.module_path)
+    }
+}
+
+fn anchor_id(prefix: &str, value: &str) -> String {
+    let digest = blake3::hash(value.as_bytes()).to_hex().to_string();
+    format!("{prefix}-{}", &digest[..16])
+}
+
+fn source_location_label(context: &SourceContext) -> String {
+    if context.start_line == context.end_line {
+        format!("{}:{}", context.path, context.start_line)
+    } else {
+        format!(
+            "{}:{}-{}",
+            context.path, context.start_line, context.end_line
+        )
+    }
+}
+
+pub fn write(path: &Path, contents: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| format!("output path has no file name: {}", path.display()))?
+        .to_string_lossy();
+    let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temporary = parent.join(format!(".{file_name}.tmp-{}-{counter}", std::process::id()));
+
+    fs::write(&temporary, contents)
+        .map_err(|error| format!("cannot write {}: {error}", temporary.display()))?;
+    match fs::rename(&temporary, path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(&temporary);
+            Err(format!("cannot replace {}: {error}", path.display()))
+        }
+    }
+}
+
+fn escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::model::{
+        AnalysisProfile, AnalysisResult, ArchitectureSummary, GateVerdict, Snapshot,
+    };
+
+    use super::{escape, html, json, result_digest};
+
+    #[test]
+    fn escapes_html_metacharacters() {
+        assert_eq!(escape("<a x='&'>\""), "&lt;a x=&#39;&amp;&#39;&gt;&quot;");
+    }
+
+    fn minimal_result() -> AnalysisResult {
+        AnalysisResult {
+            schema_version: 1,
+            tool_version: "test".into(),
+            snapshot: Snapshot {
+                content_digest: "source".into(),
+                git_head: None,
+                dirty: Some(false),
+                source_files: 0,
+            },
+            profile: AnalysisProfile {
+                id: "host".into(),
+                target: "host".into(),
+                resolved_target: "x86_64-unknown-linux-gnu".into(),
+                features: Vec::new(),
+                target_cfg: Vec::new(),
+            },
+            baseline: None,
+            verdict: GateVerdict::Pass,
+            verdict_reason: "complete".into(),
+            applicable_gate_subjects: 0,
+            architecture: ArchitectureSummary {
+                modules: 0,
+                explicit_dependency_edges: 0,
+                incomplete_modules: 0,
+                cycles: Vec::new(),
+            },
+            history: None,
+            imported_evidence: None,
+            capabilities: Vec::new(),
+            modules: Vec::new(),
+            source_contexts: Vec::new(),
+            findings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn renders_non_empty_report_sections_and_writes_atomically() {
+        use std::fs;
+
+        use crate::model::{
+            AnalysisProfile, ArchitectureSummary, BaselineContext, Capability, CapabilityStatus,
+            CoChangeEvidence, DependencyCycle, Evidence, EvidenceClass, Finding, HistoryEvidence,
+            HistorySummary, ImportedEvidence, ImportedObservation, ModuleMetrics, Priority,
+        };
+
+        let mut result = minimal_result();
+        result.verdict = GateVerdict::Regression;
+        result.verdict_reason = "<regression>".into();
+        result.profile = AnalysisProfile {
+            id: "target=fixture;features=default+alpha".into(),
+            target: "fixture".into(),
+            resolved_target: "fixture-target".into(),
+            features: vec!["alpha".into()],
+            target_cfg: vec!["target_os=fixture".into()],
+        };
+        result.baseline = Some(BaselineContext {
+            target_ref: "main".into(),
+            target_oid: "a".repeat(40),
+            merge_base: "b".repeat(40),
+            source_files: 2,
+            content_digest: "baseline".into(),
+        });
+        result.capabilities = vec![Capability {
+            name: "syntax".into(),
+            status: CapabilityStatus::Partial,
+            detail: Some("<limited>".into()),
+        }];
+        result.architecture = ArchitectureSummary {
+            modules: 2,
+            explicit_dependency_edges: 2,
+            incomplete_modules: 1,
+            cycles: vec![DependencyCycle {
+                modules: vec!["demo::a".into(), "demo::b".into()],
+            }],
+        };
+        result.history = Some(HistorySummary {
+            sampled_commits: 3,
+            changed_path_records: 4,
+            broad_commits_excluded_from_cochange: 1,
+            truncated: true,
+        });
+        result.imported_evidence = Some(ImportedEvidence {
+            producer: "bench".into(),
+            producer_version: "1".into(),
+            source_content_digest: Some("other".into()),
+            source_git_commit: None,
+            target: "fixture".into(),
+            features: vec!["alpha".into()],
+            attached: false,
+            attachment_reason: "different source".into(),
+            observations: vec![
+                ImportedObservation {
+                    subject: "src/a.rs".into(),
+                    metric: "instructions".into(),
+                    value: 7,
+                    unit: "count".into(),
+                    note: Some("<note>".into()),
+                },
+                ImportedObservation {
+                    subject: "src/b.rs".into(),
+                    metric: "allocations".into(),
+                    value: 0,
+                    unit: "count".into(),
+                    note: None,
+                },
+            ],
+        });
+        result.modules = vec![
+            ModuleMetrics {
+                crate_name: "demo".into(),
+                module_path: String::new(),
+                path: "src/lib.rs".into(),
+                lines: 10,
+                decision_sites: 2,
+                public_items: 1,
+                clone_calls: 0,
+                functions: Vec::new(),
+                types: Vec::new(),
+                explicit_imports: Vec::new(),
+                local_dependency_modules: vec!["demo::a".into()],
+                structure_digest: "root".into(),
+                parse_complete: true,
+                gate_complete: false,
+                limitation: Some("macro".into()),
+                history: None,
+            },
+            ModuleMetrics {
+                crate_name: "demo".into(),
+                module_path: "a".into(),
+                path: "src/a.rs".into(),
+                lines: 20,
+                decision_sites: 4,
+                public_items: 2,
+                clone_calls: 0,
+                functions: Vec::new(),
+                types: Vec::new(),
+                explicit_imports: Vec::new(),
+                local_dependency_modules: Vec::new(),
+                structure_digest: "a".into(),
+                parse_complete: true,
+                gate_complete: true,
+                limitation: None,
+                history: Some(HistoryEvidence {
+                    change_commits: 2,
+                    sampled_commits: 3,
+                    cochange: vec![
+                        CoChangeEvidence {
+                            path: "src/b.rs".into(),
+                            shared_commits: 2,
+                        },
+                        CoChangeEvidence {
+                            path: "src/c.rs".into(),
+                            shared_commits: 1,
+                        },
+                    ],
+                }),
+            },
+        ];
+        result.findings = vec![
+            Finding {
+                fingerprint: "gate".into(),
+                configuration: "fixture".into(),
+                rule: "rule.gate".into(),
+                subject: "demo::a".into(),
+                identity: "demo::a".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::ActFirst,
+                delta: crate::model::DeltaStatus::Worsened,
+                gate: true,
+                accepted: true,
+                acceptance_reason: Some("<accepted>".into()),
+                summary: "<summary>".into(),
+                direction: "<direction>".into(),
+                evidence: vec![Evidence {
+                    metric: "decisions".into(),
+                    value: 10,
+                    reference: 5,
+                    population: 20,
+                    baseline: Some(6),
+                    material_delta: Some(3),
+                }],
+            },
+            Finding {
+                fingerprint: "advisory".into(),
+                configuration: "fixture".into(),
+                rule: "rule.advisory".into(),
+                subject: "demo".into(),
+                identity: "demo".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: crate::model::DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "observe".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            },
+        ];
+
+        let rendered = html(&result);
+        assert!(rendered.contains("REGRESSION"));
+        assert!(rendered.contains("explicit-import dependency cycle"));
+        assert!(rendered.contains("Sample truncated"));
+        assert!(rendered.contains("unattached context only"));
+        assert!(rendered.contains("&lt;accepted&gt;"));
+        assert!(rendered.contains("Often changed with"));
+
+        let path = std::env::temp_dir().join(format!(
+            "ferric-lens-report-test-{}-nested/report.txt",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+        super::write(&path, "first").unwrap();
+        super::write(&path, "second").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "second");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn human_report_explains_why_findings_matter_and_makes_repository_explorer_secondary() {
+        use crate::model::{
+            DeltaStatus, Evidence, EvidenceClass, Finding, FunctionFact, FunctionKind,
+            ModuleMetrics, Priority,
+        };
+
+        let mut result = minimal_result();
+        result.modules = vec![
+            ModuleMetrics {
+                crate_name: "demo".into(),
+                module_path: "quiet".into(),
+                path: "src/quiet.rs".into(),
+                lines: 20,
+                decision_sites: 2,
+                public_items: 1,
+                clone_calls: 0,
+                functions: Vec::new(),
+                types: Vec::new(),
+                explicit_imports: Vec::new(),
+                local_dependency_modules: Vec::new(),
+                structure_digest: "quiet".into(),
+                parse_complete: true,
+                gate_complete: true,
+                limitation: None,
+                history: None,
+            },
+            ModuleMetrics {
+                crate_name: "demo".into(),
+                module_path: "engine".into(),
+                path: "src/engine.rs".into(),
+                lines: 120,
+                decision_sites: 30,
+                public_items: 4,
+                clone_calls: 2,
+                functions: vec![FunctionFact {
+                    name: "run".into(),
+                    kind: FunctionKind::Function,
+                    public_declared: true,
+                    decision_sites: 30,
+                    max_decision_nesting: 3,
+                }],
+                types: Vec::new(),
+                explicit_imports: Vec::new(),
+                local_dependency_modules: vec!["demo::quiet".into()],
+                structure_digest: "engine".into(),
+                parse_complete: true,
+                gate_complete: true,
+                limitation: None,
+                history: None,
+            },
+        ];
+        result.findings = vec![Finding {
+            fingerprint: "engine".into(),
+            rule: "structure.current_coupled_outlier".into(),
+            subject: "demo::engine".into(),
+            identity: "demo::engine".into(),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Strong,
+            priority: Priority::Investigate,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "technical summary".into(),
+            direction: "inspect boundary".into(),
+            evidence: vec![
+                Evidence {
+                    metric: "decision_sites".into(),
+                    value: 30,
+                    reference: 12,
+                    population: 20,
+                    baseline: None,
+                    material_delta: None,
+                },
+                Evidence {
+                    metric: "local_dependency_modules".into(),
+                    value: 8,
+                    reference: 4,
+                    population: 20,
+                    baseline: None,
+                    material_delta: None,
+                },
+            ],
+        }];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("What needs attention"));
+        assert!(rendered.contains("This module may be harder to change safely"));
+        assert!(rendered.contains("Why this matters"));
+        assert!(rendered.contains("If ignored"));
+        assert!(rendered.contains("Observed facts"));
+        assert!(rendered.contains("What to inspect next"));
+        assert!(rendered.contains("What this does not establish"));
+        assert!(rendered.contains("Change attribution unavailable"));
+        assert!(rendered.contains("Repository explorer"));
+        assert!(rendered.contains("Use this after a finding points you to an area"));
+        assert!(rendered.contains("Worth investigating"));
+        assert!(rendered.contains("No issue currently identified"));
+        assert!(rendered.find("demo::engine").unwrap() < rendered.find("demo::quiet").unwrap());
+        assert!(rendered.contains("Analysis details"));
+        assert!(rendered.contains("Technical capability details"));
+        assert!(!rendered.contains("<div class=\"card\"><h2>Coverage</h2>"));
+    }
+
+    #[test]
+    fn compact_ai_json_keeps_actionable_evidence_without_raw_repository_inventory() {
+        use crate::model::{
+            DeltaStatus, Evidence, EvidenceClass, Finding, ModuleMetrics, Priority, SourceContext,
+        };
+
+        let mut result = minimal_result();
+        result.modules = vec![ModuleMetrics {
+            crate_name: "demo".into(),
+            module_path: "engine".into(),
+            path: "src/engine.rs".into(),
+            lines: 50,
+            decision_sites: 20,
+            public_items: 2,
+            clone_calls: 0,
+            functions: Vec::new(),
+            types: Vec::new(),
+            explicit_imports: Vec::new(),
+            local_dependency_modules: Vec::new(),
+            structure_digest: "engine".into(),
+            parse_complete: true,
+            gate_complete: true,
+            limitation: None,
+            history: None,
+        }];
+        result.findings = vec![
+            Finding {
+                fingerprint: "active".into(),
+                rule: "runtime.clone_for_iteration_candidate".into(),
+                subject: "demo::engine".into(),
+                identity: "demo::engine".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "raw summary".into(),
+                direction: "measure".into(),
+                evidence: vec![Evidence {
+                    metric: "clone_for_iteration_sites".into(),
+                    value: 12,
+                    reference: 4,
+                    population: 20,
+                    baseline: None,
+                    material_delta: None,
+                }],
+            },
+            Finding {
+                fingerprint: "accepted".into(),
+                rule: "structure.current_coupled_outlier".into(),
+                subject: "demo::engine".into(),
+                identity: "demo::engine".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::Investigate,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: true,
+                acceptance_reason: Some("intentional".into()),
+                summary: "accepted".into(),
+                direction: "none".into(),
+                evidence: Vec::new(),
+            },
+        ];
+        result.source_contexts = vec![SourceContext {
+            subject: "demo::engine".into(),
+            metric: "clone_for_iteration_sites".into(),
+            path: "src/engine.rs".into(),
+            start_line: 12,
+            end_line: 12,
+            excerpt: "for value in values.clone() {".into(),
+            excerpt_truncated: false,
+        }];
+
+        let first = super::ai_json(&result);
+        let second = super::ai_json(&result);
+        let value: serde_json::Value = serde_json::from_str(&first).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(value["format"], "ferric_lens_ai");
+        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["change_attribution"]["status"], "unavailable");
+        assert!(value["change_findings"].as_array().unwrap().is_empty());
+        assert!(value["existing_findings"].as_array().unwrap().is_empty());
+        assert!(value["unattributed_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            value["context"]["observations"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            value["context"]["observations"][0]["title"],
+            "A collection is cloned just to iterate it"
+        );
+        assert_eq!(
+            value["context"]["observations"][0]["change_relevance"],
+            "unattributed"
+        );
+        assert_eq!(value["context"]["observations"][0]["path"], "src/engine.rs");
+        assert_eq!(
+            value["context"]["observations"][0]["source"][0]["start_line"],
+            12
+        );
+        assert_eq!(
+            value["context"]["observations"][0]["facts"][0],
+            "A cloned value is used directly as a for-loop iterator."
+        );
+        assert!(value["context"]["observations"][0]["interpretation"]
+            .as_str()
+            .unwrap()
+            .contains("iteration"));
+        assert!(
+            !value["context"]["observations"][0]["recommended_inspection"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!value["context"]["observations"][0]["limitations"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(value["context"]["observations"][0]
+            .get("why_care")
+            .is_none());
+        assert!(value["context"]["observations"][0]
+            .get("next_step")
+            .is_none());
+        assert!(value.get("findings").is_none());
+        assert!(value.get("observations").is_none());
+        assert!(value.get("modules").is_none());
+        assert!(value.get("capabilities").is_none());
+        assert_eq!(value["summary"]["accepted_findings"], 1);
+    }
+
+    #[test]
+    fn ai_v2_prioritizes_change_relevance_bounds_output_and_reports_omissions() {
+        use crate::model::{
+            BaselineContext, DeltaStatus, EvidenceClass, Finding, Priority, SourceContext,
+        };
+
+        let mut result = minimal_result();
+        result.baseline = Some(BaselineContext {
+            target_ref: "main".into(),
+            target_oid: "a".repeat(40),
+            merge_base: "b".repeat(40),
+            source_files: 1,
+            content_digest: "baseline".into(),
+        });
+
+        let make = |fingerprint: &str, delta: DeltaStatus, priority: Priority| Finding {
+            fingerprint: fingerprint.into(),
+            rule: "structure.current_coupled_outlier".into(),
+            subject: format!("demo::{fingerprint}"),
+            identity: format!("demo::{fingerprint}"),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Strong,
+            priority,
+            delta,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "summary".into(),
+            direction: "direction".into(),
+            evidence: Vec::new(),
+        };
+
+        result.findings = vec![
+            make("new-a", DeltaStatus::New, Priority::Investigate),
+            make("new-b", DeltaStatus::New, Priority::ActFirst),
+            make("worse", DeltaStatus::Worsened, Priority::ActFirst),
+            make("old", DeltaStatus::Unchanged, Priority::Investigate),
+            make("current", DeltaStatus::Current, Priority::Investigate),
+            make("unknown", DeltaStatus::Unknown, Priority::Investigate),
+        ];
+        for index in 0..6 {
+            result.findings.push(Finding {
+                fingerprint: format!("observe-{index}"),
+                rule: "runtime.clone_for_iteration_candidate".into(),
+                subject: format!("demo::observe{index}"),
+                identity: format!("demo::observe{index}"),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "observe".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            });
+        }
+
+        result.source_contexts = (1..=4)
+            .map(|line| SourceContext {
+                subject: "demo::new-a".into(),
+                metric: "decision_sites".into(),
+                path: "src/new_a.rs".into(),
+                start_line: line,
+                end_line: line,
+                excerpt: format!("if condition_{line} {{}}"),
+                excerpt_truncated: false,
+            })
+            .collect();
+        result.findings[0].evidence = vec![crate::model::Evidence {
+            metric: "decision_sites".into(),
+            value: 30,
+            reference: 10,
+            population: 20,
+            baseline: Some(20),
+            material_delta: Some(5),
+        }];
+
+        let value: serde_json::Value = serde_json::from_str(&super::ai_json(&result)).unwrap();
+
+        assert_eq!(value["change_attribution"]["status"], "available");
+        assert_eq!(value["change_attribution"]["baseline"], "main");
+        assert_eq!(value["additional_actionable_findings_omitted"], 1);
+        assert_eq!(value["change_findings"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            value["change_findings"][0]["change_relevance"],
+            "introduced"
+        );
+        assert_eq!(value["change_findings"][2]["change_relevance"], "worsened");
+        assert_eq!(value["existing_findings"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            value["existing_findings"][0]["change_relevance"],
+            "existing"
+        );
+        assert_eq!(value["unattributed_findings"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            value["unattributed_findings"][0]["change_relevance"],
+            "unattributed"
+        );
+        assert_eq!(
+            value["context"]["observations"].as_array().unwrap().len(),
+            5
+        );
+        assert_eq!(value["context"]["additional_observations_omitted"], 1);
+
+        let new_a = value["change_findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|finding| finding["subject"] == "demo::new-a")
+            .unwrap();
+        assert_eq!(new_a["source"].as_array().unwrap().len(), 3);
+        assert_eq!(new_a["additional_source_contexts_omitted"], 1);
+        assert!(new_a["facts"][1].as_str().unwrap().contains("baseline 20"));
+        assert!(new_a["facts"][1]
+            .as_str()
+            .unwrap()
+            .contains("material growth threshold 5"));
+
+        let rendered = html(&result);
+        assert!(rendered.contains("Introduced or worsened by this change"));
+        assert!(rendered.contains("Review these first"));
+        assert!(rendered.contains("Existing findings"));
+        assert!(rendered.contains("Not introduced by this change"));
+        assert!(rendered.contains("Attribution uncertain"));
+        assert!(rendered.contains("Baseline comparison could not classify these findings"));
+
+        result.findings = vec![make("only-new", DeltaStatus::New, Priority::Investigate)];
+        let changed_only = html(&result);
+        assert!(changed_only.contains("Introduced or worsened by this change"));
+        assert!(!changed_only.contains("<h3>Existing findings</h3>"));
+        assert!(!changed_only.contains("<h3>Attribution uncertain</h3>"));
+
+        result.findings = vec![make(
+            "only-existing",
+            DeltaStatus::Unchanged,
+            Priority::Investigate,
+        )];
+        let existing_only = html(&result);
+        assert!(!existing_only.contains("<h3>Introduced or worsened by this change</h3>"));
+        assert!(existing_only.contains("<h3>Existing findings</h3>"));
+        assert!(!existing_only.contains("<h3>Attribution uncertain</h3>"));
+
+        result.findings = vec![make(
+            "only-unknown",
+            DeltaStatus::Unknown,
+            Priority::Investigate,
+        )];
+        let unknown_only = html(&result);
+        assert!(!unknown_only.contains("<h3>Introduced or worsened by this change</h3>"));
+        assert!(!unknown_only.contains("<h3>Existing findings</h3>"));
+        assert!(unknown_only.contains("<h3>Attribution uncertain</h3>"));
+    }
+
+    #[test]
+    fn observe_findings_are_secondary_not_areas_needing_attention() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        let mut result = minimal_result();
+        result.findings = vec![Finding {
+            fingerprint: "observe".into(),
+            rule: "build.small_population_rebuild_concentration".into(),
+            subject: "demo::model".into(),
+            identity: "demo::model".into(),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Candidate,
+            priority: Priority::Observe,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "dependency hub".into(),
+            direction: "keep boundary stable".into(),
+            evidence: Vec::new(),
+        }];
+
+        let rendered = html(&result);
+        let attention = rendered
+            .split("<details class=\"analysis-details\">\n<summary><strong>Observations</strong>")
+            .next()
+            .expect("attention section");
+
+        assert!(attention.contains("0 areas worth reviewing"));
+        assert!(!attention.contains("Changes here may affect many parts of the repository"));
+        assert!(rendered.contains("<strong>Observations</strong> (1)"));
+        assert!(rendered.contains("Changes here may affect many parts of the repository"));
+
+        let cli = super::cli_summary(&result);
+        assert!(cli.contains("0 areas worth reviewing"));
+        assert!(cli.contains("1 lower-confidence observation"));
+        assert!(!cli.contains("Changes here may affect many parts of the repository"));
+    }
+
+    #[test]
+    fn html_dark_theme_uses_semantic_verdict_and_priority_cues() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        let mut result = minimal_result();
+        result.verdict = GateVerdict::Regression;
+        result.findings = vec![
+            Finding {
+                fingerprint: "urgent".into(),
+                rule: "structure.current_coupled_outlier".into(),
+                subject: "demo::urgent".into(),
+                identity: "demo::urgent".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::ActFirst,
+                delta: DeltaStatus::Worsened,
+                gate: true,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "urgent".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            },
+            Finding {
+                fingerprint: "investigate".into(),
+                rule: "refactor.multi_signal_candidate".into(),
+                subject: "demo::investigate".into(),
+                identity: "demo::investigate".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::Investigate,
+                delta: DeltaStatus::New,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "investigate".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            },
+            Finding {
+                fingerprint: "observe".into(),
+                rule: "runtime.clone_for_iteration_candidate".into(),
+                subject: "demo::observe".into(),
+                identity: "demo::observe".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "observe".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            },
+        ];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("color-scheme: dark"));
+        assert!(rendered.contains("verdict verdict-regression"));
+        assert!(rendered.contains("finding-card priority-actfirst delta-worsened gate"));
+        assert!(rendered.contains("finding-card priority-investigate delta-new"));
+        assert!(rendered.contains("finding-card priority-observe delta-current"));
+        assert!(rendered.contains("badge priority-badge"));
+        assert!(rendered.contains("--danger: #ff7b72"));
+        assert!(rendered.contains("--warning: #e3b341"));
+        assert!(rendered.contains("--info: #79c0ff"));
+        assert!(rendered.contains("--success: #7ee787"));
+    }
+
+    #[test]
+    fn cli_summary_prioritizes_plain_language_actions_over_internal_rule_names() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        let mut result = minimal_result();
+        result.findings = vec![Finding {
+            fingerprint: "refactor".into(),
+            rule: "refactor.multi_signal_candidate".into(),
+            subject: "demo::engine".into(),
+            identity: "demo::engine".into(),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Strong,
+            priority: Priority::Investigate,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "internal summary".into(),
+            direction: "inspect responsibilities".into(),
+            evidence: Vec::new(),
+        }];
+
+        let rendered = super::cli_summary(&result);
+        let ai: serde_json::Value = serde_json::from_str(&super::ai_json(&result)).unwrap();
+
+        assert!(rendered.contains("1 area worth reviewing"));
+        assert!(rendered.contains("Possible refactoring opportunity"));
+        assert!(rendered.contains("Why it matters:"));
+        assert!(rendered.contains("Inspect:"));
+        assert!(!rendered.contains("refactor.multi_signal_candidate"));
+        assert_eq!(ai["unattributed_findings"].as_array().unwrap().len(), 1);
+        assert!(ai["context"]["observations"].as_array().unwrap().is_empty());
+        assert_eq!(
+            ai["unattributed_findings"][0]["title"],
+            "Possible refactoring opportunity"
+        );
+    }
+
+    #[test]
+    fn guidance_helpers_cover_supported_families_labels_paths_and_limits() {
+        use crate::model::{
+            Capability, CapabilityStatus, DeltaStatus, EvidenceClass, Finding, GateVerdict,
+            Priority, SourceContext,
+        };
+
+        let mut finding = Finding {
+            fingerprint: "f".into(),
+            rule: String::new(),
+            subject: "demo::missing".into(),
+            identity: "demo::missing".into(),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Candidate,
+            priority: Priority::Observe,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: String::new(),
+            direction: "inspect".into(),
+            evidence: Vec::new(),
+        };
+
+        for (rule, expected_title) in [
+            (
+                "structure.small_population_decision_concentration",
+                "Complex logic is concentrated here",
+            ),
+            (
+                "runtime.clone_for_iteration_candidate",
+                "A collection is cloned just to iterate it",
+            ),
+            (
+                "runtime.clone_then_mutate_candidate",
+                "A cloned aggregate is changed through one of its fields",
+            ),
+            (
+                "build.rebuild_exposure_candidate",
+                "Changes here may affect many parts of the repository",
+            ),
+            (
+                "refactor.multi_signal_candidate",
+                "Possible refactoring opportunity",
+            ),
+            ("unknown.rule", "This area is worth reviewing"),
+        ] {
+            finding.rule = rule.into();
+            assert_eq!(super::finding_guidance(&finding).title, expected_title);
+        }
+
+        for rule in [
+            "structure.coupled_complexity_growth",
+            "structure.current_coupled_outlier",
+            "structure.small_population_decision_concentration",
+            "runtime.clone_for_iteration_candidate",
+            "runtime.clone_then_mutate_candidate",
+            "build.rebuild_exposure_candidate",
+            "correctness.cargo_feature_resolution_without_resolve",
+            "correctness.symbolic_target_identity",
+            "correctness.stdout_mode_unconditional_artifacts",
+            "correctness.workspace_manifest_snapshot_gap",
+            "correctness.lossy_git_path_decoding",
+            "refactor.multi_signal_candidate",
+            "unknown.rule",
+        ] {
+            let guidance = super::ai_rule_guidance(rule);
+            assert!(!guidance.fact.is_empty());
+            assert!(!guidance.interpretation.is_empty());
+            assert!(!guidance.recommended_inspection.is_empty());
+            assert!(!guidance.limitations.is_empty());
+        }
+
+        assert_eq!(super::metric_label("decision_sites"), "Decision points");
+        assert_eq!(
+            super::metric_label("max_function_decision_sites"),
+            "Maximum decision points in one function"
+        );
+        assert_eq!(
+            super::metric_label("local_dependency_modules"),
+            "Repository dependencies"
+        );
+        assert_eq!(
+            super::metric_label("clone_call_syntax_sites"),
+            "Clone call sites"
+        );
+        assert_eq!(
+            super::metric_label("clone_for_iteration_sites"),
+            "Clone-for-iteration sites"
+        );
+        assert_eq!(
+            super::metric_label("clone_then_mutate_sites"),
+            "Whole-aggregate clone then nested mutation sites"
+        );
+        assert_eq!(
+            super::metric_label("mutation_after_clone_sites"),
+            "Nested mutations after cloning"
+        );
+        assert_eq!(
+            super::metric_label("reverse_repository_dependents"),
+            "Modules depending on this area"
+        );
+        assert_eq!(super::metric_label("public_items"), "Public items");
+        assert_eq!(super::metric_label("other"), "Evidence value");
+
+        assert_eq!(
+            super::capability_status_label(&CapabilityStatus::Complete),
+            "complete"
+        );
+        assert_eq!(
+            super::capability_status_label(&CapabilityStatus::Partial),
+            "partial"
+        );
+        assert_eq!(
+            super::capability_status_label(&CapabilityStatus::Unavailable),
+            "unavailable"
+        );
+        assert_eq!(super::verdict_label(&GateVerdict::Pass), "PASS");
+        assert_eq!(super::verdict_label(&GateVerdict::Regression), "REGRESSION");
+        assert_eq!(
+            super::verdict_label(&GateVerdict::Inconclusive),
+            "INCONCLUSIVE"
+        );
+        assert_eq!(super::cli_verdict_label(&GateVerdict::Pass), "Pass");
+        assert_eq!(
+            super::cli_verdict_label(&GateVerdict::Regression),
+            "Regression"
+        );
+        assert_eq!(
+            super::cli_verdict_label(&GateVerdict::Inconclusive),
+            "Inconclusive"
+        );
+
+        let contexts = vec![SourceContext {
+            subject: "demo::missing".into(),
+            metric: "decision_sites".into(),
+            path: "src/context.rs".into(),
+            start_line: 1,
+            end_line: 1,
+            excerpt: "if value {}".into(),
+            excerpt_truncated: false,
+        }];
+        assert_eq!(
+            super::finding_path(&finding, &[], &contexts),
+            "src/context.rs"
+        );
+        assert_eq!(super::finding_path(&finding, &[], &[]), "demo::missing");
+
+        finding.delta = DeltaStatus::New;
+        assert_eq!(super::change_relevance(&finding, true), "introduced");
+        finding.delta = DeltaStatus::Worsened;
+        assert_eq!(super::change_relevance(&finding, true), "worsened");
+        finding.delta = DeltaStatus::Unchanged;
+        assert_eq!(super::change_relevance(&finding, true), "existing");
+        finding.delta = DeltaStatus::Unknown;
+        assert_eq!(super::change_relevance(&finding, true), "unattributed");
+        assert_eq!(super::change_relevance(&finding, false), "unattributed");
+
+        let mut same_subject_a = finding.clone();
+        same_subject_a.rule = "z.rule".into();
+        same_subject_a.delta = DeltaStatus::Current;
+        let mut same_subject_b = same_subject_a.clone();
+        same_subject_b.rule = "a.rule".into();
+        let ordered = super::ai_ordered_findings(vec![&same_subject_a, &same_subject_b], false);
+        assert_eq!(ordered[0].rule, "a.rule");
+
+        let fact = super::evidence_fact(&crate::model::Evidence {
+            metric: "decision_sites".into(),
+            value: 12,
+            reference: 8,
+            population: 20,
+            baseline: None,
+            material_delta: None,
+        });
+        assert_eq!(
+            fact,
+            "Decision points: 12; comparison reference 8 across 20 comparable modules."
+        );
+
+        let mut result = minimal_result();
+        result.capabilities = vec![
+            Capability {
+                name: "complete".into(),
+                status: CapabilityStatus::Complete,
+                detail: None,
+            },
+            Capability {
+                name: "partial".into(),
+                status: CapabilityStatus::Partial,
+                detail: Some("limited".into()),
+            },
+            Capability {
+                name: "unavailable".into(),
+                status: CapabilityStatus::Unavailable,
+                detail: None,
+            },
+        ];
+        let value: serde_json::Value = serde_json::from_str(&super::ai_json(&result)).unwrap();
+        assert_eq!(value["analysis_limits"].as_array().unwrap().len(), 2);
+        assert_eq!(value["analysis_limits"][0]["status"], "partial");
+        assert_eq!(value["analysis_limits"][1]["status"], "unavailable");
+    }
+
+    #[test]
+    fn cli_summary_bounds_visible_findings_and_reports_limit_count() {
+        use crate::model::{
+            Capability, CapabilityStatus, DeltaStatus, EvidenceClass, Finding, Priority,
+        };
+
+        let mut result = minimal_result();
+        result.capabilities = vec![Capability {
+            name: "partial".into(),
+            status: CapabilityStatus::Partial,
+            detail: Some("limited".into()),
+        }];
+        for index in 0..6 {
+            result.findings.push(Finding {
+                fingerprint: format!("finding-{index}"),
+                rule: "refactor.multi_signal_candidate".into(),
+                subject: format!("demo::m{index}"),
+                identity: format!("demo::m{index}"),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::Investigate,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "candidate".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            });
+        }
+
+        let rendered = super::cli_summary(&result);
+
+        assert!(rendered.contains("6 areas worth reviewing"));
+        assert!(rendered.contains("1 additional active finding"));
+        assert!(rendered.contains("1 capability limitation"));
+    }
+
+    #[test]
+    fn correctness_guidance_and_metric_labels_are_explicit() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        for (rule, title) in [
+            (
+                "correctness.cargo_feature_resolution_without_resolve",
+                "Feature-gated code may be analyzed under the wrong configuration",
+            ),
+            (
+                "correctness.symbolic_target_identity",
+                "Machine configuration identity can collide across host targets",
+            ),
+            (
+                "correctness.stdout_mode_unconditional_artifacts",
+                "A stdout-only mode still writes files",
+            ),
+            (
+                "correctness.workspace_manifest_snapshot_gap",
+                "The analyzed snapshot can mix different workspace manifest states",
+            ),
+            (
+                "correctness.lossy_git_path_decoding",
+                "Distinct repository paths can be silently collapsed",
+            ),
+        ] {
+            let finding = Finding {
+                fingerprint: String::new(),
+                rule: rule.into(),
+                subject: "repository".into(),
+                identity: "repository".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::ActFirst,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: String::new(),
+                direction: String::new(),
+                evidence: Vec::new(),
+            };
+            assert_eq!(super::finding_guidance(&finding).title, title);
+        }
+
+        for (metric, label) in [
+            (
+                "cargo_metadata_no_deps_sites",
+                "Cargo metadata calls without resolve graph",
+            ),
+            (
+                "cfg_feature_resolution_sites",
+                "Feature cfg resolution sites",
+            ),
+            (
+                "symbolic_target_identity_sites",
+                "Symbolic target identity sites",
+            ),
+            (
+                "symbolic_target_match_sites",
+                "Symbolic target comparison sites",
+            ),
+            (
+                "unconditional_output_write_sites",
+                "Unconditional output writes",
+            ),
+            (
+                "root_only_cargo_input_sites",
+                "Root-only Cargo input digests",
+            ),
+            ("workspace_manifest_read_sites", "Workspace manifest reads"),
+            ("lossy_git_path_decode_sites", "Lossy Git path decodes"),
+        ] {
+            assert_eq!(super::metric_label(metric), label);
+        }
+    }
+
+    #[test]
+    fn write_rejects_paths_without_file_names() {
+        let error = super::write(std::path::Path::new("/"), "content").unwrap_err();
+        assert!(error.contains("output path has no file name"));
+    }
+
+    #[test]
+    fn json_and_html_embed_the_same_semantic_result_digest() {
+        let result = minimal_result();
+        let digest = result_digest(&result);
+        let json = json(&result);
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value["result_digest"], digest);
+        assert!(html(&result).contains(&digest));
+    }
+
+    #[test]
+    fn renders_inconclusive_attached_evidence_multiple_crates_and_complete_history() {
+        use crate::model::{HistoryEvidence, HistorySummary, ImportedEvidence, ModuleMetrics};
+
+        let mut result = minimal_result();
+        result.verdict = GateVerdict::Inconclusive;
+        result.verdict_reason = "incomplete".into();
+        result.history = Some(HistorySummary {
+            sampled_commits: 1,
+            changed_path_records: 1,
+            broad_commits_excluded_from_cochange: 0,
+            truncated: false,
+        });
+        result.imported_evidence = Some(ImportedEvidence {
+            producer: "fixture".into(),
+            producer_version: "1".into(),
+            source_content_digest: Some("source".into()),
+            source_git_commit: None,
+            target: "host".into(),
+            features: Vec::new(),
+            attached: true,
+            attachment_reason: "match".into(),
+            observations: Vec::new(),
+        });
+        result.modules = vec![
+            ModuleMetrics {
+                crate_name: "a".into(),
+                module_path: String::new(),
+                path: "a/src/lib.rs".into(),
+                lines: 1,
+                decision_sites: 0,
+                public_items: 0,
+                clone_calls: 0,
+                functions: Vec::new(),
+                types: Vec::new(),
+                explicit_imports: Vec::new(),
+                local_dependency_modules: Vec::new(),
+                structure_digest: "a".into(),
+                parse_complete: true,
+                gate_complete: true,
+                limitation: None,
+                history: Some(HistoryEvidence {
+                    change_commits: 1,
+                    sampled_commits: 1,
+                    cochange: Vec::new(),
+                }),
+            },
+            ModuleMetrics {
+                crate_name: "b".into(),
+                module_path: String::new(),
+                path: "b/src/lib.rs".into(),
+                lines: 1,
+                decision_sites: 0,
+                public_items: 0,
+                clone_calls: 0,
+                functions: Vec::new(),
+                types: Vec::new(),
+                explicit_imports: Vec::new(),
+                local_dependency_modules: Vec::new(),
+                structure_digest: "b".into(),
+                parse_complete: true,
+                gate_complete: true,
+                limitation: None,
+                history: None,
+            },
+        ];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("INCONCLUSIVE"));
+        assert!(rendered.contains("attached to current analysis"));
+        assert!(!rendered.contains("Sample truncated"));
+        assert!(rendered.contains("Repository explorer"));
+        assert!(rendered.contains("a/src/lib.rs"));
+        assert!(rendered.contains("b/src/lib.rs"));
+    }
+
+    #[test]
+    fn imported_observation_without_a_note_renders_without_note_separator() {
+        use crate::model::{ImportedEvidence, ImportedObservation};
+
+        let mut result = minimal_result();
+        result.imported_evidence = Some(ImportedEvidence {
+            producer: "fixture".into(),
+            producer_version: "1".into(),
+            source_content_digest: Some("source".into()),
+            source_git_commit: None,
+            target: "host".into(),
+            features: Vec::new(),
+            attached: true,
+            attachment_reason: "match".into(),
+            observations: vec![ImportedObservation {
+                subject: "src/lib.rs".into(),
+                metric: "instructions".into(),
+                value: 1,
+                unit: "count".into(),
+                note: None,
+            }],
+        });
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("instructions = 1 count"));
+        assert!(!rendered.contains("instructions = 1 count —"));
+    }
+
+    #[test]
+    fn separates_structural_runtime_and_build_advisories() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        let mut result = minimal_result();
+        for rule in [
+            "refactor.multi_signal_candidate",
+            "structure.current_coupled_outlier",
+            "runtime.clone_for_iteration_candidate",
+            "build.rebuild_exposure_candidate",
+        ] {
+            result.findings.push(Finding {
+                fingerprint: rule.into(),
+                rule: rule.into(),
+                subject: "demo::m0".into(),
+                identity: "demo::m0".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "candidate".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            });
+        }
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("Possible refactoring opportunity"));
+        assert!(rendered.contains("This module may be harder to change safely"));
+        assert!(rendered.contains("A collection is cloned just to iterate it"));
+        assert!(rendered.contains("Changes here may affect many parts of the repository"));
+        assert!(rendered.contains("<h2>What needs attention</h2>"));
+    }
+
+    #[test]
+    fn codebase_map_renders_dependency_function_and_type_hierarchy() {
+        use crate::model::{FunctionFact, FunctionKind, ModuleMetrics, TypeFact, TypeKind};
+
+        let mut result = minimal_result();
+        result.modules = vec![ModuleMetrics {
+            crate_name: "demo".into(),
+            module_path: "engine".into(),
+            path: "src/engine.rs".into(),
+            lines: 10,
+            decision_sites: 1,
+            public_items: 2,
+            clone_calls: 1,
+            functions: vec![
+                FunctionFact {
+                    name: "engine::run<&>".into(),
+                    kind: FunctionKind::Function,
+                    public_declared: true,
+                    decision_sites: 1,
+                    max_decision_nesting: 1,
+                },
+                FunctionFact {
+                    name: "engine::helper".into(),
+                    kind: FunctionKind::Function,
+                    public_declared: false,
+                    decision_sites: 0,
+                    max_decision_nesting: 0,
+                },
+            ],
+            types: vec![
+                TypeFact {
+                    name: "engine::State<&>".into(),
+                    kind: TypeKind::Struct,
+                    public_declared: false,
+                },
+                TypeFact {
+                    name: "engine::PublicState".into(),
+                    kind: TypeKind::Struct,
+                    public_declared: true,
+                },
+            ],
+            explicit_imports: Vec::new(),
+            local_dependency_modules: vec!["demo::model<&>".into()],
+            structure_digest: "engine".into(),
+            parse_complete: true,
+            gate_complete: true,
+            limitation: None,
+            history: None,
+        }];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("<summary>Dependencies (1)</summary>"));
+        assert!(rendered.contains("demo::model&lt;&amp;&gt;"));
+        assert!(rendered.contains("<summary>Functions (2)</summary>"));
+        assert!(rendered.contains("engine::run&lt;&amp;&gt;"));
+        assert!(rendered.contains("function · public"));
+        assert!(rendered.contains("engine::helper"));
+        assert!(rendered.contains("function · private"));
+        assert!(rendered.contains("<summary>Types (2)</summary>"));
+        assert!(rendered.contains("engine::State&lt;&amp;&gt;"));
+        assert!(rendered.contains("struct · private"));
+        assert!(rendered.contains("engine::PublicState"));
+        assert!(rendered.contains("struct · public"));
+    }
+
+    #[test]
+    fn report_exposes_human_triage_labels_summary_and_module_navigation() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, ModuleMetrics, Priority};
+
+        let mut result = minimal_result();
+        result.modules = vec![ModuleMetrics {
+            crate_name: "demo".into(),
+            module_path: "engine".into(),
+            path: "src/engine.rs".into(),
+            lines: 42,
+            decision_sites: 9,
+            public_items: 1,
+            clone_calls: 0,
+            functions: Vec::new(),
+            types: Vec::new(),
+            explicit_imports: Vec::new(),
+            local_dependency_modules: Vec::new(),
+            structure_digest: "engine".into(),
+            parse_complete: true,
+            gate_complete: true,
+            limitation: None,
+            history: None,
+        }];
+        result.findings = vec![
+            Finding {
+                fingerprint: "refactor".into(),
+                rule: "refactor.multi_signal_candidate".into(),
+                subject: "demo::engine".into(),
+                identity: "demo::engine".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Strong,
+                priority: Priority::Investigate,
+                delta: DeltaStatus::Worsened,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "corroborated".into(),
+                direction: "inspect boundary".into(),
+                evidence: Vec::new(),
+            },
+            Finding {
+                fingerprint: "observe".into(),
+                rule: "runtime.clone_for_iteration_candidate".into(),
+                subject: "demo::engine".into(),
+                identity: "demo::engine".into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "observe".into(),
+                direction: "measure".into(),
+                evidence: Vec::new(),
+            },
+        ];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("<h2>What needs attention</h2>"));
+        assert!(rendered.contains("1 area worth reviewing"));
+        assert!(rendered.contains("1 investigate"));
+        assert!(rendered.contains("1 observation"));
+        assert!(rendered.contains("Possible refactoring opportunity"));
+        assert!(rendered.contains("A collection is cloned just to iterate it"));
+        assert!(rendered.contains("Priority 2 — investigate"));
+        assert!(rendered.contains("strong evidence"));
+        assert!(rendered.contains("worsened"));
+        assert!(rendered.contains("src/engine.rs"));
+        assert!(rendered.contains(">View in repository explorer</a>"));
+        assert!(rendered.contains("id=\"module-"));
+        assert!(rendered.contains("href=\"#module-"));
+    }
+
+    #[test]
+    fn human_report_orders_priority_then_change_relevance_without_mutating_result() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        let mut result = minimal_result();
+        for (fingerprint, subject, priority, delta) in [
+            (
+                "observe",
+                "demo::observe",
+                Priority::Observe,
+                DeltaStatus::Current,
+            ),
+            (
+                "investigate-current",
+                "demo::investigate-current",
+                Priority::Investigate,
+                DeltaStatus::Current,
+            ),
+            (
+                "investigate-worsened",
+                "demo::investigate-worsened",
+                Priority::Investigate,
+                DeltaStatus::Worsened,
+            ),
+            ("act", "demo::act", Priority::ActFirst, DeltaStatus::New),
+        ] {
+            result.findings.push(Finding {
+                fingerprint: fingerprint.into(),
+                rule: "structure.test".into(),
+                subject: subject.into(),
+                identity: subject.into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority,
+                delta,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "candidate".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            });
+        }
+        let original = result.findings.clone();
+
+        let rendered = html(&result);
+
+        let act = rendered.find("demo::act").unwrap();
+        let worsened = rendered.find("demo::investigate-worsened").unwrap();
+        let investigate = rendered.find("demo::investigate-current").unwrap();
+        let observe = rendered.find("demo::observe").unwrap();
+        assert!(act < worsened);
+        assert!(worsened < investigate);
+        assert!(investigate < observe);
+        assert_eq!(result.findings, original);
+    }
+
+    #[test]
+    fn human_report_labels_cover_all_model_states() {
+        use crate::model::{DeltaStatus, EvidenceClass, Priority};
+
+        assert_eq!(
+            super::priority_label(&Priority::ActFirst),
+            "Priority 1 — act first"
+        );
+        assert_eq!(
+            super::priority_label(&Priority::Investigate),
+            "Priority 2 — investigate"
+        );
+        assert_eq!(super::priority_label(&Priority::Observe), "Observe");
+        assert_eq!(
+            super::evidence_label(&EvidenceClass::Proven),
+            "proven evidence"
+        );
+        assert_eq!(
+            super::evidence_label(&EvidenceClass::Strong),
+            "strong evidence"
+        );
+        assert_eq!(
+            super::evidence_label(&EvidenceClass::Candidate),
+            "candidate evidence"
+        );
+        assert_eq!(super::delta_label(&DeltaStatus::Current), "current");
+        assert_eq!(super::delta_label(&DeltaStatus::New), "new");
+        assert_eq!(super::delta_label(&DeltaStatus::Worsened), "worsened");
+        assert_eq!(super::delta_label(&DeltaStatus::Unchanged), "unchanged");
+        assert_eq!(super::delta_label(&DeltaStatus::Unknown), "unknown");
+        assert_eq!(super::count_phrase(2, "item", "items"), "2 items");
+    }
+
+    #[test]
+    fn human_report_ordering_covers_stable_tiebreakers_and_ranks() {
+        use crate::model::{DeltaStatus, EvidenceClass, Finding, Priority};
+
+        assert_eq!(super::priority_rank(&Priority::ActFirst), 0);
+        assert_eq!(super::priority_rank(&Priority::Investigate), 1);
+        assert_eq!(super::priority_rank(&Priority::Observe), 2);
+        assert_eq!(super::delta_rank(&DeltaStatus::Worsened), 0);
+        assert_eq!(super::delta_rank(&DeltaStatus::New), 1);
+        assert_eq!(super::delta_rank(&DeltaStatus::Current), 2);
+        assert_eq!(super::delta_rank(&DeltaStatus::Unchanged), 3);
+        assert_eq!(super::delta_rank(&DeltaStatus::Unknown), 4);
+
+        let mut result = minimal_result();
+        for (fingerprint, rule, subject) in [
+            ("b", "structure.z", "demo::b"),
+            ("a-z", "structure.z", "demo::a"),
+            ("a-a", "structure.a", "demo::a"),
+        ] {
+            result.findings.push(Finding {
+                fingerprint: fingerprint.into(),
+                rule: rule.into(),
+                subject: subject.into(),
+                identity: subject.into(),
+                configuration: "host".into(),
+                evidence_class: EvidenceClass::Candidate,
+                priority: Priority::Observe,
+                delta: DeltaStatus::Current,
+                gate: false,
+                accepted: false,
+                acceptance_reason: None,
+                summary: "candidate".into(),
+                direction: "inspect".into(),
+                evidence: Vec::new(),
+            });
+        }
+
+        let rendered = html(&result);
+
+        assert!(rendered.find("structure.a").unwrap() < rendered.find("structure.z").unwrap());
+        assert!(rendered.find("demo::a").unwrap() < rendered.find("demo::b").unwrap());
+    }
+
+    #[test]
+    fn source_evidence_renders_ranges_truncation_and_escaped_excerpt() {
+        use crate::model::{
+            DeltaStatus, Evidence, EvidenceClass, Finding, Priority, SourceContext,
+        };
+
+        let mut result = minimal_result();
+        result.findings = vec![Finding {
+            fingerprint: "source-context".into(),
+            rule: "structure.test".into(),
+            subject: "demo::engine".into(),
+            identity: "demo::engine".into(),
+            configuration: "host".into(),
+            evidence_class: EvidenceClass::Strong,
+            priority: Priority::Investigate,
+            delta: DeltaStatus::Current,
+            gate: false,
+            accepted: false,
+            acceptance_reason: None,
+            summary: "source context".into(),
+            direction: "inspect".into(),
+            evidence: vec![Evidence {
+                metric: "decision_sites".into(),
+                value: 2,
+                reference: 1,
+                population: 20,
+                baseline: None,
+                material_delta: None,
+            }],
+        }];
+        result.source_contexts = vec![SourceContext {
+            subject: "demo::engine".into(),
+            metric: "decision_sites".into(),
+            path: "src/engine.rs".into(),
+            start_line: 7,
+            end_line: 9,
+            excerpt: "<unsafe & excerpt>".into(),
+            excerpt_truncated: true,
+        }];
+
+        let rendered = html(&result);
+
+        assert!(rendered.contains("src/engine.rs:7-9"));
+        assert!(rendered.contains("&lt;unsafe &amp; excerpt&gt;"));
+        assert!(rendered.contains("Excerpt bounded for report size"));
+        assert_eq!(
+            super::source_location_label(&result.source_contexts[0]),
+            "src/engine.rs:7-9"
+        );
+
+        result.source_contexts[0].end_line = 7;
+        assert_eq!(
+            super::source_location_label(&result.source_contexts[0]),
+            "src/engine.rs:7"
+        );
+    }
+
+    #[test]
+    fn write_reports_parent_creation_failure() {
+        use std::fs;
+
+        let root = std::env::temp_dir().join(format!(
+            "ferric-lens-report-parent-error-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let blocker = root.join("blocker");
+        fs::write(&blocker, "file").unwrap();
+
+        let error = super::write(&blocker.join("report.json"), "x").unwrap_err();
+
+        assert!(error.contains("cannot create"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_reports_temporary_write_failure() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let root = std::env::temp_dir().join(format!(
+            "ferric-lens-report-write-error-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let mut permissions = fs::metadata(&root).unwrap().permissions();
+        permissions.set_mode(0o555);
+        fs::set_permissions(&root, permissions).unwrap();
+
+        let result = super::write(&root.join("report.json"), "x");
+
+        let mut permissions = fs::metadata(&root).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&root, permissions).unwrap();
+        assert!(result.unwrap_err().contains("cannot write"));
+        fs::remove_dir_all(root).unwrap();
+    }
+}

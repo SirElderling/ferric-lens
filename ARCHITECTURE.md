@@ -1,6 +1,6 @@
 # Ferric Lens architecture and decision record
 
-Status: proposed for PR #1. This is a documentation design, not an implemented or benchmarked system. Behavioral requirements are in [PROJECT_SPEC.md](PROJECT_SPEC.md); product intent is in [VISION.md](VISION.md).
+Status: implemented for Ferric Lens V1 in PR #2. This document records the implemented architecture, decision rationale, deliberate V1 limits, and pre-release validation criteria. Behavioral requirements are in [PROJECT_SPEC.md](PROJECT_SPEC.md); product intent is in [VISION.md](VISION.md). Performance/resource targets and real-project precision remain release-acceptance measurements and are not implied by implementation status.
 
 ## 1. Architecture in one page
 
@@ -14,7 +14,7 @@ Use one synchronous Rust application with a library core and a thin CLI, initial
 | `model` | Stable IDs, indexes, typed edges, configuration-specific graphs | Store UI state or compiler ASTs indefinitely |
 | `rules` | Pure fact-to-finding functions and capability requirements | Read files, launch processes, or render HTML |
 | `compare` | Conservative movement matching, deltas, material fingerprints, acceptances, gate verdict | Infer semantic equivalence from fuzzy similarity |
-| `report` | Canonical JSON, static HTML, compact CLI summary | Recompute rule semantics |
+| `report` | Canonical JSON, static HTML, compact CLI summary, derived AI view with bounded evidence/interpretation metadata | Recompute detector or gate semantics |
 | `cache` | Disposable, versioned content-addressed fact storage | Become a required baseline or source of truth |
 
 The orchestrator freezes inputs, extracts/reuses facts, builds graphs, evaluates and compares core rules, optionally enriches advisories, then serializes one immutable result. Both commands call this pipeline with different requested outputs/enrichment, not different analyzers. Keep the frozen gate result separate from advisory ranking.
@@ -39,7 +39,7 @@ Capture stable rustc target cfg data and Cargo feature information. Evaluate kno
 | Unambiguous explicit local paths/imports | Method dispatch, glob ambiguity, macro-generated edges, full call graph |
 | Resolved Cargo dependencies/features where locally available | Invented resolution when packages or lockfile data are missing |
 | Dependency reach and potential rebuild exposure | Actual compile duration, monomorphization, code size |
-| Clone/allocation-like syntax candidates | Runtime allocation cost, execution frequency, bottlenecks |
+| Contextual copy-risk syntax (for-loop clones, mutable working-copy clones) | Runtime allocation cost, execution frequency, bottlenecks |
 
 **Reason:** stable/offline analysis and broken-project support are compatible with syntax and partial resolution. They do not justify pretending to have a compiler's semantic model. Source names alone are insufficient for performance claims.
 
@@ -154,7 +154,7 @@ Accept one normalized evidence envelope with version, producer, source/configura
 
 ## 8. Validation and performance acceptance
 
-Implement behavior fixtures before enabling CI gates. The repository currently contains documentation only, so none of these runtime checks are claimed to have passed.
+Behavior fixtures, specification-derived regression tests, cross-platform CI, and a source-centric 100% production coverage gate are implemented in PR #2. Release performance acceptance remains a separate measured step: the repository now includes deterministic standard and stress fixture generation plus a non-thresholded measurement workflow, but shared-runner observations are diagnostic rather than release promises.
 
 | Property | Required verification |
 | --- | --- |

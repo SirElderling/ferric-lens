@@ -1,0 +1,160 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: ubuntu-latest / stable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets --all-features
+
+      - name: Test release-acceptance tooling
+        run: python3 -m unittest tools.test_perf_fixture tools.test_perf_acceptance
+
+      - name: Test coverage gate
+        run: python3 .github/scripts/test_check_source_coverage.py
+
+      - name: Install coverage tooling
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Measure coverage
+        run: |
+          cargo llvm-cov --all-targets --all-features --lcov --output-path target/coverage.lcov
+          cargo llvm-cov report --json --output-path target/coverage.json
+
+      - name: Upload coverage evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferric-lens-coverage
+          path: |
+            target/coverage.lcov
+            target/coverage.json
+          retention-days: 3
+
+      - name: Enforce 100% coverage
+        run: |
+          cargo llvm-cov report --show-missing-lines
+          python3 .github/scripts/check_source_coverage.py target/coverage.json .
+
+      - name: Self-analyze Ferric Lens
+        run: |
+          git status --porcelain=v1 --untracked-files=all > target/ferric-lens-pre-analysis-status.txt
+          set +e
+          cargo run --locked -- analyze . --base origin/main --json target/ferric-lens-self-analysis.json --html target/ferric-lens-self-analysis.html
+          status=$?
+          cargo run --locked -- analyze . --base HEAD --ai > target/ferric-lens-self-ai.json
+          ai_status=$?
+          echo "Ferric Lens same-head AI analysis exit code: $ai_status"
+          echo "$status" > target/ferric-lens-self-analysis.exit
+          echo "Ferric Lens self-analysis exit code: $status"
+          git status --porcelain=v1 --untracked-files=all > target/ferric-lens-post-analysis-status.txt
+          exit 0
+
+      - name: End-to-end check
+        run: cargo run --locked -- check . --base HEAD --json target/ferric-lens-self-check.json
+
+      - name: Upload self-analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferric-lens-self-analysis
+          path: |
+            target/ferric-lens-self-analysis.json
+            target/ferric-lens-self-analysis.html
+            target/ferric-lens-self-analysis.exit
+            target/ferric-lens-self-ai.json
+            target/ferric-lens-self-check.json
+            target/ferric-lens-pre-analysis-status.txt
+            target/ferric-lens-post-analysis-status.txt
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Release build
+        if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+        run: cargo build --release --locked
+
+      - name: Smoke-test release binary
+        if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+        run: target/release/ferric-lens --version
+
+      - name: Upload human-test binary
+        if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferric-lens-Linux-X64
+          path: target/release/ferric-lens
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  macos:
+    name: macos-latest / stable
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets --all-features
+
+      - name: End-to-end check
+        run: cargo run --locked -- check . --base HEAD --json target/ferric-lens-self-check.json
+
+      - name: Release build
+        run: cargo build --release --locked
+
+      - name: Smoke-test release binary
+        run: target/release/ferric-lens --version
+
+      - name: Upload human-test binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferric-lens-macOS-ARM64
+          path: target/release/ferric-lens
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

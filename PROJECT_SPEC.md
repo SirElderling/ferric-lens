@@ -23,6 +23,7 @@ Ferric Lens must:
 - support fast CI gating and deeper full analysis,
 - prioritize changed-code impact,
 - identify architecture, coupling, complexity, refactor, runtime-risk, and build-efficiency concerns,
+- identify a deliberately narrow set of high-confidence deterministic correctness risks when a concrete failure mechanism can be established from source evidence,
 - use Git history as targeted evidence,
 - distinguish proven findings from strong evidence and candidates,
 - avoid opaque aggregate quality scores,
@@ -95,6 +96,7 @@ The model must represent at least:
 - change relationships,
 - findings,
 - finding evidence,
+- bounded source contexts for source-locatable evidence,
 - analysis completeness,
 - imported evidence,
 - platform/configuration origin.
@@ -133,15 +135,19 @@ Use like-for-like populations (same item kind, source class, and concrete config
 
 Each finding must have a stable identity and explicit evidence.
 
-A finding must include enough information to answer:
+A finding must include enough information to answer, without assuming that the reader is a Rust or architecture expert:
 
 - what was detected,
 - where it was detected,
-- why it matters,
+- why the reader should care,
+- what practical engineering consequence may follow if the concern grows,
 - what evidence triggered it,
+- what the reader should investigate next,
 - whether it is new, worsened, resolved, accepted, or unchanged,
 - how confident Ferric Lens is,
 - which analysis configuration observed it.
+
+Human-facing text must distinguish evidence from conclusions. It must not present a large metric value as inherently bad, assume the user knows an internal metric/rule identifier, or prescribe a final architecture that the evidence cannot establish. Internal rule IDs, fingerprints, configuration IDs, and raw capability metadata are secondary technical detail.
 
 ### 7.1 Evidence classes
 
@@ -156,7 +162,7 @@ candidate
 Definitions:
 
 - **proven**: deterministically established by an invariant or directly observable condition.
-- **strong**: supported by multiple independent deterministic signals.
+- **strong**: supported by deterministic evidence whose semantics justify a strong claim; multiple weak observations do not automatically become strong merely because they are independent.
 - **candidate**: notable evidence exists, but not enough to justify a strong conclusion.
 
 Evidence strength describes the claim, not permission to fail CI. For example, a syntax-level `.clone()` occurrence proves only that syntax exists; it does not establish allocation, unnecessary copying, or a runtime bottleneck. A complete observed dependency cycle proves a graph property, not a policy violation.
@@ -184,6 +190,22 @@ Observe
 ```
 
 Every priority must be explainable from the finding evidence.
+
+When a reliable baseline correspondence exists, advisory current-snapshot findings are attributed as `new`, `worsened`, `unchanged`, or `unknown` before refactor synthesis. Pre-existing unchanged advisory debt must not remain Priority 2 solely because it is structurally unusual; it is demoted to Observe unless separate current evidence justifies higher urgency.
+
+### 7.3 Deterministic correctness risks
+
+Ferric Lens is not a general correctness linter, but V1 may emit a small family of source-backed correctness-risk findings when all of the following hold:
+
+- the pattern is deterministically observable without building or executing the target project,
+- multiple contextual facts establish a concrete failure mechanism rather than a generic style preference,
+- a bounded remediation follows directly from the evidence,
+- obvious nearby safe forms have explicit negative tests,
+- the rule remains advisory unless a separate gate contract explicitly promotes it.
+
+The initial family covers: Cargo feature-gated reachability inferred while the Cargo resolve graph is intentionally unavailable; persistent machine configuration keyed by a symbolic target despite an available resolved target; compact/stdout modes with unconditional default artifact writes; snapshot verification that omits workspace manifests already consumed by analysis; and lossy decoding of NUL-delimited Git path streams.
+
+Generic syntax such as `unwrap()`, `.clone()`, file writes, or `from_utf8_lossy()` is insufficient by itself. Prefer lower recall over broad bug-pattern matching that would create noisy false positives.
 
 ## 8. CI gating
 
@@ -326,6 +348,8 @@ Allowed directions include:
 
 Ferric Lens must not generate source changes or prescribe a final architecture.
 
+V1 synthesizes `refactor.multi_signal_candidate` advisories from compatible deterministic signals it already owns. A candidate requires at least two independent signal kinds for the same module. The initial synthesis uses decision complexity and dependency surface/reach. Raw `.clone()` syntax concentration remains descriptive module data and does not independently emit a runtime finding or corroborate an architectural refactor. Contextual copy findings are limited to narrower deterministic shapes such as cloning a value directly for iteration or cloning into a mutable working copy followed by a known mutating operation. Multiple observations of the same signal kind do not satisfy corroboration, and combining candidate-only observations does not upgrade evidence to strong. A synthesized candidate becomes strong/investigate only when at least one supporting finding already carries strong or proven evidence. The candidate carries the supporting evidence, preserves baseline change relevance and unambiguous movement identity, and provides only a bounded structural direction. It is advisory and never changes the CI gate verdict. Future deterministic history, public-surface, contextual copying, imported test, or measured performance evidence may extend this synthesis only with equally explicit semantics.
+
 ## 12. Runtime performance-risk analysis
 
 Ferric Lens performs static performance-risk analysis.
@@ -445,9 +469,9 @@ Linux and macOS are first-class supported platforms.
 
 A CI setup may use one canonical full analysis plus targeted platform validation so shared work is not unnecessarily duplicated.
 
-The default is one host target, default Cargo features, and production library/binary targets. Explicit target/feature input selects additional concrete runs; v1 does not enumerate the feature powerset or assume `--all-features` is valid. Record rustc target cfg facts, selected features, Cargo resolution identity, and relevant input digests.
+The default is one host target, Cargo's resolved default feature set, and production library/binary targets. Explicit target/feature input selects one additional concrete profile; v1 does not enumerate the feature powerset or assume `--all-features` is valid. When Cargo metadata resolution is available, evaluate `cfg(feature = "...")` against the enabled feature set of the workspace package that owns the target, including default/transitive activation represented by Cargo's resolve graph. Record rustc target cfg facts, selected features, per-package resolved features, Cargo resolution identity, and relevant input digests.
 
-Unknown build-script cfg, unresolved feature activation, and macro-generated structure are unknown, not false. Exclude unresolved branches from definite graphs and mark affected capabilities incomplete. Do not gate rules that require those missing facts. Combining platform results preserves separate configuration keys; cache only facts actually shared across configurations.
+Unknown build-script cfg, feature activation when the Cargo resolve graph is unavailable, and macro-generated structure are unknown, not false. Exclude unresolved branches from definite graphs and mark affected capabilities incomplete. Do not gate rules that require those missing facts. Combining platform results preserves separate configuration keys; cache only facts actually shared across configurations.
 
 ## 18. Partial analysis
 
@@ -490,41 +514,35 @@ JavaScript is permitted only where equivalent behavior cannot reasonably be achi
 
 Browser code only explores the immutable result. It performs no analysis.
 
-V1 uses a linked hierarchy, summary tables, and native `details` disclosure. Avoid a force-directed graph engine and rendering every dependency edge into the DOM. Summarize repeated evidence, retain all findings, and link findings to compact source excerpts rather than embedding every source file. Report deterministic excerpt/display limits explicitly. Escape all repository/imported strings as untrusted content. The report must remain useful with JavaScript disabled.
+V1 uses a human-first hierarchy and native `details` disclosure. The primary flow is **What needs attention → change relevance → observed facts → why it matters → selection/source evidence → inspection questions → limitations**. When a comparable baseline exists, actionable findings must distinguish findings introduced or worsened by the current change from existing findings; findings whose attribution cannot be established remain explicitly uncertain. Without a comparable baseline, the report must say that change attribution is unavailable. Avoid a force-directed graph engine and rendering every dependency edge into the DOM. Summarize repeated evidence, retain all findings, and link findings to compact source excerpts rather than embedding every source file. Escape all repository/imported strings as untrusted content. The report must remain useful with JavaScript disabled.
 
-### 19.2 Integrated codebase map
+Baseline/configuration provenance, history mechanics, imported observations, hashes, and complete capability diagnostics remain accessible but are collapsed under **Analysis details** rather than competing with actionable findings on the main screen. Long technical values must wrap or otherwise remain contained within their layout.
 
-The report should revolve around the repository structure:
+For source-locatable V1 evidence, the canonical model records the finding subject, evidence metric, repository-relative source path, exact 1-based start/end line, escaped excerpt text, and whether the excerpt was truncated. These contexts are representative evidence, not a complete listing of every occurrence. V1 retains at most three contexts per subject/evidence signal; each excerpt is limited to three source lines and 600 Unicode characters. The initial exact-span families are decision sites, contextual copy-risk sites, resolved repository dependency imports, and reverse-dependency imports. Relationship evidence may therefore point to a dependent module where the dependency edge is observed. If no truthful syntax span exists for an evidence family, Ferric Lens keeps module/file-level navigation and must not invent a line. Source spans/excerpts are presentation evidence and are excluded from finding fingerprints and acceptance identity.
 
-```text
-workspace
-  └─ crate
-      └─ module
-          └─ function/type
-```
+### 19.2 Repository explorer
 
-Evidence is overlaid on this model.
+Repository structure is a secondary drill-down surface, not the report's primary answer.
 
-The report should make it possible to understand:
+The explorer exists to answer: **"A finding pointed me here; what is this area connected to and what does it contain?"** It should therefore rank modules with actionable findings first. Modules with only lower-confidence observations must be labelled as contextual observations with no action established; modules with neither must be labelled as having no currently identified concern.
 
-- priority,
-- architecture/dependency relationships,
-- refactor evidence,
-- performance risks,
-- build-cost evidence,
-- change relevance,
-- test-strength context,
-- analysis completeness.
+For each module, compact structural metrics may be shown for context, but the UI must state that metrics are not problems by themselves. Dependencies, functions, types, and history context should remain collapsed until the user asks for them. A module with no active finding must not visually imply that a high raw count is a defect.
 
-Specialized graph or matrix views may support the codebase map but should not become disconnected products.
+Findings and explorer entries must cross-link where possible so users can move from consequence/evidence to structural context and back.
 
-### 19.3 JSON
+### 19.3 Machine and AI output
 
-JSON is a first-class machine interface.
+Canonical JSON is the complete machine interface. It must represent the same canonical findings as the HTML report and CI decision and carries the bounded source-context table used by HTML so machine and human outputs refer to the same source evidence.
 
-It must represent the same canonical findings as the HTML report and CI decision.
+Ferric Lens may additionally expose a compact deterministic AI/agent view derived only from the canonical result. V1 exposes AI schema version 2 with `--ai` on `analyze` and `check`. The AI view optimizes for precision per token rather than completeness. Actionable records are ordered by change relevance before ordinary priority and are partitioned into `change_findings` (introduced or worsened), `existing_findings`, and `unattributed_findings`. When no comparable baseline exists, change attribution is explicitly unavailable and actionable records are unattributed rather than described as existing.
 
-Publish a schema version independently of the tool version. Use explicit unavailable/null states, deterministic ordering, stable string identifiers, exact integer metrics, and documented units. Runtime timings and cache statistics belong in separate diagnostic output, not canonical artifacts.
+Each AI finding separates deterministic `facts` and bounded exact `source` evidence from Ferric Lens `interpretation`, bounded `recommended_inspection` questions, finding-specific `limitations`, statistical/selection evidence, and rule provenance. Inspection guidance must tell the consumer what to verify, not prescribe a code rewrite that Ferric Lens cannot prove is safe. Observe-priority records remain under secondary `context.observations` and must not compete structurally with actionable findings.
+
+The compact presentation currently includes at most five actionable findings and five observations in deterministic order, reports omitted counts, and includes at most three source contexts per finding with an omission count when more canonical contexts exist. The view omits raw module/function/type inventory, accepted findings from the active action list, and capabilities that are fully complete. Canonical JSON remains complete. The AI view must not recompute detector or gate semantics independently or change the command exit code.
+
+`--ai` selects the compact stdout presentation. For `analyze --ai`, default JSON/HTML files are not created; explicitly requested `--json` and `--html` paths still receive the normal full/canonical artifacts. The output mode must not change analysis semantics or the command exit code.
+
+Publish schema versions independently where needed. Use explicit unavailable/null states, deterministic ordering, stable string identifiers, exact integer metrics, and documented units. Runtime timings and cache statistics belong in separate diagnostic output, not canonical artifacts.
 
 ## 20. Reproducibility
 
@@ -605,7 +623,27 @@ If a newer version finds an issue that an older version did not, the newer resul
 
 Recompute both baseline and head using that same version. Never classify a new rule's discovery of unchanged historical debt as a PR regression merely by comparing output from different tool versions.
 
-## 25. Success criteria
+## 25. Test-driven development contract
+
+Test-driven development is a core project requirement, not an optional implementation preference.
+
+For every behavior change, bug fix, rule, parser capability, output contract, or regression:
+
+1. derive the expected behavior from this specification and the public contract,
+2. add or change a focused automated test first,
+3. run it and confirm that it fails for the intended reason,
+4. implement the smallest change that makes the test pass,
+5. refactor only while the full suite remains green.
+
+A change is not complete merely because the implementation appears correct. Its externally observable behavior must be covered by deterministic automated tests. Bug fixes require a regression test that demonstrates the bug before the fix. Gate rules require positive, negative, boundary, incomplete-evidence, baseline, and acceptance cases where applicable. Determinism and output-contract changes require repeatability and cross-artifact consistency tests.
+
+Tests must assert behavior rather than mirror implementation details. Prefer public CLI and analysis-model contracts for integration tests and small focused unit tests for deterministic algorithms. Tests must be offline, reproducible, isolated from user/global Git and Cargo configuration where relevant, and must not depend on wall-clock time, network access, random ordering, or mutable external state.
+
+CI must treat the automated test suite as a required gate on Linux and macOS. Linux CI must additionally enforce 100% line, region, and function coverage for repository-owned production Rust code using a deterministic coverage tool. Coverage is source-centric: when Rust emits duplicate LLVM coverage mappings for the same production source function or region across unit, integration, binary, or other test artifacts, CI unions identical source locations and treats the source location as covered when any instrumented production instance executes it. This prevents compilation-artifact duplication from changing the denominator; it does not exclude or forgive any distinct production source line, region, function, or path. Any uncovered production path fails CI. Platform-specific code that can only execute on macOS must be covered by the macOS suite and must not be hidden through coverage exclusions. Generated code, test modules, and third-party dependencies are outside this production coverage denominator. Coverage exclusions for repository-owned production code are not permitted merely to satisfy the threshold. No production behavior may be added solely to make an after-the-fact characterization test pass if that behavior is not supported by this specification.
+
+The existing implementation predates this explicit TDD contract. Before v1 is considered complete, its already implemented behavior must be backfilled with specification-derived characterization and regression tests. Those tests are to be designed from the documented behavior first and then run against the implementation; failures indicate either an implementation gap or a specification/test mismatch that must be resolved explicitly.
+
+## 26. Success criteria
 
 Ferric Lens v1 is successful when a developer can point it at a Rust repository with no configuration and receive a reproducible result that clearly answers:
 
@@ -619,3 +657,8 @@ Ferric Lens v1 is successful when a developer can point it at a Rust repository 
 - what Ferric Lens could and could not analyze.
 
 The tool should reduce the effort required to optimize and maintain Rust codebases without replacing engineering judgment.
+
+
+### Small-cohort noise control
+
+For descriptive small-cohort concentration observations, being the unique maximum is insufficient. The leading value must also be materially separated from the runner-up: the lead must be at least half of the runner-up value, with a minimum absolute gap of two. The reported comparison reference is the runner-up. This is a noise-control heuristic for descriptive observations only; it does not alter the 20-module p90 gate semantics.
