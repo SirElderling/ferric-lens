@@ -242,6 +242,26 @@ fn filtered(world: &World) {
 }
 
 #[test]
+fn clone_then_mutate_detection_stops_when_the_binding_is_shadowed() {
+    let sources = vec![source(
+        "src/render/history.rs",
+        r#"
+fn filtered(world: &World) {
+    let mut selected = world.clone();
+    let mut selected = World::default();
+    selected.events.retain(|event| event.year > 10);
+    render(&selected);
+}
+"#,
+    )];
+
+    assert!(!scan(&sources)
+        .findings
+        .iter()
+        .any(|finding| finding.rule == "runtime.clone_then_mutate_candidate"));
+}
+
+#[test]
 fn contextual_copy_detection_requires_the_same_binding_to_be_mutated() {
     let sources = vec![source(
         "src/render/history.rs",
